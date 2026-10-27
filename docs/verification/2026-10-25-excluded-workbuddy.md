@@ -140,3 +140,58 @@ The default run is 96/96.
   holds for a Huawei Cloud account: its rows keep answering, and the exclusion
   removes the ways onto it rather than the account.
 - No live WorkBuddy or Huawei Cloud authorization was performed or is intended.
+
+## Restored: 2026-10-26 (ADR 0001 / ADR 0002)
+
+Status: **the exclusion described above has been withdrawn.** WorkBuddy China
+build (`buddy`), WorkBuddy international build (`workbuddy`) and Huawei Cloud
+CodeArts (`codearts`) are offered again as ordinary channels on both surfaces.
+The text above is kept unchanged as the record of what was decided on
+2026-10-25 and why; it is no longer the current behaviour.
+
+The decision is recorded in
+`docs/adr/0001-restore-channels-by-porting-adapters.md` (adapters were ported
+from the 2.1.0 tree, not rewritten) and
+`docs/adr/0002-keep-exclusion-machinery-empty-the-list.md` (the lists were
+emptied; `isDeniedChannel`, `POLICY_REFUSED`, the `403` flow, `policyResponse`
+and `filterEngineJSON` are untouched).
+
+What changed, by file:
+
+| File | Change |
+| --- | --- |
+| `vendor/channel-pack/src/**` | the ten interface files plus `login.ts` / `service.ts` / `codearts-credits.ts` / `buddy-balance-selector.ts` / `tencent-fingerprint.ts` ported from 2.1.0; `REF_PREFIX_TO_PROVIDER` gained `CODEARTS`, `BUDDY`, `WORKBUDDY` |
+| `src/magpie-policy.js` | `DENIED_IDS` and `DENIED_TEXT` emptied |
+| `src/disclaimer.js` | `DISCLAIMER_VERSION` 2 → 3; `EXCLUDED_CHANNELS` is an empty frozen array; the first section now states the three channels are restored |
+| `client.js` | three `CHANNEL_PROVIDERS` cards and their `CHANNEL_CREDITS` rows restored, plus three icon keys |
+| `feed/announcements.json` | v2.7.2 restoration entry, pinned, newest first |
+
+Consequences worth knowing:
+
+- The three channels are registered providers again: `/v1/models` lists them,
+  and their RPCs answer instead of `provider-unsupported`, because
+  `isSupportedProvider()` in `channel-pack-store.ts` is derived from
+  `REF_PREFIX_TO_PROVIDER`.
+- Huawei Cloud MaaS (`huaweicloud`, Token Plan) was **not** restored. It was
+  excluded by a different clause (`magpie-policy.js` L68, the engine's pinned
+  preset list) and this restoration did not touch it. `magpie-plugin-test.mjs`
+  still asserts 57 offered built-in presets.
+- Accounts signed in before the exclusion was lifted are still there; the
+  routes onto them are open again rather than the accounts being recreated.
+- Bumping `DISCLAIMER_VERSION` to 3 means every existing user sees the
+  disclaimer once more, because `disclaimerAcknowledged` compares the stored
+  `disclaimerAck` against the current version.
+
+The "Not covered" note above still holds in one respect: the pinned engine
+binary (`vendor/magpie/engine.json`) was never patched, so whatever the engine's
+own code contains is unchanged. The exclusion was a management-boundary filter
+and the restoration is the removal of that filter, not an engine change.
+
+Verification for the restoration is in
+`.scratch/channel-restoration/issues/08-full-test-regression.md`: the eleven
+suites named in the ticket all pass, `npm --prefix vendor/channel-pack run
+typecheck` reports the same 23 pre-existing errors as the baseline with none
+added, and the five suites that still fail are accounted for there (three need
+the release private key to re-sign `feed/manifest.json` and
+`catalog/integrity.json`, one exceeds the 60-second suite timeout while passing
+on its own, one needs a git checkout).

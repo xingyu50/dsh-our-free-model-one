@@ -1055,6 +1055,12 @@ async function responsesEndpoint(req, res, complete, options = {}) {
     // exactly what the completed response lists.
     let nextOutputIndex = 0
     let messageIndex
+    // `output_index` 是**单次响应内**的序号，每轮从 0 重来。直接拿它当工具 id，
+    // 会让同一个会话里每一轮的工具调用都叫 `fc_0` / `fc_1` —— DSH 把历史里的
+    // call 与 result 配对时认不出是哪一轮，判 `tool calls and tool results do
+    // not match` 并整轮失败（用户报障 2026-10-27，会话 turn 1 连续 19 个 step
+    // 共用 `fc_1` / `fc_2`）。给每次响应加一个随机前缀，保证跨轮不重复。
+    const callTag = `fc_${Math.random().toString(36).slice(2, 10)}`
     const callIndexes = new Map()
     const order = []
     const announceMessage = () => {
@@ -1069,7 +1075,7 @@ async function responsesEndpoint(req, res, complete, options = {}) {
       const index = nextOutputIndex++
       callIndexes.set(openAiIndex, index)
       order.push(openAiIndex)
-      say('response.output_item.added', { output_index: index, item: { id: `fc_${index}`, type: 'function_call', status: 'in_progress', call_id: `fc_${index}`, name, arguments: '' } })
+      say('response.output_item.added', { output_index: index, item: { id: `${callTag}_${index}`, type: 'function_call', status: 'in_progress', call_id: `${callTag}_${index}`, name, arguments: '' } })
     }
     let usage
     let outcome
@@ -1085,7 +1091,7 @@ async function responsesEndpoint(req, res, complete, options = {}) {
           const action = tools.admit(chunk)
           if (action.kind === 'drop') return
           announceCall(action.openAiIndex, action.name ?? '')
-          say('response.function_call_arguments.delta', { item_id: `fc_${callIndexes.get(action.openAiIndex)}`, output_index: callIndexes.get(action.openAiIndex), delta: action.args })
+          say('response.function_call_arguments.delta', { item_id: `${callTag}_${callIndexes.get(action.openAiIndex)}`, output_index: callIndexes.get(action.openAiIndex), delta: action.args })
           return
         }
         if (chunk.type === 'usage') {
@@ -1134,7 +1140,7 @@ async function responsesEndpoint(req, res, complete, options = {}) {
       const row = finalCalls[position]
       const openAiIndex = `outcome:${position}`
       announceCall(openAiIndex, row.name)
-      say('response.function_call_arguments.delta', { item_id: `fc_${callIndexes.get(openAiIndex)}`, output_index: callIndexes.get(openAiIndex), delta: row.arguments })
+      say('response.function_call_arguments.delta', { item_id: `${callTag}_${callIndexes.get(openAiIndex)}`, output_index: callIndexes.get(openAiIndex), delta: row.arguments })
     }
     const messageRow = outcome.text ? { id: `msg_${messageIndex}`, type: 'message', status: 'completed', role: 'assistant', content: [{ type: 'output_text', text: outcome.text, annotations: [] }] } : undefined
     const output = []
@@ -1152,7 +1158,7 @@ async function responsesEndpoint(req, res, complete, options = {}) {
       const row = finalCalls[callPos++]
       if (row !== undefined) {
         const index = callIndexes.get(entry)
-        const item = { id: `fc_${index}`, type: 'function_call', status: 'completed', call_id: `fc_${index}`, name: row.name, arguments: row.arguments }
+        const item = { id: `${callTag}_${index}`, type: 'function_call', status: 'completed', call_id: `${callTag}_${index}`, name: row.name, arguments: row.arguments }
         output.push(item)
         say('response.function_call_arguments.done', { item_id: item.id, output_index: index, name: row.name, arguments: row.arguments })
         say('response.output_item.done', { output_index: index, item })

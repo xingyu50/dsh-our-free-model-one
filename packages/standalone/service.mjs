@@ -271,6 +271,41 @@ export async function startStandalone({
       state: () => ({ ...core.state(), catalog: [...core.catalog, ...channels.publicModelRows()] }),
       publicModelRows: () => [...core.publicModelRows(), ...channels.publicModelRows()],
       complete: (request, onChunk) => channels.handles(request.model) ? channels.complete(request, onChunk) : core.complete(request, onChunk),
+      /**
+       * 管理页「测试」和对话必须认同一批模型。
+       *
+       * `core.testModel` 只在内核目录里 `find`，而渠道行（`buddy/*`、`trae/*`）是
+       * `channels.publicModelRows()` 后拼上去的，内核目录里没有，所以渠道模型点测试
+       * 一律 404 `Unknown model`。这里把渠道模型转给渠道层跑一次最小推理。
+       */
+      async testModel(id, effort, { signal } = {}) {
+        if (!channels.handles(id)) return core.testModel(id, effort, { signal })
+        const started = Date.now()
+        let first = 0
+        const body = { messages: [{ role: 'user', content: 'Reply with exactly: OK' }] }
+        if (typeof effort === 'string' && effort !== '') body.reasoning_effort = effort
+        let outcome
+        try {
+          outcome = await channels.complete({ model: id, openAi: body, signal }, () => { if (first === 0) first = Date.now() })
+        } catch (error) {
+          // 渠道层用 statusCode，管理接口按 status 分流 404/502。
+          if (error && error.status === undefined && typeof error.statusCode === 'number') error.status = error.statusCode
+          throw error
+        }
+        const ended = Date.now()
+        const text = String(outcome?.text ?? '')
+        if (outcome?.error !== undefined || text.trim() === '') {
+          const failure = new Error(String(outcome?.error?.message ?? outcome?.error ?? 'Text test returned no response text'))
+          failure.status = 502
+          throw failure
+        }
+        return {
+          model: id, ok: true,
+          totalMs: ended - started, latencyMs: ended - started,
+          ttftMs: first === 0 ? ended - started : first - started,
+          text: text.slice(0, 2000), persisted: false,
+        }
+      },
       async refreshCatalog(options) {
         if (stopped) return
         await Promise.all([core.refreshCatalog(options), channels.refresh().catch(error => { if (!stopped) throw error })])

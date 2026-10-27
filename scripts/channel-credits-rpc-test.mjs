@@ -82,6 +82,10 @@ async function verifyRefreshDispatch({ ctx, call }) {
   const providers = [
     'lobsterai', 'qoder', 'qodercn', 'trae',
     'cline', 'loomy', 'raccoon', 'minimax', 'zcode', 'gemini',
+    // 恢复的三个渠道：`buddy` / `workbuddy` 同源两实例，`codearts` 走签名协议。
+    // 其中 `workbuddy` 若不在此列表，`account.refresh` 会落到 default 抛
+    // `Unknown provider`，而这条分派错误在别处无从发现。
+    'buddy', 'workbuddy', 'codearts',
   ]
   for (const provider of providers) {
     const service = ctx[`${provider}Auth`]
@@ -108,5 +112,5 @@ async function verifyRefreshDispatch({ ctx, call }) {
       await ctx.accountPool.removeAccount(accountId)
     }
   }
-  console.log('ok  refresh RPC: all 10 providers pass exact ref/pool/id; disabled accounts refresh; failures return ok:false')
+  console.log('ok  refresh RPC: all 13 providers pass exact ref/pool/id; disabled accounts refresh; failures return ok:false')
 }

@@ -1,30 +1,36 @@
 /**
  * Account channels this build does not offer.
  *
- * WorkBuddy is sold under two names and ships in two builds: the China build
- * ("workbuddy", also marketed as CodeBuddy) and the international build
- * ("workbuddy-ai"). Neither is offered: the community plugin that serves them
- * signs requests as WorkBuddy's own desktop client, which is a risk this
- * product will not carry. The engine is a pinned binary whose plugin market is
- * fetched at run time, so the exclusion is enforced here, at the management
- * boundary this application owns, rather than in the engine.
- *
- * Huawei Cloud MaaS ("huaweicloud", its Token Plan preset) is likewise not
- * offered: this build carries no Huawei channel, and the engine's pinned preset
- * list is the one surface that would otherwise reintroduce it.
+ * The list is empty: this build offers every channel it ships an adapter for,
+ * including WorkBuddy's China build ("workbuddy", also marketed as CodeBuddy),
+ * its international build ("workbuddy-ai"), and Huawei Cloud's CodeArts coding
+ * plan ("codearts"). It is kept as a mechanism, not as a set of entries — see
+ * the note on the two constants below.
  *
  * A channel is denied by its subscription id, by the preset that names it, by
- * the package that serves it, and by any name carrying one of the aliases below
- * — a third-party plugin can sign in to the same provider under any package
- * name, and the China build is listed under "CodeBuddy" as often as under
- * "WorkBuddy".
+ * the package that serves it, and by any name carrying one of the aliases in
+ * DENIED_TEXT — a third-party plugin can sign in to the same provider under any
+ * package name, which is why the check takes both an id and a free-text field.
  */
 
-const DENIED_IDS = new Set(['workbuddy', 'workbuddy-ai', 'huaweicloud', 'codebuddy', 'codebuddy-cn', 'codearts'])
-// Aliases, not a product name filter: every spelling a package, preset, agent
-// or provider row could carry for one of these channels. "CodeArts" is Huawei
-// Cloud's own coding plan, served by a community plugin rather than a preset.
-const DENIED_TEXT = /workbuddy|codebuddy|huaweicloud|huawei[\s-]*cloud|modelarts|codearts|华为云|码道/i
+// Empty on purpose. `isDeniedChannel` and the fifteen response filters below
+// stay wired up — `src/providers/index.js` and `packages/standalone/providers.mjs`
+// both call through them, and `magpie-engine.js` throw/catches POLICY_REFUSED on
+// its request path — so withdrawing a channel again is a matter of putting its
+// id back in this set, with no code to restore.
+const DENIED_IDS = new Set()
+
+// The id set only matches a whole normalised id; this matches any spelling a
+// package, preset, agent or provider row could carry. `/(?!)/` is a regular
+// expression that matches nothing at all, including the empty string — a
+// negative lookahead of the empty pattern never succeeds. Written out rather
+// than left as a commented-out pattern so the shape of a restored alias list is
+// still visible: /workbuddy|codebuddy|huaweicloud|huawei[\s-]*cloud|modelarts|codearts|华为云|码道/i
+const DENIED_TEXT = /(?!)/
+// Kept verbatim: `src/magpie-engine.js` compares a caught failure's message
+// against this exact string to tell a policy refusal from an engine error, so
+// changing the copy would break that identity check. It is unreachable now that
+// both lists are empty, and the rest of the message is never shown.
 export const POLICY_REFUSED = 'WorkBuddy and Huawei Cloud are not offered by this build'
 
 /**

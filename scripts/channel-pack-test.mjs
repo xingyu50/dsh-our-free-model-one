@@ -119,9 +119,9 @@ try {
   apply(ctx, { disableOpencode: true })
   await new Promise(resolve => setImmediate(resolve))
   assert.equal(adapters.has('opencode'), false, 'disabled account provider is not registered')
-  assert.equal(adapters.size, 10, 'all other account providers remain registered')
+  assert.equal(adapters.size, 13, 'all other account providers remain registered')
   verifyChannelImagePricing(adapters)
-  console.log('ok  十渠道同步图片计价：缺失及默认方法兜底，厂商计价优先，重复图片与已卸载图片正确计数')
+  console.log('ok  十三渠道同步图片计价：缺失及默认方法兜底，厂商计价优先，重复图片与已卸载图片正确计数')
   assert.equal(writes.length, 0, 'mount neither creates nor deletes credentials')
   assert.equal(fetched.some(url => url.includes('opencode') || url.includes('models.dev')), false, 'no OpenCode capability/catalog warmup')
   assert.deepEqual(ctx.accountPool.listAccountsByProvider('opencode'), state.accounts.filter(entry => entry.provider === 'opencode'), 'historical account data survives')
@@ -188,7 +188,7 @@ try {
   ctx.loomyAuth.claimDailyQuota = savedClaim
   await ctx.accountPool.removeAccount('automatic-loomy')
   creds.delete('AUTO_LOOMY_FIXTURE')
-  console.log(`ok  ${sourceMode ? 'source modules' : 'generated pack'}: 10 providers, no OpenCode registration/warmup, historical data retained, account RPCs refused`)
+  console.log(`ok  ${sourceMode ? 'source modules' : 'generated pack'}: 13 providers, no OpenCode registration/warmup, historical data retained, account RPCs refused`)
   if (sourceMode) await verifySourceRegressions({ ctx, adapters, call, creds })
   await verifyChannelCreditsRpc({ ctx, call, creds })
   console.log('ok  实际渠道 RPC：七渠道仅账号池凭据即可查余额，ZCode 账号池回退及缺凭据反馈')
@@ -268,10 +268,10 @@ try {
     visit(node.children)
   }
   visit(tree)
-  assert.equal(cards.length, 10)
+  assert.equal(cards.length, 13)
   for (const provider of ['opencode', 'unsupported-alpha', 'unsupported-beta']) assert.equal(cards.includes(provider), false)
   assert.deepEqual([...cards].sort(), [...adapters.keys()].sort(), 'UI and mounted account providers agree')
-  console.log('ok  actual channel page: 10 account cards, OpenCode and unsupported providers removed')
+  console.log('ok  actual channel page: 13 account cards, OpenCode and unsupported providers removed')
   await verifyChannelModelActions()
   await verifyChannelCreditsUi()
   console.log('ok  共享渠道余额：十渠道能力、失败原因、重试、签到反馈和请求交错')
@@ -315,6 +315,7 @@ try {
 }
 
 async function verifySourceRegressions({ ctx, adapters, call, creds }) {
+  await verifyAccountCreateLoginChannels({ ctx, call, creds })
   const { verifyChannelPrFixes } = await import('./channel-pr-fixes-test.mjs')
   await verifyChannelPrFixes()
   await verifyLoopResumeEvents()
@@ -578,6 +579,171 @@ async function verifySourceRegressions({ ctx, adapters, call, creds }) {
     globalThis.fetch = originalFetch
     await ctx.accountPool.setPermanentLocked('loomy', false)
     for (const { accountId, ref } of added) { await ctx.accountPool.removeAccount(accountId); creds.delete(ref) }
+  }
+}
+
+/**
+ * 回归：`account.create` 必须支持 buddy / workbuddy / codearts 三家。
+ *
+ * 曾经的真实缺陷：`account.create` 的分支链只认 lobsterai/qoder/gemini/…，
+ * 落到 `else` 兜底返回 `unknown provider: buddy`，EAC router 页面点「添加账号」
+ * 直接报错。这三家在 `isSupportedProvider` 白名单里，所以前置校验不会拦，
+ * 缺的只是分支本身 —— 因此本用例打通的正是「白名单通过 → 分支存在」这一段。
+ *
+ * 打桩范围：只替换 `globalThis.fetch`。`fetchAuthState` / `runBuddyLoginFlow` /
+ * `requestToken` 都在**调用时**才解析全局 `fetch`，所以桩能生效，不需要改产品代码。
+ */
+async function verifyAccountCreateLoginChannels({ ctx, call, creds }) {
+  const fetchBefore = globalThis.fetch
+  const upstream = []
+  const unexpected = []
+  let tokenRejected = false
+  const nowSeconds = Math.floor(Date.now() / 1000)
+  const jwtPayload = payload => `fixture.${Buffer.from(JSON.stringify(payload)).toString('base64url')}.signature`
+  const accessToken = jwtPayload({ sub: 'fixture-buddy-user', nickname: 'Buddy Fixture', iat: nowSeconds, exp: nowSeconds + 7200 })
+
+  globalThis.fetch = async (input, init = {}) => {
+    const url = String(input)
+    const parsed = new URL(url)
+    upstream.push({ url, method: init.method ?? 'GET', headers: init.headers ?? {} })
+    if (parsed.pathname === '/v2/plugin/auth/state') {
+      const platform = parsed.searchParams.get('platform')
+      return Response.json({ code: 0, data: {
+        state: `fixture-state-${platform}`,
+        authUrl: `https://${parsed.host}/login?state=fixture-state-${platform}`,
+      } })
+    }
+    if (parsed.pathname === '/v2/plugin/auth/token') {
+      if (tokenRejected) return Response.json({ code: 40001, message: 'fixture token rejected' }, { status: 400 })
+      return Response.json({ code: 0, data: {
+        accessToken,
+        refreshToken: 'fixture-buddy-refresh',
+        // > 3600 秒：避免 scheduleRefresh 判定「即将过期」而立刻打刷新端点。
+        expiresIn: 7200,
+        refreshExpiresIn: 86_400,
+        tokenType: 'Bearer',
+        domain: parsed.host,
+      } })
+    }
+    if (parsed.pathname === '/v2/plugin/login/account') {
+      // 真实服务端常把 nickname 下发为空串，昵称实际在 JWT 里 —— 这里如实复现。
+      return Response.json({ code: 0, data: { uid: 'fixture-uid', nickname: '', enterpriseId: '', type: 'personal' } })
+    }
+    if (url === 'https://sts.cn-north-4.myhuaweicloud.com/v1/oauth2/tokens') {
+      return Response.json({
+        credentials: {
+          access_key_id: 'fixture-ak',
+          secret_access_key: 'fixture-sk',
+          security_token: 'fixture-st',
+          expiration: new Date(Date.now() + 86_400_000).toISOString(),
+        },
+        refresh_token: 'fixture-codearts-refresh',
+      })
+    }
+    unexpected.push(url)
+    // 返回非 11217/12151 的错误码：让轮询分支立刻失败，而不是空转 5 分钟。
+    return Response.json({ code: 40001, message: `unexpected fixture request: ${url}` }, { status: 400 })
+  }
+
+  const waitTerminal = async accountId => {
+    const deadline = Date.now() + 20_000
+    for (;;) {
+      const value = (await call('login.poll', { accountId })).value
+      if (value.done) return value
+      assert.ok(Date.now() < deadline, `login.poll for ${accountId} never reached a terminal state`)
+      await new Promise(resolve => setTimeout(resolve, 50))
+    }
+  }
+  const waitAccount = async (id, predicate, label) => {
+    const deadline = Date.now() + 5000
+    for (;;) {
+      const entry = ctx.accountPool.findAccount(id)
+      if (entry !== undefined && predicate(entry)) return entry
+      assert.ok(Date.now() < deadline, label)
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
+  }
+  const created = []
+  const create = async provider => {
+    const result = await call('account.create', { provider })
+    assert.equal(result.ok, true, `${provider} account.create must succeed: ${JSON.stringify(result.error)}`)
+    const { accountId, loginUrl } = result.value
+    assert.ok(accountId.startsWith(`${provider}-`), `${provider} account id shape`)
+    assert.ok(typeof loginUrl === 'string' && loginUrl.length > 0, `${provider} loginUrl is returned immediately`)
+    const entry = ctx.accountPool.findAccount(accountId)
+    assert.ok(entry, `${provider} placeholder account is registered`)
+    created.push({ accountId, ref: entry.credentialRef })
+    return { accountId, loginUrl }
+  }
+
+  try {
+    // 1) buddy：authUrl 原样透传（appendSessionParams 为 false）
+    const buddy = await create('buddy')
+    assert.equal(buddy.loginUrl, 'https://copilot.tencent.com/login?state=fixture-state-ide')
+    const buddyState = upstream.find(row => row.url.includes('/v2/plugin/auth/state') && row.url.includes('platform=ide'))
+    assert.ok(buddyState, 'buddy auth/state uses platform=ide')
+    assert.equal(buddyState.headers['X-Domain'], 'copilot.tencent.com')
+
+    // 2) workbuddy：必须补 version + loginSessionId
+    const workbuddy = await create('workbuddy')
+    const workbuddyUrl = new URL(workbuddy.loginUrl)
+    assert.equal(workbuddyUrl.host, 'www.workbuddy.ai')
+    assert.equal(workbuddyUrl.searchParams.get('state'), 'fixture-state-workbuddy-ai')
+    assert.equal(workbuddyUrl.searchParams.get('version'), '5.5.2')
+    assert.ok(workbuddyUrl.searchParams.get('loginSessionId'), 'workbuddy loginUrl carries loginSessionId')
+    const workbuddyState = upstream.find(row => row.url.includes('/v2/plugin/auth/state') && row.url.includes('platform=workbuddy-ai'))
+    assert.ok(workbuddyState, 'workbuddy auth/state uses platform=workbuddy-ai')
+    assert.equal(workbuddyState.headers['X-Domain'], 'www.workbuddy.ai')
+
+    // 3) buddy 系登录收敛：凭据落库 + 昵称取自 JWT + 可续期
+    for (const [label, { accountId }] of [['buddy', buddy], ['workbuddy', workbuddy]]) {
+      assert.deepEqual(await waitTerminal(accountId), { done: true, success: true }, `${label} poll settles successfully`)
+      const entry = await waitAccount(accountId, row => row.nickname === 'Buddy Fixture', `${label} nickname comes from the JWT claim`)
+      assert.equal(entry.refreshable, true, `${label} credential is refreshable`)
+      const stored = JSON.parse(creds.get(entry.credentialRef).value)
+      assert.equal(stored.access_token, accessToken)
+      assert.equal(stored.refresh_token, 'fixture-buddy-refresh')
+      assert.ok(Number(stored.expires_at) > Date.now(), `${label} expires_at is absolute milliseconds`)
+    }
+
+    // 4) codearts：浏览器回调式，loginUrl 自带 ≥10000 的本地端口
+    const codearts = await create('codearts')
+    const authorization = new URL(codearts.loginUrl)
+    assert.equal(authorization.origin, 'https://codearts.huaweicloud.com')
+    assert.equal(authorization.pathname, '/portal/authorize')
+    const port = Number(authorization.searchParams.get('port'))
+    assert.ok(port >= 10_000, 'codearts callback port is >= 10000')
+    // `redirect: 'manual'`：回调成功时是 307 跳 portal，跟随会打出真实网络请求。
+    const callbackResponse = await savedFetch(`http://127.0.0.1:${port}/oauth/callback?code=fixture-code`, { redirect: 'manual' })
+    assert.equal(callbackResponse.status, 307)
+    assert.deepEqual(await waitTerminal(codearts.accountId), { done: true, success: true }, 'codearts poll settles successfully')
+    const codeartsEntry = await waitAccount(codearts.accountId, row => row.refreshable === true, 'codearts account is marked refreshable')
+    // `credentialFromTokenResponse` 不含 user_name，昵称只能回退池 id。
+    assert.equal(codeartsEntry.nickname, codearts.accountId)
+    const codeartsStored = JSON.parse(creds.get(codeartsEntry.credentialRef).value)
+    assert.equal(codeartsStored.access_key_id, 'fixture-ak')
+    assert.equal(codeartsStored.refresh_token, 'fixture-codearts-refresh')
+
+    // 5) 失败路径：token 端点拒绝（非 11217）→ 终态失败 + 占位条目被移除
+    tokenRejected = true
+    const failing = await create('buddy')
+    const failure = await waitTerminal(failing.accountId)
+    assert.equal(failure.success, false)
+    assert.match(failure.error, /^auth\/token HTTP 400 code=40001: fixture token rejected$/)
+    // `removeAccount` 在 set 失败原因之后才 await，故轮询到终态时可能尚未删完。
+    for (let i = 0; i < 100 && ctx.accountPool.findAccount(failing.accountId); i++) {
+      await new Promise(resolve => setTimeout(resolve, 20))
+    }
+    assert.equal(ctx.accountPool.findAccount(failing.accountId), undefined, 'failed login removes the placeholder account')
+
+    assert.deepEqual(unexpected, [], 'no request escaped the fixture stub')
+    console.log('ok  account.create: buddy/workbuddy/codearts 三家都返回 loginUrl，轮询收敛与失败移除占位条目均正确')
+  } finally {
+    globalThis.fetch = fetchBefore
+    for (const { accountId } of created) {
+      await ctx.accountPool.removeAccount(accountId).catch(() => {})
+    }
+    for (const { ref } of created) creds.delete(ref)
   }
 }
 

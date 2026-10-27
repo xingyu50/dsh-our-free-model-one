@@ -146,7 +146,10 @@ try {
   const channelIds = await page.evaluate(() => window.channelIds)
   await count('[data-channel]', channelIds.length)
   assert.equal(await page.getByRole('heading', { name: 'EAC router', exact: true }).count(), 1)
-  assert.ok(!channelIds.some(id => /codebuddy|workbuddy|opencode/i.test(id)), 'removed account channels stay absent')
+  for (const id of ['buddy', 'workbuddy', 'codearts']) {
+    assert.ok(channelIds.includes(id), `${id} must be restored`)
+  }
+  assert.ok(!channelIds.some(id => /opencode/i.test(id)), 'opencode stays absent')
   await text(channel('qoder').locator('.ofm_chanstate'), '已连接')
   await text(channel('gemini').locator('.ofm_chanstate'), '已关闭')
   for (const id of channelIds.filter(id => !['qoder', 'gemini'].includes(id))) {

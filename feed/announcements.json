@@ -2,6 +2,18 @@
   "$schema": "./announcements.schema.md",
   "announcements": [
     {
+      "id": "2026-10-26-v2.7.2-channel-restoration",
+      "title": "v2.7.2：恢复 WorkBuddy 国内版/国际版与华为云 CodeArts 三个渠道",
+      "level": "update",
+      "pinned": true,
+      "createdAt": "2026-10-26T10:00:00Z",
+      "link": {
+        "url": "https://github.com/Ebony-Vinyl/dsh-our-free-model/releases/tag/v2.7.2",
+        "label": "查看插件更新说明"
+      },
+      "html": "<p><b>2.7.2 恢复了三个渠道。</b>WorkBuddy 国内版（buddy，亦称 CodeBuddy）、WorkBuddy 国际版（workbuddy）与华为云 CodeArts（codearts，码道）重新出现在插件端与桌面端的渠道列表里，可以登录、签到与调用；三张渠道卡片、模型目录与设置页一并恢复。渠道排除名单已清空，判定机制本身保留。使用须知与免责声明已改为正向文案，首次打开会重新显示一次；此前用过旧版本的用户需要重新确认。</p>"
+    },
+    {
       "id": "2026-10-25-v2.7.1-channel-exclusion",
       "title": "v2.7.1：彻底移除 WorkBuddy 国内版/国际版与华为云渠道",
       "level": "update",

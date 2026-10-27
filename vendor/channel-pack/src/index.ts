@@ -2,12 +2,16 @@ import type { Context } from '@deepseek-ai/cordis'
 import { credentialRef } from '@deepseek-ai/dsh-credentials'
 import { LlmError } from '@deepseek-ai/dsh-llm'
 import Schema from '@deepseek-ai/schemastery'
+import { registerCodeArtsLlm, PROVIDER as CODEARTS_PROVIDER } from './llm-adapter.js'
+import { registerBuddyLlm } from './buddy-adapter.js'
 import { registerLobsteraiLlm } from './lobsterai-adapter.js'
 import { registerQoderLlm } from './qoder-adapter.js'
 import { registerTraeLlm } from './trae-adapter.js'
 import { registerClineLlm } from './cline-adapter.js'
 import { registerLoomyLlm, parseLoomyRemoteModels } from './loomy-adapter.js'
 import { registerRaccoonLlm } from './raccoon-adapter.js'
+import { CODEARTS_CREDENTIAL_REF, CodeArtsAuth } from './service.js'
+import { BUDDY_CREDENTIAL_REF, BuddyAuth, createPoolRefresh } from './buddy-auth.js'
 import { LobsteraiAuth } from './lobsterai-auth.js'
 import { QoderAuth } from './qoder-auth.js'
 import { TraeAuth } from './trae-auth.js'
@@ -27,6 +31,7 @@ import { AccountPool, allAccountsRateLimitedForModel } from './account-pool.js'
 import { hasLegacyNamespaceRegistration, settingsOf, suppressAutoSettingsPage } from './settings-compat.js'
 import type { ImageRequestTarget } from './image-budget.js'
 import { buildRaccoonNickname, registerChannelPackRpc } from './channel-pack-rpc.js'
+import { CODEBUDDY, WORKBUDDY, type BuddyProduct } from './product.js'
 import { mountOpenAiGateway } from './openai-gateway/index.js'
 import { installLoopResume } from './loop-recovery.js'
 import {
@@ -34,11 +39,14 @@ import {
   reportLedgerAccount,
 } from './token-ledger.js'
 import { createTokenLedgerStore } from './token-ledger-store.js'
+import { buddyExpiringWindowDays } from './buddy-balance-rank.js'
+import { BuddyBalanceSelector, pickBuddyAccount } from './buddy-balance-selector.js'
 import { LOBSTERAI } from './lobsterai-product.js'
 import { QODER, QODER_CN } from './qoder-product.js'
 import { TRAE } from './trae-product.js'
 import { CLINE } from './cline-product.js'
 import { configureDeadModelStore, withDeadModelPruning } from './dead-model-store.js'
+import type { CodeArtsCredential, BuddyCredential } from './types.js'
 import type { LobsteraiCredential } from './lobsterai.js'
 import type { QoderCredential } from './qoder.js'
 import type { TraeCredential } from './trae.js'
@@ -263,10 +271,11 @@ export function apply(ctx: Context, config: { disableOpencode?: boolean; outlet?
   // ⚠️ 2026-10-01 起各 provider 已**不再**声明为可配置 provider，故这批 namespace
   // 在模型设置页上已无消费者（详见该函数头的说明）。
   registerProviderSettings(
-    ctx, 'llm-lobsterai',
+    ctx, 'llm-buddy', 'llm-workbuddy', 'llm-codearts', 'llm-lobsterai',
     'llm-qoder', 'llm-qodercn', 'llm-trae', 'llm-cline', 'llm-loomy', 'llm-raccoon',
     'llm-minimax', 'llm-zcode', 'llm-gemini',
   )
+  const service = new CodeArtsAuth(ctx)
   const pool = new AccountPool(ctx)
 
   // 「已失效模型」剔除：注入 ctx 只为把日志接进 DSH logger 并复用同一份 home
@@ -328,6 +337,280 @@ export function apply(ctx: Context, config: { disableOpencode?: boolean; outlet?
       'QUOTA_EXCEEDED',
     )
   }
+
+  // WorkBuddy provider 已从中国版（copilot.tencent.com）改造为国际版
+  // （www.workbuddy.ai）。旧账号存的是中国版凭据，其 token.domain 指向旧端点，
+  // 用新 endpoint 发请求必然失败且会一直续期失败，故启动时清理掉。
+  // 判据是「凭据 domain ≠ 产品 apiDomain」，只清真正失配的条目。
+  void pool.pruneAccountsWithForeignDomain(WORKBUDDY).then((removed) => {
+    if (removed.length > 0) {
+      ctx.logger.info(
+        `[channel-pack] 已清理 ${removed.length} 个 WorkBuddy 旧版（中国版）账号，请重新登录：${removed.join(', ')}`,
+      )
+    }
+  }).catch((error: unknown) => {
+    ctx.logger.warn(`[channel-pack] 清理 WorkBuddy 旧版账号失败：${String(error)}`)
+  })
+
+  // ⚠️ **CodeArts 不注册任何斜杠命令**（`codearts-login` / `codearts-status` /
+  // `codearts-refresh` 三个已删除）：登录、状态与续期统一在 Channel Pack 设置页完成，
+  // 与 buddy / workbuddy / lobsterai / qoder / trae 的既有做法一致。
+  const codearts = registerCodeArtsLlm(ctx, {
+    credentialRef: credentialRef(CODEARTS_CREDENTIAL_REF),
+    resolveCredential: async () => {
+      // CodeArts **只认账号池**，与其余五个 provider 一致。
+      //
+      // ⚠️ 早期它额外支持「单凭据模式」（`CODEARTS_ACCESS_TOKEN`）：登录后把凭据
+      // 写到那个固定 ref，适配器在账号池取不到时回退去读它。该模式**已移除** ——
+      // 登录入口只有 Channel Pack 设置页，凭据一律写入 `CODEARTS_ACCOUNT_XXX`，
+      // 固定的 `CODEARTS_ACCESS_TOKEN` 不会再被写入或读取。
+      //
+      // 这里仍保留 `credentialRef` 选项，仅为满足适配器契约与报错文案
+      // （其余 provider 同样传各自的默认 ref，但都不再作为回退来源）。
+      const available = await pool.getAvailableAccount('codearts', '')
+      return available?.credential as CodeArtsCredential | undefined
+    },
+    // 续期按**账号池里的具体账号**走：`refreshAccountCredential` 读写的是
+    // `CODEARTS_ACCOUNT_XXX`，而旧的 `service.refresh()` 读写的是已废弃的
+    // 单凭据 ref —— 那会刷到另一个（不存在的）凭据上。
+    refresh: async () => {
+      const available = await pool.getAvailableAccount('codearts', '')
+      if (available) await service.refreshAccountCredential(available.entry.credentialRef, pool, available.entry.id)
+    },
+    fetchRemoteModels: () => service.refreshModels(pool),
+    accountPool: pool,
+  })
+
+  // ===== Buddy (腾讯 CodeBuddy) 服务 =====
+  // 不注册斜杠命令：登录/状态/续期都在 Channel Pack 设置页完成（多账号 + 账号池），
+  // 命令式的单凭据入口已无必要。
+
+  /**
+   * 按凭据 ref 解析 buddy 系凭据（CodeBuddy 与 WorkBuddy **共用这一个函数**）。
+   *
+   * 两站凭据同构（同一 CLI 内核、同一认证协议），差别只在 endpoint；
+   * 解析这件事与 endpoint 无关，故不写两份。
+   */
+  const resolveBuddyCredentialByRef = async (refName: string): Promise<BuddyCredential | undefined> => {
+    const resolved = await ctx.credentials.resolve(credentialRef(refName))
+    if (!resolved) return undefined
+    try {
+      return JSON.parse(resolved.value) as BuddyCredential
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * 两个 buddy 各自的**按到期分档选号器**（各自一份余额缓存，绝不串味）。
+   *
+   * ⚠️ **为什么需要它**：一个 buddy 账号常同时持有多种资源包（实测 WorkBuddy
+   * 每个号都有「Bonus Pack（14 天到期）」+「Free Plan Subscription（扣费截止
+   * 8 年后）」），而**服务端扣哪个包不由插件决定**。插件能决定的只有「用哪个号」：
+   * 优先用还有「15 天内到期积分」的号（那部分再不用就作废），只剩长期积分的号
+   * 排最后 —— 与「锁定永久积分」配套（锁定时后者直接判不可用）。
+   *
+   * 判据出处见 `buddy-balance-rank.ts`（为什么是 15 天、为什么用 DeductionEndTime
+   * 而不是 CycleEndTime / ExpiredTime，都有实测对照）。
+   */
+  const buddyBalanceSelector = new BuddyBalanceSelector({
+    product: CODEBUDDY,
+    resolveCredential: resolveBuddyCredentialByRef,
+  })
+  const workbuddyBalanceSelector = new BuddyBalanceSelector({
+    product: WORKBUDDY,
+    resolveCredential: resolveBuddyCredentialByRef,
+  })
+
+  /**
+   * buddy 系的选号编排：按「enabled + 模型未受限」筛候选 → 按余额分档选号 → 取凭据。
+   *
+   * ⚠️ 余额分档**只在这批候选内部进行** —— 即与 Loomy 同一约定：策略建立在
+   * 「模型没有受限且账号没有被停用」的基础上，不能因为某个号积分多就绕开限流标记。
+   *
+   * @returns 选中账号的凭据；`credential` 为空时 `tried` 是「档位最优但凭据坏了」
+   * 的账号集合，调用方要把它作为排除集合传给 `getAvailableAccount` 继续兜底。
+   *   锁定且无可用账号时**抛错**（绝不回落，否则锁定形同虚设）。
+   */
+  const pickBuddyCredential = async (options: {
+    product: BuddyProduct
+    selector: BuddyBalanceSelector
+    /** 报错文案里的产品名（用户要知道去哪个面板解锁）。 */
+    displayName: string
+    modelId?: string
+    /**
+     * 本次请求的模型是否**免费**（消耗 0 积分），由调用方用
+     * `BuddyAdapter.isFreeModel()` 判定后传入。
+     *
+     * ⚠️ 必须是**已确认**的免费：`true` 会跳过余额分档（即不受永久积分锁定约束），
+     * 误判成免费会让付费模型绕开锁定、真烧掉永久积分。故调用方只在确定时传 true。
+     */
+    isFreeModel?: boolean
+  }): Promise<{ credential?: BuddyCredential; tried: Set<string> }> => {
+    const tried = new Set<string>()
+    const candidates = pool
+      .listAccountsByProvider(options.product.id)
+      .filter(a => a.enabled)
+      .filter((a) => {
+        // 与 `getAvailableAccount` 的限流判据保持一致（空 modelId = 不过滤）。
+        const key = options.modelId ?? ''
+        if (key.length === 0) return true
+        if (!a.modelRateLimits) return true
+        const resetAt = a.modelRateLimits[key]
+        return resetAt === undefined || resetAt === 0 || Date.now() >= resetAt
+      })
+      .map(a => ({ id: a.id, credentialRef: a.credentialRef }))
+
+    // 免费模型（消耗 0 积分）不受「锁定永久积分」约束：锁定要保护的是
+    // 「别把永久积分烧掉」，而免费模型既不扣临时积分也不扣永久积分，
+    // 却被那道门一并拦下，报出「账号有余额却没有可用账号」的矛盾错误（真实报障）。
+    //
+    // 这里**只按候选顺序取凭据**，不做余额分档 —— 免费模型没有「该烧哪个包」
+    // 的选择问题，余额查询因此完全不必要（也顺带省掉一次网络请求）。
+    // 限流过滤仍然生效（上面的 filter），不会因免费而绕开模型级限流标记。
+    if (options.isFreeModel === true) {
+      for (const candidate of candidates) {
+        const credential = await resolveBuddyCredentialByRef(candidate.credentialRef)
+        if (credential !== undefined) return { credential, tried }
+        tried.add(candidate.id)
+      }
+      // 免费模型下若凭据全坏，仍落到下面的常规路径，以复用既有的错误语义
+      // （凭据问题应报「凭据不可用」，而不是被误报成「额度已用尽」）。
+    }
+
+    const allowPermanent = !pool.permanentLocked(options.product.id)
+
+    const picked = await pickBuddyAccount(options.selector, candidates, {
+      allowPermanent,
+      resolveCredential: resolveBuddyCredentialByRef,
+    })
+    if (picked.kind === 'account') {
+      return { credential: picked.credential, tried: new Set(picked.tried) }
+    }
+    for (const id of picked.tried) tried.add(id)
+    if (picked.kind === 'locked') {
+      // ⚠️ **锁定时绝不可落到调用方的 `getAvailableAccount` 兜底** —— 那会绕过
+      // 锁定、照样消耗永久积分，锁定形同虚设（与 Loomy 那条同因）。
+      const days = buddyExpiringWindowDays()
+      // ⚠️ 同样要区分「真的用尽」与「查不到」（与 Loomy 那条同型缺陷）：
+      // 把一次网络抖动报成"额度已用尽"，用户会去解锁或白等，而号其实有钱。
+      if (picked.reason?.kind === 'unknown') {
+        throw new Error(
+          `${options.displayName}：无法确认是否有可用账号。已锁定永久积分，而部分账号的余额查询失败`
+          + `（${picked.reason.errors.slice(0, 2).join('；')}）。这些账号**可能仍有**「${days} 天内到期」`
+          + '的积分 —— 请重试，或在 Channel Pack 对应面板检查凭据是否失效。',
+        )
+      }
+      throw new Error(
+        `${options.displayName}：没有可用账号。已锁定永久积分，而所有账号的「${days} 天内到期」`
+        + '积分都已用尽。请在 Channel Pack 的 '
+        + `${options.displayName} 面板解锁永久积分，或等待资源包到期后重新发放额度。`,
+      )
+    }
+    return { tried }
+  }
+
+  const buddy = new BuddyAuth(ctx)
+  const buddyAdapter = registerBuddyLlm(ctx, {
+    credentialRef: credentialRef(BUDDY_CREDENTIAL_REF),
+    resolveCredential: async (modelId?: string) => {
+      // 优先按「快到期积分」分档选号（锁定永久积分时也走这条，见上）。
+      const picked = await pickBuddyCredential({
+        product: CODEBUDDY,
+        selector: buddyBalanceSelector,
+        displayName: 'CodeBuddy',
+        modelId,
+        // 免费模型跳过「锁定 + 临期积分」这道门（判据见 BuddyAdapter.isFreeModel）。
+        // `buddyAdapter` 在此处是自引用：闭包只在注册完成后才执行，故无 TDZ 问题。
+        isFreeModel: await buddyAdapter.isFreeModel(modelId),
+      })
+      if (picked.credential) return picked.credential
+      // 回退到账号池的既有选择（凭据损坏的账号已被 tried 排除），最后才退单凭据 ref。
+      // provider 实参用 CODEBUDDY.id 而非字面量 'buddy'：写死字面量在改名/多产品
+      // 场景下会静默查不到账号（本插件在 workbuddy 上踩过同类坑）。
+      // ⚠️ `modelId` 必须透传：限流按**模型**记（`modelRateLimits[model]`），
+      // 传空串会让 `getAvailableAccount` 的限流过滤整体短路
+      //（`if (modelId.length === 0) return true`）→ 被标记限流的账号仍被选中。
+      const available = await pool.getAvailableAccount(CODEBUDDY.id, modelId ?? '', picked.tried)
+      // Token 账本（第 2 期）：回报「本笔请求解析出的账号」。
+      if (available) {
+        reportLedgerAccount(CODEBUDDY.id, available.entry.id)
+        return available.credential as BuddyCredential
+      }
+      // 退到单凭据 ref 之前先证明失败原因：全被模型限流时报明确的限流错误，
+      // 而不是让它降级成误导性的 MISSING_CREDENTIAL（见该助手的说明）。
+      throwIfAllAccountsRateLimited(CODEBUDDY, modelId)
+      const resolved = await ctx.credentials.resolve(credentialRef(BUDDY_CREDENTIAL_REF))
+      if (!resolved) return undefined
+      try {
+        return JSON.parse(resolved.value) as BuddyCredential
+      } catch {
+        return undefined
+      }
+    },
+    // 刷新**账号池里实际使用的那一个账号**，而不是默认单凭据 ref ——
+    // 后者在 Channel Pack 登录路径下根本不存在，会把 401 报成「未配置凭据」
+    // 并自锁。详见 createPoolRefresh 的注释。
+    refresh: createPoolRefresh(pool, 'buddy', buddy),
+    fetchRemoteModels: () => buddy.fetchModels(pool),
+    readImage: makeReadImage(ctx),
+    // 图片请求版本（缩放）桥接：issue !IKITT9。不可用时适配器自动回退原图。
+    readImageRequest: makeReadImageRequest(ctx),
+    accountPool: pool,
+    product: CODEBUDDY,
+  })
+
+  // ===== WorkBuddy (腾讯 WorkBuddy) 服务 =====
+  // 与 CodeBuddy 同源（同后端、同协议），差异全部由 product 配置承载。
+  // 服务名由 BuddyAuth 依 product.id 派生，故两个产品分别注册为
+  // ctx.buddyAuth / ctx.workbuddyAuth，互不覆盖。
+  // 同样不注册斜杠命令：入口在 Channel Pack 的 WorkBuddy 面板。
+  const workbuddy = new BuddyAuth(ctx, { product: WORKBUDDY })
+  const workbuddyAdapter = registerBuddyLlm(ctx, {
+    credentialRef: credentialRef(WORKBUDDY.defaultCredentialRef),
+    resolveCredential: async (modelId?: string) => {
+      // 只从 workbuddy 的账号池取账号，回退到 WorkBuddy 自己的单凭据 ref，
+      // 保证不会串用 CodeBuddy 的凭据。
+      // 选号策略与 CodeBuddy 同款，但用的是**WorkBuddy 自己的锁状态与余额缓存**
+      // （两站积分构成不同：实测国际版是「Bonus Pack 14 天 + Free Plan 长期」）。
+      const picked = await pickBuddyCredential({
+        product: WORKBUDDY,
+        selector: workbuddyBalanceSelector,
+        displayName: 'WorkBuddy',
+        modelId,
+        // 免费模型跳过「锁定 + 临期积分」这道门（判据见 BuddyAdapter.isFreeModel）。
+        // 用户报障「账户可用却提示没有可用账号」正是缺了这一条：免费模型不扣积分，
+        // 却被永久积分锁定拦下。
+        isFreeModel: await workbuddyAdapter.isFreeModel(modelId),
+      })
+      if (picked.credential) return picked.credential
+      // ⚠️ `modelId` 透传：否则模型级限流标记被忽略（详见 buddy 处说明）。
+      // provider 实参用 WORKBUDDY.id 而非字面量 'workbuddy'（同类坑见上）。
+      const available = await pool.getAvailableAccount(WORKBUDDY.id, modelId ?? '', picked.tried)
+      // Token 账本（第 2 期）：回报「本笔请求解析出的账号」。
+      if (available) {
+        reportLedgerAccount(WORKBUDDY.id, available.entry.id)
+        return available.credential as BuddyCredential
+      }
+      // 同 buddy：区分「全部限流」与「真的没登录」（见该助手的说明）。
+      throwIfAllAccountsRateLimited(WORKBUDDY, modelId)
+      const resolved = await ctx.credentials.resolve(credentialRef(WORKBUDDY.defaultCredentialRef))
+      if (!resolved) return undefined
+      try {
+        return JSON.parse(resolved.value) as BuddyCredential
+      } catch {
+        return undefined
+      }
+    },
+    // 同上：必须刷池内账号（`WORKBUDDY_ACCESS_TOKEN` 从未被写入过）。
+    // 这条正是「workbuddy + deepseek-v4.1-flash 一直报未配置凭据」的根因。
+    refresh: createPoolRefresh(pool, 'workbuddy', workbuddy),
+    fetchRemoteModels: () => workbuddy.fetchModels(pool),
+    readImage: makeReadImage(ctx),
+    readImageRequest: makeReadImageRequest(ctx),
+    accountPool: pool,
+    product: WORKBUDDY,
+  })
 
   // ===== LobsterAI (有道龙虾) 服务 =====
 
@@ -1355,6 +1638,9 @@ const zcodeAdapter = registerZcodeLlm(ctx, {
    * 「凭据一直刷不动」在日志里完全无痕（issue !IKIRTT 的可观测性条目）。
    */
   const refreshTargets: ReadonlyArray<readonly [string, (pool: AccountPool) => Promise<void>]> = [
+    ['codearts', (p) => service.refreshAll(p)],
+    ['buddy', (p) => buddy.refreshAll(p)],
+    ['workbuddy', (p) => workbuddy.refreshAll(p)],
     ['lobsterai', (p) => lobsterai.refreshAll(p)],
     ['qoder', (p) => qoder.refreshAll(p)],
     ['qodercn', (p) => qoderCn.refreshAll(p)],
@@ -1420,6 +1706,9 @@ const zcodeAdapter = registerZcodeLlm(ctx, {
     refreshTimer.unref?.()
     ctx.effect(() => () => {
       clearInterval(refreshTimer)
+      service.stop()
+      buddy.stop()
+      workbuddy.stop()
       lobsterai.stop()
       qoder.stop()
       qoderCn.stop()
@@ -1443,6 +1732,9 @@ const zcodeAdapter = registerZcodeLlm(ctx, {
 
   // 保留旧的 stop scheduler（兼容旧命令）
   ctx.effect(() => () => {
+    service.stop()
+    buddy.stop()
+    workbuddy.stop()
     lobsterai.stop()
     qoder.stop()
     qoderCn.stop()
@@ -1602,7 +1894,7 @@ const zcodeAdapter = registerZcodeLlm(ctx, {
   // 已失效模型被加回设置页，PR 想修的「用户仍看到下架模型」原问题**完全没修到**。
   //
   // 这里复用与注册**同一个**包装函数，确保两条路径的可见性一致。
-
+  // ⚠️ `codearts` 不在 `modelAdapters` 的常规形态里，但它同样需要该包装。
   //
   // ⚠️ 包装失败**不阻断启动**：回退到原始实例即可（它只是显示层的收敛）。
   const pruned = <T extends object>(provider: string, adapter: T): T => {
@@ -1614,8 +1906,11 @@ const zcodeAdapter = registerZcodeLlm(ctx, {
     }
   }
   const modelAdapters: Record<string, { listAllModels(): readonly { id: string; name: string }[] }> = {
-
+    // `codearts` 是 registerCodeArtsLlm 返回的**适配器实例**（与 CodeArtsAuth
     // 服务实例 `service` 不同名，故这里可以简写）。
+    codearts: pruned(CODEARTS_PROVIDER, codearts),
+    buddy: pruned('buddy', buddyAdapter),
+    workbuddy: pruned('workbuddy', workbuddyAdapter),
     lobsterai: pruned(LOBSTERAI.id, lobsteraiAdapter),
     qoder: pruned(QODER.id, qoderAdapter),
     qodercn: pruned(QODER_CN.id, qoderCnAdapter),
@@ -1634,7 +1929,7 @@ const zcodeAdapter = registerZcodeLlm(ctx, {
   // 丢的却是「下一轮工具调用能不能带上签名」。
   ctx.effect(() => () => { void geminiSigStore.flush().catch(() => {}) })
 
-  registerChannelPackRpc(ctx, pool, lobsterai, qoder, qoderCn, trae, cline, loomy, raccoon, minimax, zcode, gemini, modelAdapters, {
+  registerChannelPackRpc(ctx, pool, service, buddy, workbuddy, lobsterai, qoder, qoderCn, trae, cline, loomy, raccoon, minimax, zcode, gemini, modelAdapters, {
     ...config,
   })
   // 网关是旁路功能：这里传 `pool` 只为读设置页里的开关，其内部任何失败都已

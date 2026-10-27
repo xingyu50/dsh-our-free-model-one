@@ -91,13 +91,14 @@ try {
     await api('/subscriptions/remove', { id: row.id })
     assert.ok(!(await api('/summary')).body.catalog.some(model => model.id === `subscription:${row.id}/ui-model`))
   })
-  await check('EAC router shows retained channels and no removed providers', async () => {
+  await check('EAC router shows all thirteen channels including the restored three', async () => {
     await nav('EAC router')
     await page.getByLabel('搜索渠道').waitFor()
     assert.equal(await page.getByRole('heading', { name: 'EAC router', exact: true }).count(), 1)
     const names = await page.locator('.channel-directory-row h2, .provider-card h2').allTextContents()
-    assert.ok(names.length >= 10)
-    assert.equal(names.some(name => /CodeBuddy|WorkBuddy/i.test(name)), false)
+    assert.ok(names.length >= 13, `every channel must be listed, got ${names.length}`)
+    assert.ok(names.some(name => /WorkBuddy/.test(name)), 'WorkBuddy must be listed')
+    assert.ok(names.some(name => /CodeArts/.test(name)), 'Huawei Cloud CodeArts must be listed')
     await page.screenshot({ path: path.join(outputDir, 'eac-router-desktop.png'), fullPage: true })
   })
   await check('resource editor and saved client profiles persist through real management APIs', async () => {
@@ -148,7 +149,7 @@ try {
     await dialog.getByRole('button', { name: /预览/ }).first().click()
     await dialog.getByText(/上下文/).first().waitFor()
     await dialog.getByRole('button', { name: '保存路由组', exact: true }).click()
-    await page.getByText('UI routing group', { exact: true }).waitFor()
+    await page.getByRole('region', { name: '路由组列表' }).getByText('UI routing group', { exact: true }).waitFor()
     const group = (await api('/routing')).body.combos.find(row => row.name === 'UI routing group')
     assert.equal(group.strategy, 'smart')
     assert.ok(group.models.length)

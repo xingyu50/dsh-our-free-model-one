@@ -23,8 +23,14 @@
  *    若抢在续期之前签到，过期凭据会让整轮变成失败。
  * 即便如此仍可能抢在续期完成前（多账号时续期本身就要几秒到几十秒），故**再加
  * 一道保险**：整轮跑完**没有任何一条能证明「今天已被处理」**时**不记日期**，
- * 下次启动会重试（见 `shouldMarkToday`）。延迟可用
+ * 一小时后自动重试（见 `shouldMarkToday` 与 `RETRY_MS`）。延迟可用
  * `DSH_CHANNEL_PACK_AUTO_CHECKIN_DELAY_MS` 覆盖，`0` 合法（表示立刻跑，单测用它）。
+ *
+ * ## 排定链
+ *
+ * `start()` 只排**首轮**；每轮结束由 `cycle()` 调 `armNext()` 重排下一轮，
+ * 所以 dsh 进程跨天不重启也能在次日自动跑（真实缺陷，2026-10-26：原实现
+ * `start()` 排完一轮就不再重排，进程活 11 天期间从第二天起再没自动签到过）。
  *
  * ## 什么算「今天已被处理」
  *
@@ -54,7 +60,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import { QODER_BILLING_UTC_OFFSET_MS } from './model-queue.js'
+import { QODER_BILLING_UTC_OFFSET_MS, nextUtc8DayStartMs } from './model-queue.js'
 import { resolveChannelPackHome } from './channel-pack-store.js'
 import { formatClaimGains } from './credits.js'
 import { ZCODE } from './zcode-product.js'
@@ -166,6 +172,15 @@ export function sanitizeAutoCheckin(raw: unknown): AutoCheckinDoc {
 export function utc8DateString(nowMs: number = Date.now()): string {
   return new Date(nowMs + QODER_BILLING_UTC_OFFSET_MS).toISOString().slice(0, 10)
 }
+
+/**
+ * 今天还没记入时的重试间隔（毫秒）。
+ *
+ * ⚠️ 必须有：`shouldMarkToday` 为假时 `performRun` 刻意不记日期，原文的兜底是
+ * 「下次启动会重试」—— 但 dsh 进程能连续存活多天，这个兜底在长命进程里等于不存在，
+ * 那天的额度会被整天漏领。改成「一小时后自己重试」，直到记入或跨过日界。
+ */
+const RETRY_MS = 3_600_000
 
 /** 环境变量：启动后延迟多久再尝试自动签到（毫秒）。 */
 export const DSH_CHANNEL_PACK_AUTO_CHECKIN_DELAY_MS = 'DSH_CHANNEL_PACK_AUTO_CHECKIN_DELAY_MS'
@@ -363,7 +378,7 @@ export function describeRun(totals: RunTotals): string {
  * 而且界面还显示「1 个今天已领」，用户毫无提示。渠道自己用
  * `ClaimOutcome.coversToday` 标出「这条不算今天」，本函数只负责数。
  *
- * 反例（不记、下次启动重试）：
+ * 反例（不记、一小时后重试，见 `RETRY_MS`）：
  * - 整轮零成功零已领（凭据全过期 / 网络不通 / 启动太早抢在续期之前）——
  *   若记了，用户当天就再也不会自动签到，且界面只说「上次：N 个失败」；
  * - 跑完但**没有一条能证明今天**（例如只有 Qoder 且赶在 10:00 之前）——
@@ -458,11 +473,14 @@ export interface AutoCheckin {
    * 故下一轮跑出新结果时它会重新出现。
    */
   dismiss(): Promise<RpcUsageAutoCheckinState>
-  /** 启动时调用一次：延迟后排定一轮（内部自己判开关与当天是否已跑）。 */
+  /**
+   * 启动时调用一次：延迟后排定一轮，**并在每轮结束后按 UTC+8 日界重排下一轮**
+   * （内部自己判开关与当天是否已跑）。
+   */
   start(): void
   /** 立刻按判据跑一轮（供「刚打开开关」与单测用）。 */
   runIfDue(): Promise<void>
-  /** 取消尚未执行的延迟任务（不打断已开始的一轮）。 */
+  /** 取消尚未执行的延迟任务与后续重排（不打断已开始的一轮）。 */
   stop(): void
 }
 
@@ -473,7 +491,15 @@ export function createAutoCheckin(deps: AutoCheckinDeps): AutoCheckin {
   let running = false
   /** 在飞去重：`setEnabled(true)` 与启动排定可能同时想跑。 */
   let inflight: Promise<void> | null = null
+  /** 尚未触发的那一轮（`null` = 正在跑，或已被 `stop()` 清掉）。 */
   let pending: { cancel(): void } | null = null
+  /**
+   * 排定链是否还活着。`start()` 置真、`stop()` 置假。
+   *
+   * ⚠️ 不能拿 `pending !== null` 当这个判据：一轮**跑到一半**时 `pending` 也是
+   * `null`，此时再调一次 `start()` 会排进第二条链，两条链各自每天跑一轮。
+   */
+  let armed = false
 
   const today = (): string => utc8DateString(now())
 
@@ -497,7 +523,7 @@ export function createAutoCheckin(deps: AutoCheckinDeps): AutoCheckin {
     try {
       providers = [...new Set(await deps.listProviderIds())].sort()
     } catch (error) {
-      // 账号池读不出来：不记日期，下次启动重试。
+      // 账号池读不出来：不记日期，一小时后重试（见 RETRY_MS）。
       deps.warn?.(`[channel-pack] 自动签到：读取账号池失败，本次跳过: ${String(error)}`)
       return
     }
@@ -557,9 +583,10 @@ export function createAutoCheckin(deps: AutoCheckinDeps): AutoCheckin {
 
     if (!shouldMarkToday(totals)) {
       // ⚠️ 刻意**不写** lastDate：让「凭据还没续上 / 网络不通 / 赶在渠道刷新前
-      // 跑的那一轮」能在下次启动重试，而不是当天就此放弃（判据见 shouldMarkToday）。
+      // 跑的那一轮」能在一小时后重试，而不是当天就此放弃（判据见 shouldMarkToday，
+      // 重排见 armNext）。进程不重启也成立。
       deps.warn?.(
-        `[channel-pack] 自动签到未记入今日（下次启动会重试）：${describeRun(totals)}`,
+        `[channel-pack] 自动签到未记入今日（${RETRY_MS / 60_000} 分钟后重试）：${describeRun(totals)}`,
       )
       return
     }
@@ -598,6 +625,28 @@ export function createAutoCheckin(deps: AutoCheckinDeps): AutoCheckin {
     return task
   }
 
+  /**
+   * 排定下一轮：今天已经记过 ⇒ 睡到下一个 UTC+8 日界；还没记过 ⇒ 一小时后重试
+   * （理由见 `RETRY_MS`）。开关关着时只保留日界那一次唤醒，不按小时空转。
+   */
+  function armNext(): void {
+    // 复用 `nextUtc8DayStartMs`：日界归服务端，口径必须与 `today()` 一致。
+    const toBoundary = Math.max(1, nextUtc8DayStartMs(now()) - now())
+    const marked = doc.lastDate !== '' && doc.lastDate === today()
+    const ms = doc.enabled && !marked ? Math.min(RETRY_MS, toBoundary) : toBoundary
+    pending = (deps.schedule ?? defaultSchedule)(() => { void cycle() }, ms)
+  }
+
+  /** 一轮 = 跑（内部自己判闸）+ 排下一轮。`stop()` 之后不再重排。 */
+  async function cycle(): Promise<void> {
+    pending = null
+    try {
+      await runIfDue()
+    } finally {
+      if (armed) armNext()
+    }
+  }
+
   return {
     state,
     async setEnabled(enabled) {
@@ -610,18 +659,16 @@ export function createAutoCheckin(deps: AutoCheckinDeps): AutoCheckin {
       return state()
     },
     start() {
-      if (pending !== null) return
+      if (armed) return
+      armed = true
       const ms = deps.delayMs ?? autoCheckinDelayMs()
-      const fire = (): void => {
-        pending = null
-        void runIfDue()
-      }
       // 延迟为 0 = 立刻跑（单测的默认形态，也是用户把环境变量设成 0 时的语义）。
+      // ⚠️ 只对**首轮**成立：重排见 `armNext`，那里按日界/重试间隔算，永不为 0（否则忙循环）。
       if (ms <= 0) {
-        fire()
+        void cycle()
         return
       }
-      pending = (deps.schedule ?? defaultSchedule)(fire, ms)
+      pending = (deps.schedule ?? defaultSchedule)(() => { void cycle() }, ms)
     },
     runIfDue,
     async dismiss() {
@@ -636,6 +683,7 @@ export function createAutoCheckin(deps: AutoCheckinDeps): AutoCheckin {
       return state()
     },
     stop() {
+      armed = false
       pending?.cancel()
       pending = null
     },

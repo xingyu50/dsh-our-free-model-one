@@ -227,28 +227,26 @@ await check('empty or offscreen aquariums pause, filled visible aquariums resume
   app.dispose(); assert.equal(app.observers[1].disconnected, true)
 })
 
-await check('the disclaimer renders both excluded channels and acknowledges through the backend', () => {
-  const app = boot({ fetchImpl: endpoint => endpoint === '/disclaimer'
-    ? { version: 1, title: '使用须知与免责声明', subtitle: '关于本插件未提供的渠道',
-      intro: '个人学习与技术研究项目', accept: '我已阅读并了解', reopen: '查看免责声明',
-      sections: [{ id: 'excluded', heading: '本插件不提供这些渠道', body: '不含 WorkBuddy 与华为云 Huawei Cloud MaaS' }],
-      acknowledged: false }
-    : {} })
-  const tree = app.draw(app.api.Disclaimer, { t: app.t, copy: {
-    version: 1, title: '使用须知与免责声明', subtitle: '关于本插件未提供的渠道',
-    intro: '个人学习与技术研究项目', accept: '我已阅读并了解', reopen: '查看免责声明',
-    sections: [{ id: 'excluded', heading: '本插件不提供这些渠道', body: '不含 WorkBuddy 与华为云 Huawei Cloud MaaS' }],
-  }, onClose() {} })
+await check('the disclaimer names the three restored channels and acknowledges through the backend', () => {
+  const copy = {
+    version: 3, title: '使用须知与免责声明', subtitle: '关于本插件提供的渠道，以及你需要知道的责任边界',
+    intro: '本插件是一个个人学习与技术研究项目', accept: '我已阅读并了解', reopen: '查看免责声明',
+    sections: [{ id: 'channels', heading: '这三个渠道已恢复', body: '本插件包含 WorkBuddy 国内版（workbuddy，亦称 CodeBuddy）、WorkBuddy 国际版（workbuddy-ai）与华为云 CodeArts（codearts，码道）三个渠道。' }],
+  }
+  const app = boot({ fetchImpl: endpoint => endpoint === '/disclaimer' ? { ...copy, acknowledged: false } : {} })
+  const tree = app.draw(app.api.Disclaimer, { t: app.t, copy, onClose() {} })
   const text = flatten(tree).filter(node => typeof node === 'string').join(' ')
-  assert.match(text, /WorkBuddy/, 'the excluded channel is named')
-  assert.match(text, /Huawei Cloud/, 'the second excluded channel is named')
+  assert.match(text, /WorkBuddy/, 'the restored channel is named')
+  assert.match(text, /CodeArts/, 'Huawei Cloud CodeArts is named')
+  assert.match(text, /已恢复/, 'the copy states the channels are restored')
+  assert.equal(/不提供|未提供/.test(text), false, 'the copy makes no exclusion claim')
   assert.match(text, /个人学习/, 'the project states its purpose')
   assert.ok(flatten(tree).some(node => node?.props?.role === 'dialog'), 'it is a modal dialog')
   // The accept button writes the acknowledgement, then closes.
   let closed = false
   const app2 = boot()
   const tree2 = app2.draw(app2.api.Disclaimer, { t: app2.t, copy: {
-    version: 1, title: 'T', subtitle: 'S', intro: 'I', accept: 'OK', reopen: 'R', sections: [],
+    version: 3, title: 'T', subtitle: 'S', intro: 'I', accept: 'OK', reopen: 'R', sections: [],
   }, onClose() { closed = true } })
   const accept = flatten(tree2).find(node => node?.props?.onClick && node?.props?.disabled === false)
   assert.ok(accept, 'an accept control exists')

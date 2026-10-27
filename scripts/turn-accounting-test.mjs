@@ -142,14 +142,19 @@ await check('recordTurn accumulates one row per call', () => {
   assert.equal(state.logical.models['combo:mix'].turns, 2)
 })
 
-await check('the disclaimer names both excluded channels and stays versioned', () => {
+await check('the disclaimer names the three restored channels and stays versioned', () => {
   assert.equal(DISCLAIMER.version, DISCLAIMER_VERSION)
-  assert.ok(EXCLUDED_CHANNELS.some(name => /WorkBuddy/i.test(name)), 'WorkBuddy is named')
-  assert.ok(EXCLUDED_CHANNELS.some(name => /Huawei/i.test(name)), 'Huawei Cloud is named')
+  assert.deepEqual([...EXCLUDED_CHANNELS], [], 'no channel is listed as excluded')
   const copy = JSON.stringify(DISCLAIMER)
   assert.match(copy, /个人学习/, 'the project describes itself as personal study')
-  assert.match(copy, /与我们无关|与本项目作者及团队无关/, 'it states the team is not responsible')
-  assert.ok(DISCLAIMER.sections.length >= 3, 'it covers exclusion, responsibility and warranty')
+  assert.match(copy, /已恢复/, 'it says the channels came back')
+  const channels = DISCLAIMER.sections[0]
+  const channelCopy = channels.heading + channels.body
+  assert.match(channelCopy, /WorkBuddy/, 'WorkBuddy is named')
+  assert.match(channelCopy, /CodeArts/, 'Huawei Cloud CodeArts is named')
+  assert.ok(!/不提供|不包含|不含|未提供/.test(channelCopy), 'the channel section makes no exclusion claim')
+  assert.ok(!/与我们无关|与本项目作者及团队无关/.test(copy), 'it no longer disowns the channels')
+  assert.ok(DISCLAIMER.sections.length >= 3, 'it covers channels, responsibility and warranty')
   assert.ok(DISCLAIMER.accept.length > 0 && DISCLAIMER.reopen.length > 0)
 })
 
