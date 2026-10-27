@@ -75,19 +75,25 @@ jobs:
         run: node scripts/test-all.mjs --mode release
       - name: Commit and push the refreshed records
         env:
-          # GITHUB_TOKEN is a ruleset outsider: main demands PRs and green
-          # checks from it. The push token belongs to a bypass holder, so the
-          # push lands as theirs; a fine-grained PAT scoped to this repo is
-          # the intended long-term value for this secret.
+          # Upstream's main is ruleset-protected, so it demands a bypass holder
+          # and this token is a fine-grained PAT scoped to the repository. This
+          # fork's main carries no ruleset or branch protection, so GITHUB_TOKEN
+          # can land the commit on its own; the PAT stays supported for the case
+          # where protection is added later.
           PUSH_TOKEN: ${{ secrets.OFM_RELEASE_PUSH_TOKEN }}
+          FALLBACK_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if git diff --quiet -- feed/manifest.json catalog/integrity.json catalog/dsh-plugin.json catalog/provenance.json; then
             echo "the committed manifest describes this tree — nothing to push"
             exit 0
           fi
           if [ -z "$PUSH_TOKEN" ]; then
-            echo '::error::OFM_RELEASE_PUSH_TOKEN is not set — the re-signed records cannot reach main'
-            exit 1
+            if [ -z "$FALLBACK_TOKEN" ]; then
+              echo '::error::neither OFM_RELEASE_PUSH_TOKEN nor GITHUB_TOKEN is available — the re-signed records cannot reach main'
+              exit 1
+            fi
+            echo "OFM_RELEASE_PUSH_TOKEN is unset; pushing with GITHUB_TOKEN (main has no ruleset here)"
+            PUSH_TOKEN="$FALLBACK_TOKEN"
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

@@ -21,7 +21,11 @@
 import fs from 'node:fs'
 import path from 'node:path'
 
-const REPO = 'Ebony-Vinyl/dsh-our-free-model'
+// This fork publishes its own release: the announcement feed and the upgrade
+// manifest both resolve against it, not against the upstream this fork was cut
+// from. Changing this without changing PINNED_MANIFEST_PUBLIC_KEY in
+// src/updater.js leaves every installed copy unable to verify the next release.
+const REPO = 'xingyu50/dsh-our-free-model-one'
 
 /**
  * Feed locations, in preference order.

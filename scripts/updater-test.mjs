@@ -134,7 +134,7 @@ const corruptManifest = manifestFor(newFiles)
 // The mutable ref can move or serve stale bytes; only a resolved SHA is stable.
 const SNAPSHOT = 'a'.repeat(40)
 const NEXT_SNAPSHOT = 'b'.repeat(40)
-const REPOSITORY = 'Ebony-Vinyl/dsh-our-free-model'
+const REPOSITORY = 'xingyu50/dsh-our-free-model-one'
 const rawSource = `https://raw.githubusercontent.com/${REPOSITORY}/main/feed/manifest.json`
 const cdnSource = `https://cdn.jsdelivr.net/gh/${REPOSITORY}@main/feed/manifest.json`
 const gcoreSource = `https://gcore.jsdelivr.net/gh/${REPOSITORY}@main/feed/manifest.json`

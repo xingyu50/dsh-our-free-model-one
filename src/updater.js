@@ -29,7 +29,9 @@ import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
 
-const REPO = 'Ebony-Vinyl/dsh-our-free-model'
+// This fork publishes its own release (see PINNED_MANIFEST_PUBLIC_KEY below —
+// the two move together, and a release signed by any other key is refused).
+const REPO = 'xingyu50/dsh-our-free-model-one'
 
 /**
  * A GitHub raw proxy. On networks where `raw.githubusercontent.com` and
@@ -74,7 +76,7 @@ export const DEFAULT_MANIFEST_SOURCES = [
  * itself — whoever forges the manifest forges the hashes. This key is the step
  * the forger cannot take.
  */
-export const PINNED_MANIFEST_PUBLIC_KEY = 'MCowBQYDK2VwAyEAeLdSVwYFyazc2PIBC0oLsvo4LghGEQz9iXIl3CqRuXI='
+export const PINNED_MANIFEST_PUBLIC_KEY = 'MCowBQYDK2VwAyEA5/jd1/avTlL49PH2a++illcwQFWAFCd6fpA/7MgkENg='
 
 /** The manifest fields a signature covers, in canonical (sorted-key) JSON. */
 const SIGNED_FIELDS = ['version', 'base', 'publishedAt', 'notes', 'files', 'minSupported']
