@@ -1,7 +1,7 @@
 {
   "version": "2.7.2",
   "base": "../",
-  "publishedAt": "2026-10-27T08:34:03.081Z",
+  "publishedAt": "2026-10-27T09:24:46.263Z",
   "notes": "",
   "files": [
     {
@@ -31,8 +31,8 @@
     },
     {
       "path": "index.js",
-      "size": 119524,
-      "sha256": "780a00aef08cff3d517c917c66d664f93b7d32d1dee8e3026aa5f9f95dc51c29"
+      "size": 119898,
+      "sha256": "e1112917eeae3b9538b74dc7a78d06c03dfffbdb7a0cd18dd3a6ad58bf72ad1f"
     },
     {
       "path": "LICENSE",
@@ -61,8 +61,8 @@
     },
     {
       "path": "src/aggregate.js",
-      "size": 33149,
-      "sha256": "5756af70d0421a4f22e7b40ce87afe7618333c55ba8010bde9423873c135d9cc"
+      "size": 31460,
+      "sha256": "7b1907283eff3d6f500df4de23052b4b58223dfa53a9824b8fb8ae255e913378"
     },
     {
       "path": "src/anthropic.js",
@@ -86,8 +86,8 @@
     },
     {
       "path": "src/combos.js",
-      "size": 11859,
-      "sha256": "5b4439b033c60115767c94975323e6896382de4e87328b58a93199893388e368"
+      "size": 13442,
+      "sha256": "9b66bf45d3a9265fd1c156ad1b2f42def831aff4da78320d487b66d03cc40ce3"
     },
     {
       "path": "src/core/completion.js",
@@ -126,8 +126,8 @@
     },
     {
       "path": "src/eac.js",
-      "size": 13561,
-      "sha256": "359f5729ab22bdf406c6f1c0c4817eb1a1b6f3099c07dcaeb1558503333314b5"
+      "size": 14074,
+      "sha256": "cc1f05027049072de05571d277d7d1aaa2ec24b0354fdee02b8b6ce01c99731e"
     },
     {
       "path": "src/effort.js",
@@ -161,8 +161,8 @@
     },
     {
       "path": "src/http.js",
-      "size": 28004,
-      "sha256": "982a5bef246bdff705be081bb25205c4e168f5741cb52a4bb37859e793bf35a3"
+      "size": 29147,
+      "sha256": "1524257421ce408326eb7866238bce3f09d728b4d12a147d26c678c421583017"
     },
     {
       "path": "src/image-pricing.d.ts",
@@ -178,6 +178,11 @@
       "path": "src/kilo.js",
       "size": 7745,
       "sha256": "8ece253a9ae295973103e72473b6812c2024fa26f48830295cdc7cfb56a22018"
+    },
+    {
+      "path": "src/lane-turn.js",
+      "size": 8283,
+      "sha256": "c4a94a518139ebdcbbea14712c690d2a600cb47f343050dca376d4c614dd997c"
     },
     {
       "path": "src/local-optimize.js",
@@ -470,5 +475,5 @@
       "sha256": "b2cbbd38d5461521f40d8fbd947bfa9be641481602eaec0f1fc5d29cca8d7e5f"
     }
   ],
-  "signature": "W+ZwNOss+6lo4hhz+0608WOXgNSJAhDPtlVx7V5LiAnBZBxd3gS7mn3wkXKCwzoN4GAGR0tVXwZwC1ta1vHpAQ=="
+  "signature": "KBSxSAZcwLq6e7uibk/qa5Cdisu6xnUQwvJFoVaSU571UQlaoop+xEyLVr9GJMnIFWRTwbR1ps3OJ3r6gY1XAA=="
 }

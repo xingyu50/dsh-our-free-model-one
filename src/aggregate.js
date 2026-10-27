@@ -49,8 +49,9 @@
  * @module src/aggregate.js
  */
 
-import { CODE, UpstreamError, classifyFailure, classifyStreamFailure, readHead, readSse, replayStream, sniffBody, transportCause } from './http.js'
+import { CODE, UpstreamError, classifyFailure, transportCause } from './http.js'
 import { egressFetch } from './egress.js'
+import { laneTurn } from './lane-turn.js'
 import { chatEndpoint, defaultHeaders, getProvider, modelsEndpoint, providerModelId } from './providers/index.js'
 import { displayModelName } from './catalog.js'
 
@@ -78,7 +79,6 @@ const CHAT_SUFFIX = Object.freeze({
 
 const DEFAULT_CONTEXT_WINDOW = 131072
 const DEFAULT_MAX_OUTPUT = 32768
-const SNIFF_BYTES = 4096
 const LISTING_TIMEOUT_MS = 15000
 const TURN_TIMEOUT_MS = 300000
 const USER_AGENT = 'dsh-our-free-model'
@@ -529,74 +529,31 @@ export async function postAggregateStreamed({ config, providerId, modelId, body,
   }
   const bodyText = typeof outbound === 'string' ? outbound
     : JSON.stringify({ ...outbound, ...(model === '' ? {} : { model }), stream: true })
-  let response
-  try {
-    response = await egressFetch(resolved.chatUrl, {
-      method: 'POST',
-      headers: { ...resolved.headers, accept: 'text/event-stream' },
-      body: bodyText,
-      redirect: 'error',
-      signal,
-    })
-  } catch (error) {
-    if (signal?.aborted === true || error?.name === 'AbortError') throw new UpstreamError('request aborted', CODE.aborted)
-    throw new UpstreamError(
+  // The orchestration (post -> abort -> retry-after -> classify -> sniff -> fold)
+  // lives in `laneTurn`; this lane supplies only what is its own: the transport,
+  // the redacting classifier, and the wire-specific frame synthesis.
+  return laneTurn({
+    transport: (url, init) => egressFetch(url, { ...init, redirect: 'error' }),
+    url: resolved.chatUrl,
+    headers: { ...resolved.headers, accept: 'text/event-stream' },
+    body: bodyText,
+    signal,
+    onData,
+    timeoutMs,
+    classify: (status, rawText, retryAt) => classifyUpstream(status, rawText, retryAt, resolved.apiKey),
+    describeTransportFailure: error => new UpstreamError(
       `model request to ${resolved.provider.name} failed: ${redact(error?.message ?? error, resolved.apiKey)}${transportCause(error)}`,
-      CODE.transport)
-  }
-
-  const setRetry = retryAfterMs(response)
-  if (!response.ok) {
-    const refusal = await response.text().catch(() => '')
-    throw classifyUpstream(response.status, refusal, setRetry, resolved.apiKey)
-  }
-  if (response.body === null) throw new UpstreamError('model stream returned no body', CODE.empty)
-
-  const head = await readHead(response.body, SNIFF_BYTES, { signal, timeoutMs })
-  const shape = sniffBody(head.text)
-  if (shape === 'empty') throw new UpstreamError('model stream returned no body', CODE.empty)
-  if (shape === 'sse') {
-    // Raw payloads, straight through: the wire's own decoder reads them, so
-    // nothing is rewritten between the provider and the harness.
-    await readSse(replayStream(head), onData, signal, timeoutMs)
-    return { status: response.status }
-  }
-
-  // A provider that answered a stream request with one JSON document. Fold the
-  // whole answer in, then emit the frame sequence its wire's decoder expects.
-  let rawText = head.text
-  if (!head.done) {
-    try {
-      while (true) {
-        const row = await head.reader.read()
-        if (row.done) break
-        if (row.value !== undefined) rawText += head.decoder.decode(row.value, { stream: true })
-      }
-    } catch (error) {
-      await head.reader.cancel().catch(() => {})
-      throw classifyStreamFailure(error, signal)
-    }
-  }
-  rawText += head.decoder.decode()
-  let payload
-  try {
-    payload = JSON.parse(redact(rawText, resolved.apiKey))
-  } catch {
-    // A 200 body that is not JSON is a hop speaking for the provider. Markup is
-    // a front proxy (a WAF page, a CDN error), and replaying the identical body
-    // draws it again — so it is not retryable SERVER.
-    if (/^\s*<(!doctype|html[\s>])/i.test(rawText)) {
-      throw new UpstreamError(
-        `the provider's front proxy answered HTTP ${response.status} with an HTML error page`,
-        CODE.client, { status: response.status })
-    }
-    throw new UpstreamError(`unexpected non-stream response: ${redact(rawText, resolved.apiKey).slice(0, 200)}`, CODE.server, { status: response.status })
-  }
-  if (payload?.error !== undefined || payload?.type === 'error') {
-    throw classifyUpstream(response.status, rawText, setRetry, resolved.apiKey)
-  }
-  for (const frame of synthesisedFrames(resolved.wire, payload, model)) onData(frame)
-  return { status: response.status }
+      CODE.transport),
+    // Redacted before JSON.parse and before classification: a provider can echo
+    // the key in either.
+    transformText: rawText => redact(rawText, resolved.apiKey),
+    describeHtmlPage: (rawText, status) => new UpstreamError(
+      `the provider's front proxy answered HTTP ${status} with an HTML error page`,
+      CODE.client, { status }),
+    onJson: payload => {
+      for (const frame of synthesisedFrames(resolved.wire, payload, model)) onData(frame)
+    },
+  })
 }
 
 /**

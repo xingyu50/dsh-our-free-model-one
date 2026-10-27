@@ -51,7 +51,7 @@ import { createPushHub } from './src/push.js'
 import { rejectionFor, isLoopbackHost, connectionAdmissionView } from './src/trust.js'
 import { resolveAttributionUserAgent } from './adapter/kernel.js'
 import { buildAggregateCatalog, fetchProviderModels, isAggregateEntry, testProvider } from './src/aggregate.js'
-import { buildComboCatalog, COMBO_STRATEGIES, isComboEntry, normalizeCombos, pruneRotation } from './src/combos.js'
+import { buildComboCatalog, COMBO_STRATEGIES, ensureAcyclic, isComboEntry, normalizeCombos, pruneRotation } from './src/combos.js'
 import { getProvider, listProviders } from './src/providers/index.js'
 import { addSavings, describeSavingsTotal, emptySavings, saverConfig, savingsPercent } from './src/token-saver/index.js'
 import { CAVEMAN_LEVELS, PONYTAIL_LEVELS } from './src/token-saver/prompts.js'
@@ -1181,6 +1181,11 @@ export function apply(ctx, config) {
       save: async patch => {
         if (patch === null || typeof patch !== 'object') throw httpError(400, 'the request body must be a JSON object')
         const rows = normalizeCombos(patch.combos)
+        // Refused before it is stored: a cyclic chain is dropped silently at render
+        // time (src/combos.js buildComboCatalog), so saving one would leave the user
+        // with "the chain I just saved is gone" and no error. The standalone
+        // boundary already refuses these; this is the same rule on this surface.
+        ensureAcyclic(rows)
         // Stored as entered. Links that name nothing right now are kept on purpose:
         // a chain that reaches an EAC model is still correct on a day the lane is
         // closed, and dropping the link would quietly rewrite the user's chain.

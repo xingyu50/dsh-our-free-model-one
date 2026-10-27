@@ -92,6 +92,46 @@ export function normalizeCombos(raw) {
 }
 
 /**
+ * Refuse a set of combos that form a cycle.
+ *
+ * A cycle is not a cosmetic problem: `buildComboCatalog` below never returns a
+ * chain it cannot resolve, so a cyclic combo is dropped **silently** at render
+ * time. Without this check the plugin's save path could persist one, and the
+ * user's only symptom would be "the chain I just saved is gone" — no error, no
+ * hint, nothing to search for.
+ *
+ * The standalone management boundary already refuses these
+ * (`packages/standalone/routing.mjs:36`), so the two surfaces disagreed: the
+ * same payload was accepted on one and rejected on the other. This is that
+ * rule, moved next to the data it validates.
+ *
+ * A link naming a combo that does not exist is **not** a cycle and stays
+ * allowed — `index.js`'s save path keeps those on purpose ("a chain that
+ * reaches an EAC model is still correct on a day the lane is closed").
+ *
+ * @param {Array<object>} combos - from `normalizeCombos`
+ * @throws {Error & {statusCode: 400}} when any chain reaches itself
+ */
+export function ensureAcyclic(combos) {
+  const byId = new Map(combos.map(row => [row.id, row]))
+  const active = new Set()
+  const checked = new Set()
+  const visit = id => {
+    if (active.has(id)) {
+      throw Object.assign(new Error('嵌套路由组形成循环引用'), { statusCode: 400 })
+    }
+    if (checked.has(id)) return
+    const row = byId.get(id)
+    if (row === undefined) return
+    active.add(id)
+    for (const model of row.models) visit(model)
+    active.delete(id)
+    checked.add(id)
+  }
+  for (const row of combos) visit(row.id)
+}
+
+/**
  * Build the virtual catalog rows for every enabled combo.
  *
  * Models that are not in the catalog *right now* are dropped from the chain

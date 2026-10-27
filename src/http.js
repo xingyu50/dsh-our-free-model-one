@@ -87,6 +87,21 @@ export function transportCause(error) {
   return parts.length > 0 ? ` — ${parts.join('; ')}` : ''
 }
 
+/**
+ * Is this body a front-proxy HTML page rather than the provider's own answer?
+ *
+ * A WAF or CDN in front of a lane answers hard failures with a whole HTML page.
+ * The predicate lives here, beside the classifier that has to act on it, and is
+ * exported so `src/lane-turn.js` can share the same test without `http.js`
+ * having to import back from it — the dependency runs one way.
+ *
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function isHtmlFrontProxyPage(text) {
+  return /^\s*<(!doctype|html[\s>])/i.test(String(text ?? ''))
+}
+
 /** Turn a gateway JSON error envelope into a classified failure. */
 export function classifyFailure(status, payload, retryAfterMs) {
   const error = payload?.error ?? payload ?? {}
@@ -98,9 +113,18 @@ export function classifyFailure(status, payload, retryAfterMs) {
   // fix by re-sending — and the markup buries the one useful fact. Callers may
   // hand over the raw page (the free lane's fold) or the one-line reduction
   // (errorPageMessage); both name the hop instead of the credential (issue #63).
-  const rawHtml = /^\s*<(!doctype|html[\s>])/i.test(raw)
-  const isHtmlPage = rawHtml || raw.includes('with an HTML error page')
-  const message = rawHtml
+  //
+  // The reduction is recognised by the frontProxyPage marker that helper sets,
+  // not by substring-matching its prose: reading another module's wording made
+  // a copy edit a silent behaviour change. Same predicate, structured input.
+  const rawHtml = isHtmlFrontProxyPage(raw)
+    || (error !== null && typeof error === 'object' && error.frontProxyPage === true)
+  const isHtmlPage = rawHtml
+  // A caller that already reduced the page to one sentence keeps its wording:
+  // `errorPageMessage` names the hop in the lane's own voice, and rewriting it
+  // here would make the co-paid lane talk about `the gateway` and a long
+  // conversation it never had. Only the raw markup is expanded.
+  const message = isHtmlFrontProxyPage(raw)
     ? `the gateway's front proxy answered HTTP ${status} with an HTML error page — usually a WAF or body-size limit in front of the gateway, not your credentials; if this hit a long conversation, its request size is the likely trigger`
     : raw
   const flat = message.toLowerCase()

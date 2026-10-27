@@ -28,7 +28,7 @@ import { Readable } from 'node:stream'
 // Web-stream adapter: http.js's readHead/readSse speak getReader(), so the
 // node:http response is converted into a proper WHATWG ReadableStream.
 import { ReadableStream } from 'node:stream/web'
-import { CODE, UpstreamError, classifyFailure, classifyStreamFailure, readHead, readSse, replayStream, sniffBody, transportCause } from './http.js'
+import { CODE, UpstreamError, classifyFailure, classifyStreamFailure, isHtmlFrontProxyPage, readHead, readSse, replayStream, sniffBody, transportCause } from './http.js'
 import { readEacUser } from './eac-user.js'
 
 const LISTING_TIMEOUT_MS = 15000
@@ -160,14 +160,26 @@ function headersFor(credential, method, fullUrl, body) {
   return { ...headers, 'authorization': `Bearer ${credential.apiKey}` }
 }
 
-/** A proxy in front of the relay answers hard failures with a whole HTML error
+/**
+ * Reduce an HTML error page to one readable line, and say whether it was one.
+ *
+ * A proxy in front of the relay answers hard failures with a whole HTML error
  * page — Cloudflare's 524 origin-timeout page being the common one. Pasting it
  * into the harness buries the one useful fact (the status) under markup, so an
- * unparseable body that is HTML reduces to one readable line. */
+ * unparseable body that is HTML reduces to one readable line.
+ *
+ * The `frontProxyPage` flag is what `classifyFailure` reads to tell a WAF page
+ * from a credential refusal. It used to substring-match this sentence instead,
+ * which made a copy edit here a silent behaviour change there.
+ *
+ * @returns {{ message: string, frontProxyPage: boolean }}
+ */
 function errorPageMessage(text, status) {
   const head = String(text ?? '')
-  if (/^\s*<(!doctype|html)/i.test(head)) return `the gateway's front proxy answered HTTP ${status} with an HTML error page`
-  return head.slice(0, 300) || `HTTP ${status}`
+  if (isHtmlFrontProxyPage(head)) {
+    return { message: `the gateway's front proxy answered HTTP ${status} with an HTML error page`, frontProxyPage: true }
+  }
+  return { message: head.slice(0, 300) || `HTTP ${status}`, frontProxyPage: false }
 }
 
 /** One listing round: `GET {base}/models`. Returns the parsed JSON document. */
@@ -183,7 +195,7 @@ export async function fetchSealedListing(credential, { signal, timeoutMs = LISTI
     const response = await laneFetch(listingUrl, { headers: headersFor(credential, 'GET', listingUrl, ''), redirect: 'error', signal: controller.signal })
     const text = await response.text()
     let payload
-    try { payload = JSON.parse(text) } catch { payload = { error: { message: errorPageMessage(text, response.status) } } }
+    try { payload = JSON.parse(text) } catch { payload = { error: errorPageMessage(text, response.status) } }
     if (!response.ok) throw classifyFailure(response.status, payload)
     return payload
   } catch (error) {
@@ -229,7 +241,7 @@ export async function postSealedStreamed({ credential, body, signal, onData, tim
   if (!response.ok) {
     const text = await response.text().catch(() => '')
     let payload
-    try { payload = JSON.parse(text) } catch { payload = { error: { message: errorPageMessage(text, response.status) } } }
+    try { payload = JSON.parse(text) } catch { payload = { error: errorPageMessage(text, response.status) } }
     throw classifyFailure(response.status, payload, setRetry)
   }
   if (response.body === null) throw new UpstreamError('model stream returned no body', CODE.empty)
@@ -266,7 +278,8 @@ export async function postSealedStreamed({ credential, body, signal, onData, tim
     // page again, so this must not land in retryable SERVER. Anything else
     // keeps the retryable server verdict.
     if (/^\s*<(!doctype|html[\s>])/i.test(text)) {
-      throw new UpstreamError(errorPageMessage(text, response.status), CODE.client, { status: response.status })
+      const page = errorPageMessage(text, response.status)
+      throw new UpstreamError(page.message, CODE.client, { status: response.status, frontProxyPage: page.frontProxyPage })
     }
     throw new UpstreamError(`unexpected non-stream response: ${text.slice(0, 200)}`, CODE.server, { status: response.status })
   }
