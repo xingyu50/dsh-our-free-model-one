@@ -66,6 +66,7 @@ const suites = [
   ['turn-accounting', 'turn-accounting-test.mjs', []],
   ['chan-relay', 'chan-relay-test.mjs', []],
   ['channel-pack', 'channel-pack-test.mjs', []],
+  ['channel-registry', 'channel-registry-test.mjs', []],
   ['channel-auto-checkin-daily', 'auto-checkin-daily-test.mjs', []],
   ['channel-source', 'channel-pack-test.mjs', ['--source', '--channels-only']],
   ['channel-network', 'channel-network-test.mjs', []],

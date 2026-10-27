@@ -27844,7 +27844,7 @@ ${captureLines}` : capture.stack;
 });
 
 // vendor/channel-pack/src/index.ts
-import { credentialRef as credentialRef16 } from "@deepseek-ai/dsh-credentials";
+import { credentialRef as credentialRef17 } from "@deepseek-ai/dsh-credentials";
 import { LlmError as LlmError20 } from "@deepseek-ai/dsh-llm";
 import Schema2 from "@deepseek-ai/schemastery";
 
@@ -40930,493 +40930,6 @@ function registerLoomyLlm(ctx, options) {
   return adapter;
 }
 
-// vendor/channel-pack/src/raccoon-adapter.ts
-import { LlmAdapter as LlmAdapter8, LlmError as LlmError11, ReasoningEffortId as ReasoningEffortId8 } from "@deepseek-ai/dsh-llm";
-
-// vendor/channel-pack/src/raccoon.ts
-import { createCipheriv, randomBytes as randomBytes2 } from "node:crypto";
-var RACCOON_API_BASE = "https://xiaohuanxiong.com";
-var RACCOON_POINTS_PREFIX = "/api/web/points/v1";
-var RACCOON_DESKTOP_PREFIX = "/api/web/desktop/v1";
-var RACCOON_PHONE_CIPHER_SECRET = "senseraccoon2023";
-var RACCOON_REQUEST_TIMEOUT_MS = 6e4;
-var RACCOON_LOGIN_TIMEOUT_MS = 5 * 60 * 1e3;
-var RACCOON_QR_STATUS = {
-  pending: "pending",
-  logging: "logging",
-  canceled: "canceled",
-  success: "success"
-};
-function decodeJwtExpMs(token) {
-  if (typeof token !== "string" || token.length === 0) return void 0;
-  const parts = token.split(".");
-  if (parts.length < 2) return void 0;
-  try {
-    const payload = JSON.parse(Buffer.from(parts[1] ?? "", "base64url").toString("utf8"));
-    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return void 0;
-    const exp = payload.exp;
-    if (typeof exp !== "number" || !Number.isFinite(exp) || exp <= 0) return void 0;
-    return exp * 1e3;
-  } catch {
-    return void 0;
-  }
-}
-function raccoonCredentialExpiresAtMs(credential) {
-  const raw = credential.expires_at;
-  if (typeof raw === "string" && raw.trim().length > 0) {
-    const parsed = Number(raw);
-    if (Number.isFinite(parsed) && parsed > 0) return parsed;
-  }
-  return decodeJwtExpMs(credential.access_token);
-}
-function isRaccoonExpired(credential) {
-  const expiresAt = raccoonCredentialExpiresAtMs(credential);
-  return expiresAt !== void 0 && expiresAt <= Date.now();
-}
-function isRaccoonRefreshable(credential) {
-  return typeof credential.refresh_token === "string" && credential.refresh_token.trim().length > 0;
-}
-function encryptRaccoonPhone(phone, iv) {
-  const key = Buffer.from(RACCOON_PHONE_CIPHER_SECRET, "utf8");
-  const nonce = iv ?? randomBytes2(16);
-  const cipher = createCipheriv("aes-128-cfb", key, nonce);
-  cipher.setAutoPadding(false);
-  const ciphertext = Buffer.concat([cipher.update(Buffer.from(phone, "utf8")), cipher.final()]);
-  return Buffer.concat([nonce, ciphertext]).toString("base64");
-}
-function formatMultiplier(value) {
-  return String(Number(value.toFixed(4)));
-}
-function raccoonDisplayName(model) {
-  const name2 = typeof model.description === "string" && model.description.length > 0 ? model.description : model.id;
-  const effective = model.effectiveMultiplier;
-  if (typeof effective !== "number" || !Number.isFinite(effective) || effective < 0) return name2;
-  if (effective === 0) return `${name2} \xB7 \u514D\u8D39`;
-  const base = model.baseMultiplier;
-  const hasBase = typeof base === "number" && Number.isFinite(base) && base > 0;
-  if (hasBase && base > effective) {
-    return `${name2} \xB7 x${formatMultiplier(base)}\u2192x${formatMultiplier(effective)}`;
-  }
-  return `${name2} \xB7 x${formatMultiplier(effective)}`;
-}
-function raccoonHeaders(credential, opts = {}) {
-  const headers = {
-    Accept: "application/json",
-    "Content-Type": "application/json",
-    Authorization: `Bearer ${credential.access_token}`,
-    // 个人账号为空串；客户端总是发送该头
-    "X-Org-Code": credential.office_identity ?? "",
-    "X-Raccoon-Language": "zh"
-  };
-  if (opts.platform !== void 0 && opts.platform.length > 0) {
-    headers["X-Client-Platform"] = opts.platform;
-  }
-  if (opts.version !== void 0 && opts.version.length > 0) {
-    headers["X-Client-Version"] = opts.version;
-  }
-  if (credential.device_id !== void 0 && credential.device_id.length > 0) {
-    headers["X-Client-Device-ID"] = credential.device_id;
-  }
-  return headers;
-}
-
-// vendor/channel-pack/src/raccoon-product.ts
-var RACCOON_EFFORT_ON = "on";
-var RACCOON_EFFORT_OFF = "off";
-var RACCOON_EFFORT_NAMES = Object.freeze({
-  [RACCOON_EFFORT_ON]: "\u5F00\u542F",
-  [RACCOON_EFFORT_OFF]: "\u5173\u95ED"
-});
-var RACCOON_REASONING_EFFORTS = Object.freeze([
-  RACCOON_EFFORT_ON,
-  RACCOON_EFFORT_OFF
-]);
-var RACCOON_DEFAULT_EFFORT = RACCOON_EFFORT_ON;
-var RACCOON_FALLBACK_MODELS = [
-  {
-    id: "sn-sensenova-6-8-flash",
-    name: "SenseNova-6.8-Flash \xB7 \u514D\u8D39",
-    contextWindow: 256e3,
-    maxTokens: 63999,
-    supportsImage: true
-  },
-  {
-    id: "sn-sensenova-6-8-flash-lite",
-    name: "SenseNova-6.8-Flash-Lite \xB7 \u514D\u8D39",
-    contextWindow: 256e3,
-    maxTokens: 63999,
-    supportsImage: true
-  },
-  {
-    id: "sn-glm-5-3",
-    name: "GLM-5-3 \xB7 x0.75",
-    contextWindow: 1e6,
-    maxTokens: 1e5,
-    supportsImage: true
-  },
-  {
-    id: "sn-kimi-k3",
-    // ⚠️ 1 倍也要显示（用户报障「为什么 Kimi-K3 没有倍率，ide 是 1 倍，
-    // 1 倍也要显示倍率」）—— 见 `raccoonDisplayName` 的注释。
-    name: "Kimi-K3 \xB7 x1",
-    contextWindow: 1e6,
-    maxTokens: 1e5,
-    supportsImage: true
-  },
-  {
-    id: "sn-glm-5-3-flash",
-    name: "GLM-5-3-Flash \xB7 x0.2\u2192x0.1",
-    contextWindow: 1e6,
-    maxTokens: 1e5,
-    // ⚠️ 远端 tags 不含 `vision`，但**实测能看图**（见 RACCOON_IMAGE_CAPABILITY_OVERRIDES）。
-    supportsImage: true
-  },
-  {
-    id: "sn-deepseek-v4-1-flash",
-    name: "DeepSeek-V4.1-Flash \xB7 x0.25",
-    contextWindow: 1e6,
-    maxTokens: 1e5,
-    // ⚠️ 同上：远端 tags 不含 `vision`，实测 5/5 读对随机数字。
-    supportsImage: true
-  }
-];
-var RACCOON_IMAGE_CAPABILITY_OVERRIDES = /* @__PURE__ */ new Set([
-  "sn-deepseek-v4-1-flash",
-  "sn-glm-5-3-flash"
-]);
-function raccoonSupportsImage(modelId, tags) {
-  if (RACCOON_IMAGE_CAPABILITY_OVERRIDES.has(modelId)) return true;
-  return tags.includes("vision") || tags.includes("image") || tags.includes("image-understanding");
-}
-var RACCOON = {
-  id: "raccoon",
-  // ⚠️ 用『Raccoon (商汤)』而非『Raccoon Work (商汤)』—— 后者在 Channel Pack 的
-  // provider Tab 里**触发换行**（用户报障）。客户端内的品牌名是 `Raccoon Work`，
-  // 但那个词组太长；缩短成 `Raccoon` 后与其余 provider 的标签长度一致
-  displayName: "Raccoon (\u5546\u6C64)",
-  apiBase: RACCOON_API_BASE,
-  authApiPrefix: "/api/web/auth/v1",
-  llmApiPrefix: "/api/web/llm/v2",
-  pointsApiPrefix: "/api/web/points/v1",
-  desktopApiPrefix: "/api/web/desktop/v1",
-  userAgent: "Raccoon Work/1.0.35 (Windows)",
-  clientPlatform: "desktop-windows",
-  clientVersion: "v1.0.35",
-  defaultCredentialRef: "RACCOON_ACCESS_TOKEN",
-  // 实测该网关按**请求体字节**卡（`HTTP_413: request body exceeds 10MB`），
-  // 所以字节目标是主约束；像素预算保证图不至于大到压不进那个字节目标。
-  imagePixelBudget: 64e4,
-  imageMaxBytes: RACCOON_REQUEST_IMAGE_MAX_BYTES,
-  phoneCipherSecret: RACCOON_PHONE_CIPHER_SECRET,
-  aliyunCaptcha: { sceneId: "1pkmy0x3", prefix: "hk1r5l" },
-  fallbackModels: RACCOON_FALLBACK_MODELS
-};
-
-// vendor/channel-pack/src/raccoon-adapter.ts
-function isQuotaError(data) {
-  const error = typeof data.error === "object" && data.error !== null ? data.error : data;
-  return String(error.code ?? data.code) === "402" || /积分不足|余额不足|insufficient[_\s]+(?:points|balance|credits)/i.test(
-    String(error.message ?? error.msg ?? "")
-  );
-}
-function raccoonThinkingExtraBody(effort) {
-  if (effort === void 0 || effort.length === 0) return void 0;
-  const type = effort === RACCOON_EFFORT_OFF ? "disabled" : "enabled";
-  return { thinking: { type } };
-}
-function raccoonReasoningInfo() {
-  const efforts = RACCOON_REASONING_EFFORTS.map((id) => ({
-    id: ReasoningEffortId8(id),
-    name: RACCOON_EFFORT_NAMES[id] ?? id
-  }));
-  const defaultEffort = RACCOON_REASONING_EFFORTS.includes(RACCOON_DEFAULT_EFFORT) ? ReasoningEffortId8(RACCOON_DEFAULT_EFFORT) : ReasoningEffortId8(RACCOON_REASONING_EFFORTS[0] ?? RACCOON_EFFORT_ON);
-  return { efforts, defaultEffort };
-}
-function positiveMaxTokens2(value) {
-  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : void 0;
-}
-function fallbackToRemote2(model) {
-  return {
-    id: model.id,
-    name: model.name,
-    contextWindow: model.contextWindow,
-    maxTokens: model.maxTokens,
-    // 兜底表**声明**图片能力（它有该字段）；与 loomy 不同（那边兜底表没有该信息）。
-    supportsImage: model.supportsImage
-  };
-}
-var RaccoonAdapter = class extends LlmAdapter8 {
-  constructor(options) {
-    super();
-    this.options = options;
-    this.product = options.product ?? RACCOON;
-    this.fetchImpl = options.fetchImpl ?? fetch;
-    this.fallbackIndex = new Map(this.product.fallbackModels.map((model) => [model.id, model]));
-  }
-  options;
-  product;
-  fetchImpl;
-  /** 兜底模型索引（id → 条目）。 */
-  fallbackIndex;
-  /** 远端模型缓存；未拉取时为 undefined。 */
-  remoteModels;
-  /** 目录加载闸门：并发去重 + 失败/空结果冷却（见 `remote-catalog-gate.ts`）。 */
-  catalogGate = new RemoteCatalogGate();
-  /**
-   * 描述本适配器拥有的 provider 路由。
-   *
-   * 对入参做防御性归一化：DSH 会强制校验 `info.id === provider`，而模型设置页
-   * 会用该 id 计算 `deriveKeyRef(provider)`（内部调 `provider.toUpperCase()`）。
-   * 一旦 provider 不是字符串，直接回退到本产品的 id。
-   */
-  providerInfo(provider) {
-    const id = typeof provider === "string" && provider.length > 0 ? provider : this.product.id;
-    return { id, name: this.product.displayName };
-  }
-  /**
-   * 完整目录（**不套黑名单**），带最终展示名。
-   *
-   * 设置页需要它渲染被关闭的模型 —— 否则那些条目只能凭 `disabledMap` 的 key
-   * 补回，而那条路径拿不到展示名，会退化成裸 id（倍率与模型名随之丢失）。
-   */
-  listAllModels() {
-    const source = this.remoteModels ?? this.product.fallbackModels.map(fallbackToRemote2);
-    return source.map((model) => ({ id: model.id, name: model.name }));
-  }
-  /**
-   * 取远端模型目录；**失败时不把兜底表写进缓存**。
-   *
-   * ⚠ 原实现是 `this.remoteModels = fallback; return fallback` —— 把兜底表当成
-   * 「已加载」记下，于是一次瞬时失败会让该 provider **整个进程生命周期**都只剩
-   * 兜底模型（用户看不到自己的模型，且无从触发重试，只能重启）。
-   * 改为：只缓存**真实远端目录**，兜底表每次现算（纯本地、零成本），
-   * 并用 {@link RemoteCatalogGate} 的冷却挡住「每模型重试一次」的放大。
-   */
-  async loadModels() {
-    if (this.remoteModels !== void 0) return this.remoteModels;
-    const fetchRemote = this.options.fetchRemoteModels;
-    if (fetchRemote !== void 0) {
-      await this.catalogGate.run(async () => {
-        const fetched = await fetchRemote();
-        if (fetched.length === 0) return false;
-        this.remoteModels = fetched;
-        return true;
-      });
-      if (this.remoteModels !== void 0) return this.remoteModels;
-    }
-    return this.product.fallbackModels.map(fallbackToRemote2);
-  }
-  inputModalitiesFor(model) {
-    return model?.supportsImage === true ? ["text", "image"] : ["text"];
-  }
-  async listModels(_provider) {
-    if (!await providerCatalogVisible(this.options.accountPool, this.product.id)) return [];
-    const all = await this.loadModels();
-    const disabled = this.options.accountPool?.disabledModelsFor(this.product.id);
-    const listed = disabled === void 0 || disabled.size === 0 ? all : all.filter((model) => !disabled.has(model.id));
-    return listed.map((model) => ({
-      provider: this.product.id,
-      id: model.id,
-      // 倍率拼进 name（不是 description）：composer 的模型切换菜单只渲染 name。
-      name: model.name,
-      inputModalities: this.inputModalitiesFor(model)
-    }));
-  }
-  async resolveModel(provider, model, _signal) {
-    const all = await this.loadModels();
-    const entry = all.find((item) => item.id === model);
-    const fallback = this.fallbackIndex.get(model);
-    const bareName = fallback !== void 0 ? fallback.name.replace(/ · .*$/, "") : model;
-    const resolved = {
-      provider,
-      id: model,
-      name: entry !== void 0 ? entry.name.replace(/ · .*$/, "") : bareName,
-      inputModalities: this.inputModalitiesFor(entry)
-    };
-    const contextWindow = entry?.contextWindow ?? fallback?.contextWindow;
-    if (contextWindow !== void 0 && contextWindow > 0) {
-      resolved.context = { contextWindow };
-    }
-    const maxTokens = positiveMaxTokens2(entry?.maxTokens ?? fallback?.maxTokens);
-    if (maxTokens !== void 0) resolved.defaultMaxTokens = maxTokens;
-    resolved.reasoning = raccoonReasoningInfo();
-    return resolved;
-  }
-  /**
-   * 兼容 0.1.1-rc.2：新版 `LlmRuntime.prepareCall()` 会调用
-   * `registration.adapter.prepareCall(...)`，而本仓库链接的 dsh-llm 副本
-   * 基类尚未提供该方法。与其余适配器同款 shim。
-   */
-  async prepareCall(provider, model, signal) {
-    return {
-      model: await this.resolveModel(provider, model, signal),
-      stream: (options) => this.stream(options)
-    };
-  }
-  async *stream(options) {
-    const imageRefs = /* @__PURE__ */ new Map();
-    for (const message2 of options.messages) {
-      if (Array.isArray(message2.content)) collectImages3(message2.content, imageRefs);
-    }
-    const all = await this.loadModels();
-    const entry = all.find((item) => item.id === options.model);
-    let imageUrls;
-    if (imageRefs.size > 0) {
-      if (!this.inputModalitiesFor(entry).includes("image")) {
-        throw new LlmError11(`raccoon: \u6A21\u578B "${options.model}" \u4E0D\u652F\u6301\u56FE\u7247\u8F93\u5165`, "UNSUPPORTED_CONTENT");
-      }
-      if (this.options.readImage === void 0) {
-        throw new LlmError11("raccoon: \u56FE\u7247\u8F93\u5165\u9700\u8981\u9644\u4EF6\u670D\u52A1", "UNSUPPORTED_CONTENT");
-      }
-      imageUrls = /* @__PURE__ */ new Map();
-      const readImage = this.options.readImage;
-      for (const [id, ref] of imageRefs) {
-        const projected = await projectRequestImage(ref, {
-          readImageRequest: this.options.readImageRequest,
-          pixelBudget: this.product.imagePixelBudget,
-          maxBytes: this.product.imageMaxBytes
-        });
-        const image = projected ?? await readImage(ref);
-        if (image === void 0) continue;
-        imageUrls.set(id, `data:${image.mediaType};base64,${Buffer.from(image.data).toString("base64")}`);
-      }
-    }
-    let credential = await this.options.resolveCredential(options.model);
-    let accountId = credential === void 0 ? void 0 : await this.options.accountPool?.findAccountIdByCredential(this.product.id, credential.access_token);
-    if (credential === void 0 || isRaccoonExpired(credential)) {
-      credential = await this.options.refresh(accountId || void 0) ?? await this.options.resolveCredential(options.model);
-    }
-    if (credential === void 0 || credential.access_token.length === 0) {
-      throw new LlmError11("raccoon: no usable credential; log in first", "MISSING_CREDENTIAL");
-    }
-    const messages = serializeMessages4(options.messages, imageUrls);
-    const wireMessages = options.system !== void 0 && options.system.length > 0 ? [{ role: "system", content: options.system }, ...messages] : messages;
-    const thinking = raccoonThinkingExtraBody(options.reasoningEffort);
-    const buildBody = () => JSON.stringify({
-      model: options.model,
-      messages: wireMessages,
-      stream: true,
-      ...options.maxTokens !== void 0 ? { max_tokens: options.maxTokens } : {},
-      ...options.temperature !== void 0 ? { temperature: options.temperature } : {},
-      ...options.stop !== void 0 && options.stop.length > 0 ? { stop: options.stop } : {},
-      // ⚠️ tools 必须真的下发到请求体**顶层**：Qoder/TRAE 都因漏发而让模型
-      // 在正文里臆造 XML 工具调用，harness 认不出 → 任务终止。
-      ...options.tools !== void 0 && options.tools.length > 0 ? {
-        tools: options.tools.map((tool) => ({
-          type: "function",
-          function: {
-            name: tool.name,
-            ...tool.description.length > 0 ? { description: tool.description } : {},
-            ...tool.parameters === void 0 ? {} : { parameters: tool.parameters }
-          }
-        }))
-      } : {},
-      // 思考档位（开 / 关）。⚠️ **必须在 `extra_body` 内** —— 实测放顶层会被忽略
-      //（连非法值都不报错）。不传档位时不发该字段，保持服务端默认（= 开）。
-      ...thinking !== void 0 ? { extra_body: thinking } : {}
-    });
-    const headers = () => ({
-      Accept: "text/event-stream",
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${credential?.access_token ?? ""}`,
-      "X-Org-Code": credential?.office_identity ?? "",
-      "X-Raccoon-Language": "zh",
-      "X-Client-Platform": this.product.clientPlatform
-    });
-    const send = async () => {
-      try {
-        return await this.fetchImpl(
-          `${this.product.apiBase}${this.product.llmApiPrefix}/chat/completions`,
-          {
-            method: "POST",
-            headers: headers(),
-            body: buildBody(),
-            signal: options.signal
-          }
-        );
-      } catch (error) {
-        if (options.signal?.aborted) throw error;
-        if (isTransportError4(error)) {
-          throw new LlmError11(
-            `raccoon: transport error: ${error instanceof Error ? error.message : String(error)}`,
-            "TRANSPORT",
-            { cause: error }
-          );
-        }
-        throw error;
-      }
-    };
-    const tried = /* @__PURE__ */ new Set();
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (accountId) tried.add(accountId);
-      let emitted = false;
-      try {
-        let response = await send();
-        if (response.status === 401 || response.status === 403) {
-          await response.body?.cancel();
-          const refreshed = await this.options.refresh(accountId || void 0) ?? await this.options.resolveCredential(options.model);
-          if (refreshed === void 0 || refreshed.access_token.length === 0) {
-            throw new LlmError11("raccoon: credential expired and refresh failed", "AUTH", { status: response.status });
-          }
-          credential = refreshed;
-          response = await send();
-        }
-        if (!response.ok) {
-          const errorText = await response.text().catch(() => "");
-          let quota = response.status === 402;
-          try {
-            quota ||= isQuotaError(JSON.parse(errorText));
-          } catch {
-          }
-          throw new LlmError11(
-            `raccoon: ${errorDetail4(errorText)}`,
-            quota ? "QUOTA_EXCEEDED" : httpErrorCode4(response.status),
-            { status: response.status }
-          );
-        }
-        for await (const chunk of consumeOpenAiSse(response, { signal: options.signal }, {
-          label: "raccoon",
-          firstTokenTimeoutMs: resolveFirstTokenTimeoutMs8(),
-          chunkTimeoutMs: resolveChunkTimeoutMs8(),
-          isQuotaError,
-          ...options.maxTokens === void 0 ? {} : { maxTokens: options.maxTokens }
-        })) {
-          emitted = true;
-          yield chunk;
-        }
-        return;
-      } catch (error) {
-        if (options.signal?.aborted || !(error instanceof LlmError11) || error.code !== "QUOTA_EXCEEDED") throw error;
-        if (accountId) {
-          await this.options.accountPool?.updateModelRateLimit(accountId, options.model, nextUtc8DayStartMs());
-        }
-        if (emitted || attempt === 2 || this.options.nextAccount === void 0) throw error;
-        const next = await this.options.nextAccount(options.model, tried);
-        if (next === void 0 || tried.has(next.accountId)) throw error;
-        accountId = next.accountId;
-        credential = next.credential;
-        if (isRaccoonExpired(credential)) {
-          credential = await this.options.refresh(accountId) ?? credential;
-        }
-      }
-    }
-  }
-};
-function resolveFirstTokenTimeoutMs8() {
-  const raw = Number(process.env.DSH_RACCOON_FIRST_TOKEN_TIMEOUT_MS);
-  return Number.isFinite(raw) && raw > 0 ? raw : 12e4;
-}
-function resolveChunkTimeoutMs8() {
-  const raw = Number(process.env.DSH_RACCOON_CHUNK_TIMEOUT_MS);
-  return Number.isFinite(raw) && raw > 0 ? raw : 12e4;
-}
-function registerRaccoonLlm(ctx, options) {
-  const product = options.product ?? RACCOON;
-  const adapter = new RaccoonAdapter(options);
-  registerAdapterIdempotent(ctx.llm, [product.id], adapter);
-  return adapter;
-}
-
 // vendor/channel-pack/src/service.ts
 import { Service } from "@deepseek-ai/cordis";
 import { credentialRef as credentialRef2 } from "@deepseek-ai/dsh-credentials";
@@ -41424,10 +40937,10 @@ import { credentialRef as credentialRef2 } from "@deepseek-ai/dsh-credentials";
 // vendor/channel-pack/src/login.ts
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
-import { getRandomValues, randomUUID as randomUUID2, randomBytes as randomBytes4 } from "node:crypto";
+import { getRandomValues, randomUUID as randomUUID2, randomBytes as randomBytes3 } from "node:crypto";
 
 // vendor/channel-pack/src/oauth.ts
-import { createHash as createHash4, randomBytes as randomBytes3 } from "node:crypto";
+import { createHash as createHash4, randomBytes as randomBytes2 } from "node:crypto";
 
 // node_modules/jose/dist/webapi/lib/buffer_utils.js
 var encoder = new TextEncoder();
@@ -42128,7 +41641,7 @@ var TOKEN_TIMEOUT_MS = 6e4;
 var GRANT_AUTHORIZATION_CODE = "authorization_code";
 var GRANT_REFRESH_TOKEN = "refresh_token";
 function generatePkcePair() {
-  const codeVerifier = randomBytes3(48).toString("base64url");
+  const codeVerifier = randomBytes2(48).toString("base64url");
   const codeChallenge = createHash4("sha256").update(codeVerifier).digest("base64url");
   return { codeVerifier, codeChallenge };
 }
@@ -42145,7 +41658,7 @@ async function signDpopJws(keyPair, htm, htu) {
     htm,
     htu,
     iat: Math.floor(Date.now() / 1e3),
-    jti: randomBytes3(32).toString("hex")
+    jti: randomBytes2(32).toString("hex")
   };
   return new SignJWT(payload).setProtectedHeader({ alg: "ES256", typ: "dpop+jwt", jwk: keyPair.publicKeyJwk }).sign(key);
 }
@@ -42504,7 +42017,7 @@ function listenOnCallbackPort(server) {
   });
 }
 async function startOAuthFlow(options = {}) {
-  const ticketId = randomBytes4(32).toString("hex");
+  const ticketId = randomBytes3(32).toString("hex");
   const pkce = generatePkcePair();
   const keyPair = await generateDpopKeyPair();
   const { port, server, result } = await startOAuthCallbackServer(ticketId, pkce, keyPair, options);
@@ -47674,1524 +47187,6 @@ var LoomyAuth = class extends Service7 {
   }
 };
 
-// vendor/channel-pack/src/raccoon-auth.ts
-import { Service as Service8 } from "@deepseek-ai/cordis";
-import { credentialRef as credentialRef9 } from "@deepseek-ai/dsh-credentials";
-
-// vendor/channel-pack/src/raccoon-credits.ts
-var RACCOON_LOGIN_REWARD_POINTS = 3e3;
-var RACCOON_LOGIN_REWARD_EVENT_NAME = "\u684C\u9762\u7AEF\u767B\u5F55\u5956\u52B1";
-function parseEnvelope(payload, status) {
-  const record = typeof payload === "object" && payload !== null && !Array.isArray(payload) ? payload : {};
-  const code = typeof record.code === "number" ? record.code : status >= 400 ? status : 0;
-  const message2 = typeof record.message === "string" && record.message.length > 0 ? record.message : typeof record.details === "string" ? record.details : "";
-  const data = typeof record.data === "object" && record.data !== null && !Array.isArray(record.data) ? record.data : void 0;
-  return { ok: code === 0, code, message: message2, data };
-}
-function readNumber2(value) {
-  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
-}
-async function requestJson(url, credential, product, init, fetcher) {
-  try {
-    const response = await fetcher(url, {
-      method: init.method,
-      headers: raccoonHeaders(credential, {
-        platform: product.clientPlatform,
-        version: product.clientVersion
-      }),
-      ...init.body === void 0 ? {} : { body: init.body },
-      signal: AbortSignal.timeout(RACCOON_REQUEST_TIMEOUT_MS)
-    });
-    const parsed = await response.json();
-    return parseEnvelope(parsed, response.status);
-  } catch (error) {
-    return {
-      ok: false,
-      code: -1,
-      message: error instanceof Error ? error.message : String(error),
-      data: void 0
-    };
-  }
-}
-function makePackage2(name2, remaining) {
-  return {
-    name: name2,
-    unit: "\u79EF\u5206",
-    remaining,
-    total: remaining,
-    used: 0,
-    active: true,
-    cycleStartTime: "",
-    cycleEndTime: "",
-    expiredTime: ""
-  };
-}
-async function fetchRaccoonCreditBalance(product, credential, fetcher = fetch) {
-  const envelope = await requestJson(
-    `${product.apiBase}${RACCOON_POINTS_PREFIX}/balance`,
-    credential,
-    product,
-    { method: "GET" },
-    fetcher
-  );
-  if (!envelope.ok || envelope.data === void 0) return null;
-  const available2 = readNumber2(envelope.data.available_points);
-  if (available2 === void 0) return null;
-  const packages = [];
-  const reward = readNumber2(envelope.data.reward_points);
-  const daily = readNumber2(envelope.data.daily_points);
-  const topup = readNumber2(envelope.data.topup_points);
-  const monthly = readNumber2(envelope.data.monthly_points);
-  if (reward !== void 0) packages.push(makePackage2("\u5956\u52B1\u79EF\u5206", reward));
-  if (daily !== void 0) packages.push(makePackage2("\u6BCF\u65E5\u79EF\u5206", daily));
-  if (monthly !== void 0 && monthly > 0) packages.push(makePackage2("\u4F1A\u5458\u79EF\u5206", monthly));
-  if (topup !== void 0) packages.push(makePackage2("\u5145\u503C\u79EF\u5206", topup));
-  return {
-    total: available2,
-    // 极端情形（服务端只给 total 不给分项）也要有至少一个包，否则 UI 空列表
-    packages: packages.length > 0 ? packages : [makePackage2("\u53EF\u7528\u79EF\u5206", available2)],
-    expiredTotal: 0
-  };
-}
-async function claimRaccoonLoginReward(product, credential, fetcher = fetch) {
-  const envelope = await requestJson(
-    `${product.apiBase}${RACCOON_DESKTOP_PREFIX}/login/points/grant`,
-    credential,
-    product,
-    { method: "POST" },
-    fetcher
-  );
-  if (!envelope.ok) {
-    return {
-      kind: "failed",
-      code: envelope.code,
-      message: envelope.message.length > 0 ? envelope.message : "\u9886\u53D6\u767B\u5F55\u5956\u52B1\u5931\u8D25"
-    };
-  }
-  if (envelope.data?.granted !== true) {
-    return {
-      kind: "already-claimed",
-      message: "\u8BE5\u8D26\u53F7\u5DF2\u9886\u53D6\u8FC7\u684C\u9762\u7AEF\u767B\u5F55\u5956\u52B1\uFF08\u6BCF\u53F7\u4E00\u6B21\uFF09"
-    };
-  }
-  const popup = typeof envelope.data.popup === "object" && envelope.data.popup !== null ? envelope.data.popup : void 0;
-  const points = readNumber2(popup?.points) ?? RACCOON_LOGIN_REWARD_POINTS;
-  return { kind: "claimed", credit: points, streakDays: 0, isStreakDay: false };
-}
-async function fetchRaccoonOnboardingStatus(product, credential, fetcher = fetch) {
-  const envelope = await requestJson(
-    `${product.apiBase}${RACCOON_POINTS_PREFIX}/bills?paging.limit=50&paging.offset=0`,
-    credential,
-    product,
-    { method: "GET" },
-    fetcher
-  );
-  if (!envelope.ok || envelope.data === void 0) {
-    return { claimed: false, points: RACCOON_LOGIN_REWARD_POINTS };
-  }
-  const items = Array.isArray(envelope.data.items) ? envelope.data.items : [];
-  let claimed = false;
-  let points = RACCOON_LOGIN_REWARD_POINTS;
-  for (const raw of items) {
-    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) continue;
-    const item = raw;
-    if (item.biz_type !== "reward_grant") continue;
-    if (item.event_name !== RACCOON_LOGIN_REWARD_EVENT_NAME) continue;
-    claimed = true;
-    const billPoints = readNumber2(item.points);
-    if (billPoints !== void 0 && billPoints > 0) points = billPoints;
-    break;
-  }
-  return { claimed, points };
-}
-
-// vendor/channel-pack/src/raccoon-oauth.ts
-import { randomBytes as randomBytes5 } from "node:crypto";
-function parseEnvelope2(payload, status) {
-  const record = typeof payload === "object" && payload !== null && !Array.isArray(payload) ? payload : {};
-  const code = typeof record.code === "number" ? record.code : status >= 400 ? status : 0;
-  const message2 = typeof record.message === "string" ? record.message : "";
-  const details = typeof record.details === "string" ? record.details : "";
-  const data = typeof record.data === "object" && record.data !== null && !Array.isArray(record.data) ? record.data : void 0;
-  return { code, message: message2, details, data };
-}
-function envelopeError(envelope, fallback) {
-  const parts = [envelope.message, envelope.details].filter((s) => s.length > 0);
-  const text = parts.length > 0 ? parts.join(": ") : fallback;
-  return new Error(`raccoon: ${text}`);
-}
-async function postJson(url, body, fetcher, headers = {}) {
-  let response;
-  try {
-    response = await fetcher(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...headers },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(RACCOON_REQUEST_TIMEOUT_MS)
-    });
-  } catch (error) {
-    throw new Error(
-      `raccoon: \u8BF7\u6C42\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`
-    );
-  }
-  let parsed;
-  try {
-    parsed = await response.json();
-  } catch {
-    throw new Error(`raccoon: \u54CD\u5E94\u4E0D\u662F JSON\uFF08HTTP ${response.status}\uFF09`);
-  }
-  return { envelope: parseEnvelope2(parsed, response.status), status: response.status };
-}
-function generateQrCode() {
-  return randomBytes5(16).toString("hex");
-}
-function buildQrImageUrl(product, code) {
-  const params = new URLSearchParams({ code, appname: "\u5546\u6C64\u5C0F\u6D63\u718A\u5B98\u7F51" });
-  return `${product.apiBase}/login/mp?${params.toString()}`;
-}
-async function pollRaccoonQrLogin(product, code, fetcher = fetch) {
-  let envelope;
-  try {
-    const result = await postJson(
-      `${product.apiBase}${product.authApiPrefix}/login_with_qrcode_code`,
-      { qrcode_code: code },
-      fetcher
-    );
-    envelope = result.envelope;
-  } catch {
-    return { status: "pending" };
-  }
-  if (envelope.code !== 0 || envelope.data === void 0) return { status: "pending" };
-  const raw = envelope.data.status;
-  const status = typeof raw === "string" ? raw : "";
-  const expiredAt = typeof envelope.data.expired_at === "string" ? envelope.data.expired_at : void 0;
-  if (status === RACCOON_QR_STATUS.canceled) return { status: "canceled" };
-  if (status === RACCOON_QR_STATUS.logging) {
-    return { status: "logging", ...expiredAt !== void 0 ? { expiredAt } : {} };
-  }
-  if (status === RACCOON_QR_STATUS.success) {
-    const accessToken = typeof envelope.data.access_token === "string" ? envelope.data.access_token : "";
-    const refreshToken2 = typeof envelope.data.refresh_token === "string" ? envelope.data.refresh_token : "";
-    if (accessToken.length === 0) return { status: "pending" };
-    const expMs = decodeJwtExpMs(accessToken);
-    return {
-      status: "success",
-      accessToken,
-      refreshToken: refreshToken2,
-      ...expMs !== void 0 ? { expiresAt: String(expMs) } : {}
-    };
-  }
-  return { status: "pending" };
-}
-async function sendRaccoonSmsCode(product, phone, captchaParam, fetcher = fetch) {
-  const { envelope } = await postJson(
-    `${product.apiBase}${product.authApiPrefix}/send_sms`,
-    {
-      captcha_param: captchaParam,
-      nation_code: "86",
-      phone: encryptRaccoonPhone(phone)
-    },
-    fetcher
-  );
-  if (envelope.code !== 0) {
-    if (envelope.code === 100006) {
-      throw new Error("raccoon: \u56FE\u5F62\u9A8C\u8BC1\u7801\u6821\u9A8C\u5931\u8D25\uFF0C\u8BF7\u91CD\u65B0\u5B8C\u6210\u6ED1\u5757\u9A8C\u8BC1");
-    }
-    throw envelopeError(envelope, "\u4E0B\u53D1\u77ED\u4FE1\u9A8C\u8BC1\u7801\u5931\u8D25");
-  }
-}
-async function loginRaccoonWithSmsCode(product, phone, smsCode, fetcher = fetch) {
-  const { envelope } = await postJson(
-    `${product.apiBase}${product.authApiPrefix}/login_with_sms`,
-    {
-      nation_code: "86",
-      phone: encryptRaccoonPhone(phone),
-      sms_code: smsCode
-    },
-    fetcher
-  );
-  if (envelope.code !== 0) throw envelopeError(envelope, "\u77ED\u4FE1\u767B\u5F55\u5931\u8D25");
-  return credentialFromEnvelope(envelope);
-}
-function credentialFromEnvelope(envelope) {
-  const data = envelope.data ?? {};
-  const accessToken = typeof data.access_token === "string" ? data.access_token : "";
-  const refreshToken2 = typeof data.refresh_token === "string" ? data.refresh_token : "";
-  if (accessToken.length === 0) {
-    throw new Error("raccoon: \u767B\u5F55\u54CD\u5E94\u7F3A\u5C11 access_token");
-  }
-  const expMs = decodeJwtExpMs(accessToken);
-  const officeIdentity = typeof data.office_identity === "string" ? data.office_identity : "";
-  return {
-    access_token: accessToken,
-    refresh_token: refreshToken2,
-    ...expMs !== void 0 ? { expires_at: String(expMs) } : {},
-    ...officeIdentity.length > 0 ? { office_identity: officeIdentity } : {}
-  };
-}
-async function refreshRaccoonCredential(product, credential, fetcher = fetch) {
-  const { envelope, status } = await postJson(
-    `${product.apiBase}${product.authApiPrefix}/refresh`,
-    { refresh_token: credential.refresh_token },
-    fetcher
-  );
-  if (status === 401 || envelope.code === 200003) {
-    throw new Error("raccoon: \u767B\u5F55\u6001\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55");
-  }
-  if (envelope.code !== 0) throw envelopeError(envelope, "\u7EED\u671F\u5931\u8D25");
-  const data = envelope.data ?? {};
-  const accessToken = typeof data.access_token === "string" ? data.access_token : "";
-  if (accessToken.length === 0) {
-    throw new Error("raccoon: \u7EED\u671F\u54CD\u5E94\u7F3A\u5C11 access_token");
-  }
-  const nextRefresh = typeof data.refresh_token === "string" && data.refresh_token.length > 0 ? data.refresh_token : credential.refresh_token;
-  const expMs = decodeJwtExpMs(accessToken);
-  return {
-    ...credential,
-    access_token: accessToken,
-    refresh_token: nextRefresh,
-    ...expMs !== void 0 ? { expires_at: String(expMs) } : {}
-  };
-}
-async function fetchRaccoonUserInfo(product, credential, fetcher = fetch) {
-  try {
-    const response = await fetcher(`${product.apiBase}${product.authApiPrefix}/user_info`, {
-      method: "GET",
-      headers: raccoonHeaders(credential),
-      signal: AbortSignal.timeout(RACCOON_REQUEST_TIMEOUT_MS)
-    });
-    if (!response.ok) return {};
-    const envelope = parseEnvelope2(await response.json(), response.status);
-    if (envelope.code !== 0 || envelope.data === void 0) return {};
-    const userId = typeof envelope.data.id === "string" ? envelope.data.id : "";
-    const nickname = typeof envelope.data.name === "string" ? envelope.data.name : "";
-    const officeIdentity = typeof envelope.data.office_identity === "string" ? envelope.data.office_identity : "";
-    const phone = typeof envelope.data.phone === "string" ? envelope.data.phone : "";
-    return {
-      ...userId.length > 0 ? { userId } : {},
-      ...nickname.length > 0 ? { nickname } : {},
-      ...officeIdentity.length > 0 ? { officeIdentity } : {},
-      ...phone.length > 0 ? { phone } : {}
-    };
-  } catch {
-    return {};
-  }
-}
-
-// vendor/channel-pack/src/raccoon-login-page.ts
-import { createServer as createServer5 } from "node:http";
-
-// vendor/channel-pack/src/raccoon-qr.ts
-var DATA_CODEWORDS = [0, 16, 28, 44, 64, 86, 108, 124, 154, 182, 216];
-var EC_BLOCKS_M = [
-  void 0,
-  { ecPerBlock: 10, groups: [[1, 16]] },
-  { ecPerBlock: 16, groups: [[1, 28]] },
-  { ecPerBlock: 26, groups: [[1, 44]] },
-  { ecPerBlock: 18, groups: [[2, 32]] },
-  { ecPerBlock: 24, groups: [[2, 43]] },
-  { ecPerBlock: 16, groups: [[4, 27]] },
-  { ecPerBlock: 18, groups: [[4, 31]] },
-  { ecPerBlock: 22, groups: [[2, 38], [2, 39]] },
-  { ecPerBlock: 22, groups: [[3, 36], [2, 37]] },
-  { ecPerBlock: 26, groups: [[4, 43], [1, 44]] }
-];
-var GF_EXP = new Uint8Array(512);
-var GF_LOG = new Uint8Array(256);
-{
-  let x = 1;
-  for (let i = 0; i < 255; i++) {
-    GF_EXP[i] = x;
-    GF_LOG[x] = i;
-    x <<= 1;
-    if ((x & 256) !== 0) x ^= 285;
-  }
-  for (let i = 255; i < 512; i++) GF_EXP[i] = GF_EXP[i - 255] ?? 0;
-}
-function gfMul(a, b) {
-  if (a === 0 || b === 0) return 0;
-  return GF_EXP[(GF_LOG[a] ?? 0) + (GF_LOG[b] ?? 0)] ?? 0;
-}
-function polyMul(a, b) {
-  const result = new Array(a.length + b.length - 1).fill(0);
-  for (let i = 0; i < a.length; i++) {
-    for (let j = 0; j < b.length; j++) {
-      result[i + j] ^= gfMul(a[i] ?? 0, b[j] ?? 0);
-    }
-  }
-  return result;
-}
-function rsGeneratorPoly(degree) {
-  let poly = [1];
-  for (let i = 0; i < degree; i++) {
-    poly = polyMul(poly, [1, GF_EXP[i] ?? 0]);
-  }
-  return poly;
-}
-function rsEncode(data, ecCount) {
-  const gen = rsGeneratorPoly(ecCount);
-  const buf = [...data, ...new Array(ecCount).fill(0)];
-  for (let i = 0; i < data.length; i++) {
-    const coef = buf[i] ?? 0;
-    if (coef === 0) continue;
-    for (let j = 0; j < gen.length; j++) {
-      buf[i + j] ^= gfMul(gen[j] ?? 0, coef);
-    }
-  }
-  return buf.slice(data.length);
-}
-function pickVersion(byteLength) {
-  for (let version = 1; version <= 10; version++) {
-    const capacityBits = (DATA_CODEWORDS[version] ?? 0) * 8;
-    const overheadBits = 4 + (version <= 9 ? 8 : 16);
-    if (overheadBits + byteLength * 8 <= capacityBits) return version;
-  }
-  return void 0;
-}
-function buildCodewords(bytes, version) {
-  const blocks = EC_BLOCKS_M[version];
-  if (blocks === void 0) throw new Error(`raccoon: \u4E0D\u652F\u6301\u7684\u4E8C\u7EF4\u7801\u7248\u672C ${version}`);
-  const totalDataCodewords = DATA_CODEWORDS[version] ?? 0;
-  const capacityBits = totalDataCodewords * 8;
-  const bits = [];
-  const pushBits = (value, length) => {
-    for (let i = length - 1; i >= 0; i--) bits.push(value >> i & 1);
-  };
-  pushBits(4, 4);
-  pushBits(bytes.length, version <= 9 ? 8 : 16);
-  for (const byte of bytes) pushBits(byte, 8);
-  const terminator = Math.min(4, capacityBits - bits.length);
-  pushBits(0, terminator);
-  while (bits.length % 8 !== 0) bits.push(0);
-  const PAD_BYTES = [236, 17];
-  for (let i = 0; bits.length < capacityBits; i++) {
-    pushBits(PAD_BYTES[i % 2] ?? 0, 8);
-  }
-  const dataCodewords = [];
-  for (let i = 0; i < bits.length; i += 8) {
-    let byte = 0;
-    for (let j = 0; j < 8; j++) byte = byte << 1 | (bits[i + j] ?? 0);
-    dataCodewords.push(byte);
-  }
-  const dataBlocks = [];
-  const ecBlocks = [];
-  let offset = 0;
-  for (const [count2, dataPerBlock] of blocks.groups) {
-    for (let b = 0; b < count2; b++) {
-      const block = dataCodewords.slice(offset, offset + dataPerBlock);
-      offset += dataPerBlock;
-      dataBlocks.push(block);
-      ecBlocks.push(rsEncode(block, blocks.ecPerBlock));
-    }
-  }
-  const result = [];
-  const maxDataLen = Math.max(...dataBlocks.map((b) => b.length));
-  for (let i = 0; i < maxDataLen; i++) {
-    for (const block of dataBlocks) {
-      if (i < block.length) result.push(block[i] ?? 0);
-    }
-  }
-  for (let i = 0; i < blocks.ecPerBlock; i++) {
-    for (const block of ecBlocks) {
-      result.push(block[i] ?? 0);
-    }
-  }
-  return result;
-}
-function alignmentPositions(version, size) {
-  if (version === 1) return [];
-  const numAlign = Math.floor(version / 7) + 2;
-  const step = Math.ceil((version * 4 + 4) / (numAlign * 2 - 2)) * 2;
-  const result = [6];
-  for (let pos = size - 7; result.length < numAlign; pos -= step) {
-    result.splice(1, 0, pos);
-  }
-  return result;
-}
-function drawFinderPattern(modules, isFunction, size, x, y) {
-  for (let dy = -4; dy <= 4; dy++) {
-    for (let dx = -4; dx <= 4; dx++) {
-      const xx = x + dx;
-      const yy = y + dy;
-      if (xx < 0 || xx >= size || yy < 0 || yy >= size) continue;
-      const dist = Math.max(Math.abs(dx), Math.abs(dy));
-      const dark = dist !== 2 && dist !== 4;
-      modules[yy][xx] = dark;
-      isFunction[yy][xx] = true;
-    }
-  }
-}
-function drawAlignmentPattern(modules, isFunction, x, y) {
-  for (let dy = -2; dy <= 2; dy++) {
-    for (let dx = -2; dx <= 2; dx++) {
-      const dark = Math.max(Math.abs(dx), Math.abs(dy)) !== 1;
-      modules[y + dy][x + dx] = dark;
-      isFunction[y + dy][x + dx] = true;
-    }
-  }
-}
-function drawFunctionPatterns(modules, isFunction, size, version) {
-  for (let i = 0; i < size; i++) {
-    const dark = i % 2 === 0;
-    modules[6][i] = dark;
-    isFunction[6][i] = true;
-    modules[i][6] = dark;
-    isFunction[i][6] = true;
-  }
-  drawFinderPattern(modules, isFunction, size, 3, 3);
-  drawFinderPattern(modules, isFunction, size, size - 4, 3);
-  drawFinderPattern(modules, isFunction, size, 3, size - 4);
-  const positions = alignmentPositions(version, size);
-  const n = positions.length;
-  for (let i = 0; i < n; i++) {
-    for (let j = 0; j < n; j++) {
-      const isCorner = i === 0 && j === 0 || i === 0 && j === n - 1 || i === n - 1 && j === 0;
-      if (isCorner) continue;
-      drawAlignmentPattern(modules, isFunction, positions[i] ?? 0, positions[j] ?? 0);
-    }
-  }
-  drawFormatBits(modules, isFunction, size, 0);
-  if (version >= 7) {
-    let rem = version;
-    for (let i = 0; i < 12; i++) {
-      rem = rem << 1 ^ (rem >>> 11) * 7973;
-    }
-    const bits = version << 12 | rem;
-    for (let i = 0; i < 18; i++) {
-      const dark = (bits >> i & 1) === 1;
-      const a = size - 11 + i % 3;
-      const b = Math.floor(i / 3);
-      modules[b][a] = dark;
-      isFunction[b][a] = true;
-      modules[a][b] = dark;
-      isFunction[a][b] = true;
-    }
-  }
-}
-function drawFormatBits(modules, isFunction, size, mask) {
-  const data = 0 << 3 | mask;
-  let rem = data;
-  for (let i = 0; i < 10; i++) {
-    rem = rem << 1 ^ (rem >>> 9) * 1335;
-  }
-  const bits = (data << 10 | rem) ^ 21522;
-  const set = (x, y, dark) => {
-    modules[y][x] = dark;
-    isFunction[y][x] = true;
-  };
-  const bit = (i) => (bits >> i & 1) === 1;
-  for (let i = 0; i <= 5; i++) set(8, i, bit(i));
-  set(8, 7, bit(6));
-  set(8, 8, bit(7));
-  set(7, 8, bit(8));
-  for (let i = 9; i < 15; i++) set(14 - i, 8, bit(i));
-  for (let i = 0; i < 8; i++) set(size - 1 - i, 8, bit(i));
-  for (let i = 8; i < 15; i++) set(8, size - 7 + (i - 8), bit(i));
-  set(8, size - 8, true);
-}
-function drawCodewords(modules, isFunction, size, codewords) {
-  let i = 0;
-  for (let right = size - 1; right >= 1; right -= 2) {
-    if (right === 6) right = 5;
-    for (let vert = 0; vert < size; vert++) {
-      for (let j = 0; j < 2; j++) {
-        const x = right - j;
-        const upward = (right + 1 & 2) === 0;
-        const y = upward ? size - 1 - vert : vert;
-        if (isFunction[y][x] !== true && i < codewords.length * 8) {
-          const byte = codewords[i >>> 3] ?? 0;
-          modules[y][x] = (byte >> 7 - (i & 7) & 1) === 1;
-          i++;
-        }
-      }
-    }
-  }
-}
-function applyMask(modules, isFunction, size, mask) {
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      if (isFunction[y][x] === true) continue;
-      let invert;
-      switch (mask) {
-        case 0:
-          invert = (x + y) % 2 === 0;
-          break;
-        case 1:
-          invert = y % 2 === 0;
-          break;
-        case 2:
-          invert = x % 3 === 0;
-          break;
-        case 3:
-          invert = (x + y) % 3 === 0;
-          break;
-        case 4:
-          invert = (Math.floor(y / 2) + Math.floor(x / 3)) % 2 === 0;
-          break;
-        case 5:
-          invert = x * y % 2 + x * y % 3 === 0;
-          break;
-        case 6:
-          invert = (x * y % 2 + x * y % 3) % 2 === 0;
-          break;
-        default:
-          invert = ((x + y) % 2 + x * y % 3) % 2 === 0;
-          break;
-      }
-      if (invert) modules[y][x] = !modules[y][x];
-    }
-  }
-}
-function computePenalty(modules, size) {
-  const N1 = 3;
-  const N2 = 3;
-  const N3 = 40;
-  const N4 = 10;
-  let result = 0;
-  for (let y = 0; y < size; y++) {
-    const row = modules[y];
-    result += penaltyForLine(row, size, N1, N3);
-  }
-  for (let x = 0; x < size; x++) {
-    const col = [];
-    for (let y = 0; y < size; y++) col.push(modules[y][x] === true);
-    result += penaltyForLine(col, size, N1, N3);
-  }
-  for (let y = 0; y < size - 1; y++) {
-    for (let x = 0; x < size - 1; x++) {
-      const c = modules[y][x];
-      if (c === modules[y][x + 1] && c === modules[y + 1][x] && c === modules[y + 1][x + 1]) {
-        result += N2;
-      }
-    }
-  }
-  let dark = 0;
-  for (const row of modules) {
-    for (const cell of row) if (cell) dark++;
-  }
-  const total = size * size;
-  const k = Math.ceil(Math.abs(dark * 20 - total * 10) / total) - 1;
-  result += Math.max(0, k) * N4;
-  return result;
-}
-function penaltyForLine(line2, size, N1, N3) {
-  let result = 0;
-  let runLength = 1;
-  for (let i = 1; i < size; i++) {
-    if (line2[i] === line2[i - 1]) {
-      runLength++;
-    } else {
-      if (runLength >= 5) result += N1 + (runLength - 5);
-      runLength = 1;
-    }
-  }
-  if (runLength >= 5) result += N1 + (runLength - 5);
-  const PATTERN_A = [true, false, true, true, true, false, true, false, false, false, false];
-  const PATTERN_B = [false, false, false, false, true, false, true, true, true, false, true];
-  for (let i = 0; i + 11 <= size; i++) {
-    let matchA = true;
-    let matchB = true;
-    for (let j = 0; j < 11; j++) {
-      if (line2[i + j] !== PATTERN_A[j]) matchA = false;
-      if (line2[i + j] !== PATTERN_B[j]) matchB = false;
-      if (!matchA && !matchB) break;
-    }
-    if (matchA) result += N3;
-    if (matchB) result += N3;
-  }
-  return result;
-}
-function buildQrMatrix(text, options = {}) {
-  const level = options.errorCorrection ?? "M";
-  if (level !== "M") {
-    throw new Error(`raccoon: \u4E8C\u7EF4\u7801\u76EE\u524D\u53EA\u652F\u6301\u7EA0\u9519\u7B49\u7EA7 M\uFF08\u6536\u5230 ${level}\uFF09`);
-  }
-  const forcedMask = options.mask;
-  if (forcedMask !== void 0 && (!Number.isInteger(forcedMask) || forcedMask < 0 || forcedMask > 7)) {
-    throw new Error(`raccoon: \u63A9\u7801\u5FC5\u987B\u662F 0..7 \u7684\u6574\u6570\uFF08\u6536\u5230 ${String(forcedMask)}\uFF09`);
-  }
-  const bytes = Array.from(new TextEncoder().encode(text));
-  const version = pickVersion(bytes.length);
-  if (version === void 0) {
-    throw new Error(
-      `raccoon: \u4E8C\u7EF4\u7801\u5185\u5BB9\u8FC7\u957F\uFF08${bytes.length} \u5B57\u8282\uFF0C\u4E0A\u9650 213 \u5B57\u8282\uFF09\uFF0C\u8BF7\u7F29\u77ED\u5185\u5BB9`
-    );
-  }
-  const size = version * 4 + 17;
-  const modules = Array.from({ length: size }, () => new Array(size).fill(false));
-  const isFunction = Array.from({ length: size }, () => new Array(size).fill(false));
-  drawFunctionPatterns(modules, isFunction, size, version);
-  drawCodewords(modules, isFunction, size, buildCodewords(bytes, version));
-  let bestMask = 0;
-  if (forcedMask !== void 0) {
-    bestMask = forcedMask;
-  } else {
-    let bestPenalty = Number.POSITIVE_INFINITY;
-    for (let mask = 0; mask < 8; mask++) {
-      applyMask(modules, isFunction, size, mask);
-      drawFormatBits(modules, isFunction, size, mask);
-      const penalty = computePenalty(modules, size);
-      if (penalty < bestPenalty) {
-        bestPenalty = penalty;
-        bestMask = mask;
-      }
-      applyMask(modules, isFunction, size, mask);
-    }
-  }
-  applyMask(modules, isFunction, size, bestMask);
-  drawFormatBits(modules, isFunction, size, bestMask);
-  return { size, modules };
-}
-function renderQrSvg(text, options = {}) {
-  const px = options.size ?? 158;
-  const margin = options.margin ?? 4;
-  const dark = options.dark ?? "#000000";
-  const light = options.light ?? "#ffffff";
-  const { size, modules } = buildQrMatrix(text);
-  const dim = size + margin * 2;
-  const segments = [];
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
-      if (modules[y]?.[x] === true) {
-        segments.push(`M${x + margin},${y + margin}h1v1h-1z`);
-      }
-    }
-  }
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 ${dim} ${dim}" shape-rendering="crispEdges" role="img"><rect width="${dim}" height="${dim}" fill="${light}"/><path d="${segments.join("")}" fill="${dark}"/></svg>`;
-}
-
-// vendor/channel-pack/src/raccoon-login-page.ts
-var RACCOON_LOGIN_PAGE_PATHS = {
-  login: "/raccoon/login",
-  poll: "/raccoon/poll",
-  smsSend: "/raccoon/sms/send",
-  smsVerify: "/raccoon/sms/verify"
-};
-async function startRaccoonLoginFlow(options = {}) {
-  const product = options.product ?? RACCOON;
-  const fetcher = options.fetcher ?? fetch;
-  const state = {
-    qrCode: generateQrCode(),
-    phone: "",
-    lastExpiredAt: void 0
-  };
-  let resolveResult;
-  let rejectResult;
-  const result = new Promise((resolve2, reject) => {
-    resolveResult = resolve2;
-    rejectResult = reject;
-  });
-  result.catch(() => {
-  });
-  let settled = false;
-  const settleOk = (value) => {
-    if (settled) return;
-    settled = true;
-    resolveResult(value);
-  };
-  const settleErr = (error) => {
-    if (settled) return;
-    settled = true;
-    rejectResult(error);
-  };
-  const server = createServer5((request2, response) => {
-    void handleRequest2(request2, response, { state, product, fetcher, settleOk }).catch(
-      (error) => {
-        try {
-          response.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" }).end(`\u5185\u90E8\u9519\u8BEF\uFF1A${error instanceof Error ? error.message : String(error)}`);
-        } catch {
-        }
-      }
-    );
-  });
-  const port = await listenOnRandomPort3(server);
-  const loginUrl = `http://127.0.0.1:${port}${RACCOON_LOGIN_PAGE_PATHS.login}`;
-  let closed = false;
-  const close = async () => {
-    if (closed) return;
-    closed = true;
-    settleErr(new Error("raccoon: \u767B\u5F55\u6D41\u7A0B\u5DF2\u5173\u95ED"));
-    await new Promise((resolve2) => {
-      server.close(() => resolve2());
-    });
-  };
-  const timeoutMs = options.timeoutMs ?? RACCOON_LOGIN_TIMEOUT_MS;
-  const timer = setTimeout(() => {
-    settleErr(new Error(`raccoon: \u767B\u5F55\u8D85\u65F6\uFF08${Math.round(timeoutMs / 1e3)} \u79D2\u5185\u672A\u5B8C\u6210\uFF09`));
-  }, timeoutMs);
-  timer.unref?.();
-  void result.catch(() => {
-  }).finally(() => {
-    clearTimeout(timer);
-    if (!closed) {
-      closed = true;
-      void new Promise((resolve2) => {
-        server.close(() => resolve2());
-      });
-    }
-  });
-  return { loginUrl, result, close };
-}
-async function handleRequest2(request2, response, deps) {
-  const url = new URL(request2.url ?? "/", `http://127.0.0.1:${request2.socket.localPort ?? 0}`);
-  const { state, product } = deps;
-  if (url.pathname === RACCOON_LOGIN_PAGE_PATHS.login) {
-    response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
-    response.end(renderRaccoonLoginPage(product, state.qrCode));
-    return;
-  }
-  if (url.pathname === RACCOON_LOGIN_PAGE_PATHS.poll) {
-    const polled = await pollRaccoonQrLogin(product, state.qrCode, deps.fetcher);
-    if (polled.status === "success" && polled.accessToken !== void 0) {
-      const credential = {
-        access_token: polled.accessToken,
-        refresh_token: polled.refreshToken ?? "",
-        ...polled.expiresAt !== void 0 ? { expires_at: polled.expiresAt } : {}
-      };
-      deps.settleOk(credential);
-      writeJson2(response, { status: "success" });
-      return;
-    }
-    if (polled.expiredAt !== void 0) state.lastExpiredAt = polled.expiredAt;
-    if (polled.status === "canceled") {
-      state.qrCode = generateQrCode();
-    }
-    writeJson2(response, {
-      status: polled.status,
-      ...polled.expiredAt !== void 0 ? { expiredAt: polled.expiredAt } : {},
-      // code 变化时把新二维码给页面（页面据此换图）
-      ...polled.status === "canceled" ? { qr: renderQrSvg(buildQrImageUrl(product, state.qrCode)) } : {}
-    });
-    return;
-  }
-  if (url.pathname === RACCOON_LOGIN_PAGE_PATHS.smsSend && request2.method === "POST") {
-    const body = await readJsonBody2(request2);
-    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
-    const captchaParam = typeof body.captchaParam === "string" ? body.captchaParam : "";
-    if (!/^1[3-9]\d{9}$/.test(phone)) {
-      response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-      response.end(JSON.stringify({ ok: false, message: "\u8BF7\u8F93\u5165\u6709\u6548\u7684 11 \u4F4D\u624B\u673A\u53F7" }));
-      return;
-    }
-    try {
-      await sendRaccoonSmsCode(product, phone, captchaParam, deps.fetcher);
-      state.phone = phone;
-      writeJson2(response, { ok: true });
-    } catch (error) {
-      writeJson2(response, {
-        ok: false,
-        message: error instanceof Error ? error.message : String(error)
-      });
-    }
-    return;
-  }
-  if (url.pathname === RACCOON_LOGIN_PAGE_PATHS.smsVerify && request2.method === "POST") {
-    const body = await readJsonBody2(request2);
-    const smsCode = typeof body.smsCode === "string" ? body.smsCode.trim() : "";
-    if (state.phone.length === 0) {
-      response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-      response.end(JSON.stringify({ ok: false, message: "\u8BF7\u5148\u83B7\u53D6\u624B\u673A\u9A8C\u8BC1\u7801" }));
-      return;
-    }
-    if (smsCode.length === 0) {
-      response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
-      response.end(JSON.stringify({ ok: false, message: "\u8BF7\u8F93\u5165\u9A8C\u8BC1\u7801" }));
-      return;
-    }
-    try {
-      const credential = await loginRaccoonWithSmsCode(product, state.phone, smsCode, deps.fetcher);
-      deps.settleOk(credential);
-      writeJson2(response, { ok: true });
-    } catch (error) {
-      writeJson2(response, {
-        ok: false,
-        message: error instanceof Error ? error.message : String(error)
-      });
-    }
-    return;
-  }
-  response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" }).end("Not found");
-}
-function writeJson2(response, payload) {
-  response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
-  response.end(JSON.stringify(payload));
-}
-async function readJsonBody2(request2) {
-  const chunks = [];
-  let total = 0;
-  for await (const chunk of request2) {
-    const buf = chunk;
-    total += buf.length;
-    if (total > 64 * 1024) throw new Error("\u8BF7\u6C42\u4F53\u8FC7\u5927");
-    chunks.push(buf);
-  }
-  const text = Buffer.concat(chunks).toString("utf-8");
-  if (text.length === 0) return {};
-  try {
-    const parsed = JSON.parse(text);
-    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    throw new Error("\u8BF7\u6C42\u4F53\u4E0D\u662F\u5408\u6CD5 JSON");
-  }
-}
-function listenOnRandomPort3(server) {
-  return new Promise((resolve2, reject) => {
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      const port = typeof address === "object" && address !== null ? address.port : 0;
-      if (port === 0) {
-        reject(new Error("raccoon: \u672C\u5730\u767B\u5F55\u9875\u670D\u52A1\u5668\u672A\u80FD\u83B7\u5F97\u7AEF\u53E3"));
-        return;
-      }
-      resolve2(port);
-    });
-  });
-}
-function renderRaccoonLoginPage(product, qrCode) {
-  const code = qrCode ?? generateQrCode();
-  const qrSvg = renderQrSvg(buildQrImageUrl(product, code), { size: 200 });
-  return `<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Raccoon Work \u767B\u5F55</title>
-<style>
-  :root { color-scheme: light; }
-  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
-         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
-         background: #f5f6f8; color: #1f2329; }
-  .card { background: #fff; border-radius: 12px; padding: 20px 24px 24px; box-shadow: 0 4px 24px rgba(0,0,0,.08);
-          text-align: center; width: 320px; }
-  h1 { font-size: 16px; margin: 0 0 14px; font-weight: 600; }
-  .tabs { display: flex; gap: 4px; background: #f2f3f5; border-radius: 8px; padding: 4px; margin-bottom: 16px; }
-  .tabs button { flex: 1; padding: 7px; font-size: 13px; border: 0; border-radius: 6px;
-                 background: transparent; color: #4e5969; cursor: pointer; }
-  .tabs button[data-active="1"] { background: #fff; color: #1f2329; font-weight: 600;
-                                  box-shadow: 0 1px 3px rgba(0,0,0,.08); }
-  .pane { display: none; }
-  .pane[data-show="1"] { display: block; }
-  /* \u4E8C\u7EF4\u7801\u5BB9\u5668\uFF1ASVG \u81EA\u9002\u5E94\u586B\u5145\uFF08SVG \u81EA\u5E26 width/height \u4E0E viewBox\uFF09 */
-  .qr { width: 200px; height: 200px; display: block; margin: 0 auto; border: 1px solid #eceef1;
-        border-radius: 8px; padding: 6px; box-sizing: content-box; background: #fff; }
-  .qr svg { display: block; width: 100%; height: 100%; }
-  .sub { font-size: 12px; color: #8a9099; margin: 10px 0 0; }
-  .status { margin-top: 12px; font-size: 13px; color: #4e5969; min-height: 20px; }
-  .status[data-tone="ok"] { color: #0f9d58; font-weight: 600; }
-  .status[data-tone="err"] { color: #d93026; }
-  label { display: block; font-size: 12px; color: #8a9099; margin-bottom: 4px; text-align: left; }
-  input { width: 100%; box-sizing: border-box; padding: 8px 10px; font-size: 14px; margin-bottom: 10px;
-          border: 1px solid #d9dde3; border-radius: 6px; }
-  button.primary { width: 100%; padding: 9px; font-size: 14px; border: 0; border-radius: 6px;
-                   background: #8E6BF2; color: #fff; cursor: pointer; }
-  button.primary:disabled { background: #c9cdd4; cursor: not-allowed; }
-  .row { display: flex; gap: 8px; align-items: flex-start; }
-  .row input { margin-bottom: 10px; }
-  #captcha-element { margin-bottom: 10px; }
-</style>
-</head>
-<body>
-  <div class="card">
-    <h1>\u767B\u5F55 Raccoon Work</h1>
-
-    <div class="tabs">
-      <button id="tabQr" data-active="1" type="button">\u5FAE\u4FE1\u626B\u7801</button>
-      <button id="tabSms" data-active="0" type="button">\u77ED\u4FE1\u767B\u5F55</button>
-    </div>
-
-    <div class="pane" id="paneQr" data-show="1">
-      <div class="qr" id="qrBox">${qrSvg}</div>
-      <p class="sub">\u6253\u5F00\u5FAE\u4FE1\u626B\u4E00\u626B\uFF0C\u626B\u63CF\u4E0A\u65B9\u4E8C\u7EF4\u7801</p>
-      <div class="status" id="qrStatus">\u7B49\u5F85\u626B\u7801\u2026</div>
-    </div>
-
-    <div class="pane" id="paneSms" data-show="0">
-      <label for="phone">\u624B\u673A\u53F7</label>
-      <div class="row">
-        <input id="phone" type="tel" inputmode="numeric" maxlength="11" placeholder="\u8BF7\u8F93\u5165 11 \u4F4D\u624B\u673A\u53F7">
-        <button class="primary" id="sendCode" type="button" style="width:auto;white-space:nowrap;padding:9px 12px;">\u83B7\u53D6\u9A8C\u8BC1\u7801</button>
-      </div>
-      <div id="captcha-element"></div>
-      <label for="smsCode">\u9A8C\u8BC1\u7801</label>
-      <input id="smsCode" type="text" inputmode="numeric" maxlength="6" placeholder="\u8BF7\u8F93\u5165 6 \u4F4D\u9A8C\u8BC1\u7801">
-      <button class="primary" id="doLogin" type="button">\u767B\u5F55</button>
-      <div class="status" id="smsStatus"></div>
-    </div>
-  </div>
-
-<script src="https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js"></script>
-<script>
-(function () {
-  'use strict';
-  var POLL_INTERVAL_MS = 2000;
-  var paths = ${JSON.stringify(RACCOON_LOGIN_PAGE_PATHS)};
-
-  // \u2500\u2500 Tab \u5207\u6362 \u2500\u2500
-  var tabQr = document.getElementById('tabQr');
-  var tabSms = document.getElementById('tabSms');
-  var paneQr = document.getElementById('paneQr');
-  var paneSms = document.getElementById('paneSms');
-  function selectTab(sms) {
-    tabQr.setAttribute('data-active', sms ? '0' : '1');
-    tabSms.setAttribute('data-active', sms ? '1' : '0');
-    paneQr.setAttribute('data-show', sms ? '0' : '1');
-    paneSms.setAttribute('data-show', sms ? '1' : '0');
-  }
-  tabQr.addEventListener('click', function () { selectTab(false); });
-  tabSms.addEventListener('click', function () { selectTab(true); });
-
-  // \u2500\u2500 \u626B\u7801\u8F6E\u8BE2 \u2500\u2500
-  var qrStatus = document.getElementById('qrStatus');
-  var qrBox = document.getElementById('qrBox');
-  var pollTimer = null;
-  function setQrStatus(text, tone) {
-    qrStatus.textContent = text;
-    if (tone) { qrStatus.setAttribute('data-tone', tone); } else { qrStatus.removeAttribute('data-tone'); }
-  }
-  function pollOnce() {
-    fetch(paths.poll).then(function (r) { return r.json(); }).then(function (data) {
-      if (data.status === 'success') {
-        setQrStatus('\u767B\u5F55\u6210\u529F\uFF0C\u53EF\u4EE5\u5173\u95ED\u6B64\u7A97\u53E3\u4E86', 'ok');
-        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-        setTimeout(function () { window.close(); }, 1200);
-        return;
-      }
-      if (data.status === 'logging') { setQrStatus('\u5DF2\u626B\u7801\uFF0C\u8BF7\u5728\u5FAE\u4FE1\u4E2D\u786E\u8BA4\u2026'); return; }
-      if (data.status === 'canceled') {
-        if (data.qr) { qrBox.innerHTML = data.qr; }
-        setQrStatus('\u4E8C\u7EF4\u7801\u5DF2\u5237\u65B0\uFF0C\u8BF7\u91CD\u65B0\u626B\u7801');
-        return;
-      }
-      setQrStatus('\u7B49\u5F85\u626B\u7801\u2026');
-    }).catch(function () {
-      // \u8F6E\u8BE2\u5076\u53D1\u5931\u8D25\u4E0D\u6253\u65AD\uFF08\u4E0B\u4E00\u6B21\u7EE7\u7EED\uFF09
-    });
-  }
-  pollTimer = setInterval(pollOnce, POLL_INTERVAL_MS);
-  pollOnce();
-
-  // \u2500\u2500 \u77ED\u4FE1\u767B\u5F55 \u2500\u2500
-  var smsStatus = document.getElementById('smsStatus');
-  var phoneInput = document.getElementById('phone');
-  var smsCodeInput = document.getElementById('smsCode');
-  var sendBtn = document.getElementById('sendCode');
-  var loginBtn = document.getElementById('doLogin');
-  var captchaInstance = null;
-  var pendingCaptcha = null;
-
-  function setSmsStatus(text, tone) {
-    smsStatus.textContent = text || '';
-    if (tone) { smsStatus.setAttribute('data-tone', tone); } else { smsStatus.removeAttribute('data-tone'); }
-  }
-
-  function submitSmsSend(captchaParam) {
-    var phone = (phoneInput.value || '').trim();
-    if (!/^1[3-9]\\d{9}$/.test(phone)) {
-      setSmsStatus('\u8BF7\u8F93\u5165\u6709\u6548\u7684 11 \u4F4D\u624B\u673A\u53F7', 'err');
-      return;
-    }
-    sendBtn.disabled = true;
-    setSmsStatus('\u53D1\u9001\u4E2D\u2026');
-    fetch(paths.smsSend, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ phone: phone, captchaParam: captchaParam || '' })
-    }).then(function (r) { return r.json(); }).then(function (data) {
-      if (data && data.ok) { setSmsStatus('\u9A8C\u8BC1\u7801\u5DF2\u53D1\u9001\uFF0C\u8BF7\u67E5\u6536\u77ED\u4FE1', 'ok'); }
-      else { setSmsStatus((data && data.message) || '\u53D1\u9001\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5', 'err'); }
-    }).catch(function () {
-      setSmsStatus('\u53D1\u9001\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u540E\u91CD\u8BD5', 'err');
-    }).finally(function () {
-      sendBtn.disabled = false;
-    });
-  }
-
-  // \u963F\u91CC\u4E91\u6ED1\u5757\uFF1A\u771F\u5B9E\u52A0\u8F7D\u5B98\u65B9\u811A\u672C\uFF08SceneId / prefix \u6765\u81EA\u5BA2\u6237\u7AEF\u914D\u7F6E\uFF09\u3002
-  function initCaptcha() {
-    if (typeof window.initAliyunCaptcha !== 'function') { return false; }
-    window.initAliyunCaptcha({
-      SceneId: '${product.aliyunCaptcha.sceneId}',
-      prefix: '${product.aliyunCaptcha.prefix}',
-      mode: 'popup',
-      element: '#captcha-element',
-      button: '#sendCode',
-      captchaVerifyCallback: function (captchaParam) {
-        pendingCaptcha = captchaParam;
-        submitSmsSend(captchaParam);
-        return { captchaResult: true, bizResult: true };
-      },
-      onBizResultCallback: function () { return null; },
-      getInstance: function (instance) { captchaInstance = instance; return null; },
-      slideStyle: { width: 320, height: 40 },
-      language: 'cn'
-    });
-    return true;
-  }
-  var captchaReady = initCaptcha();
-  sendBtn.addEventListener('click', function () {
-    if (!captchaReady) { captchaReady = initCaptcha(); }
-    if (!captchaReady) {
-      // \u811A\u672C\u672A\u52A0\u8F7D\uFF08\u79BB\u7EBF/\u88AB\u62E6\u622A\uFF09\uFF1A\u9000\u5316\u4E3A\u76F4\u63A5\u63D0\u4EA4\uFF0C\u8BA9\u670D\u52A1\u7AEF\u62A5\u660E\u786E\u539F\u56E0
-      // \uFF08\u5B9E\u6D4B\u4F1A\u56DE captcha_verify_error\uFF0C\u9875\u9762\u636E\u6B64\u63D0\u793A\u7528\u6237\uFF09\u3002
-      setSmsStatus('\u9A8C\u8BC1\u7801\u7EC4\u4EF6\u672A\u52A0\u8F7D\uFF0C\u6B63\u5728\u5C1D\u8BD5\u76F4\u63A5\u53D1\u9001\u2026');
-      submitSmsSend('');
-    }
-  });
-
-  loginBtn.addEventListener('click', function () {
-    var code = (smsCodeInput.value || '').trim();
-    if (!code) { setSmsStatus('\u8BF7\u8F93\u5165\u9A8C\u8BC1\u7801', 'err'); return; }
-    loginBtn.disabled = true;
-    setSmsStatus('\u767B\u5F55\u4E2D\u2026');
-    fetch(paths.smsVerify, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ smsCode: code })
-    }).then(function (r) { return r.json(); }).then(function (data) {
-      if (data && data.ok) {
-        setSmsStatus('\u767B\u5F55\u6210\u529F\uFF0C\u53EF\u4EE5\u5173\u95ED\u6B64\u7A97\u53E3\u4E86', 'ok');
-        setTimeout(function () { window.close(); }, 1200);
-      } else {
-        setSmsStatus((data && data.message) || '\u9A8C\u8BC1\u7801\u4E0D\u6B63\u786E\uFF0C\u8BF7\u91CD\u8BD5', 'err');
-      }
-    }).catch(function () {
-      setSmsStatus('\u767B\u5F55\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u540E\u91CD\u8BD5', 'err');
-    }).finally(function () {
-      loginBtn.disabled = false;
-    });
-  });
-})();
-</script>
-</body>
-</html>`;
-}
-
-// vendor/channel-pack/src/raccoon-auth.ts
-var RACCOON_EXPIRY_ACCESSORS = {
-  expiresAtOf: raccoonCredentialExpiresAtMs,
-  refreshableOf: isRaccoonRefreshable,
-  identityOf: (credential) => credential.access_token ?? ""
-};
-var RefreshTokenExpiredError8 = class extends Error {
-  constructor(message2) {
-    super(message2);
-    this.name = "RefreshTokenExpiredError";
-  }
-};
-function parseRaccoonCredential(value) {
-  try {
-    const parsed = JSON.parse(value);
-    return typeof parsed === "object" && parsed !== null && typeof parsed.access_token === "string" ? parsed : void 0;
-  } catch {
-    return void 0;
-  }
-}
-function normalizeRemoteModel(entry) {
-  const id = typeof entry.name === "string" ? entry.name.trim() : "";
-  if (id.length === 0) return void 0;
-  if (entry.visible === false) return void 0;
-  const params = typeof entry.params === "object" && entry.params !== null ? entry.params : {};
-  const description = typeof entry.description === "string" && entry.description.length > 0 ? entry.description : id;
-  const effective = typeof entry.billing_effective_multiplier === "number" ? entry.billing_effective_multiplier : Number.NaN;
-  const base = typeof entry.billing_multiplier === "number" ? entry.billing_multiplier : Number.NaN;
-  const rawStatus = typeof entry.billing_status === "string" ? entry.billing_status : "";
-  const status = rawStatus === "discount" || rawStatus === "limited_free" ? rawStatus : "normal";
-  const statusNote = typeof entry.billing_status_note === "string" ? entry.billing_status_note : "";
-  const meta = {
-    id,
-    description,
-    effectiveMultiplier: effective,
-    baseMultiplier: base,
-    status,
-    statusNote
-  };
-  const readPositiveInt = (value) => {
-    return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : 0;
-  };
-  const tags = Array.isArray(entry.tags) ? entry.tags.filter((t) => typeof t === "string").map((t) => t.toLowerCase()) : [];
-  return {
-    id,
-    name: raccoonDisplayName(meta),
-    contextWindow: readPositiveInt(params.context_window ?? entry.context_window),
-    maxTokens: readPositiveInt(params.max_tokens),
-    // ⚠️ **不能只看 tags**：`vision` 是客户端「Raccoon-Auto 选模」的偏好标签，
-    // 不是服务端能力契约（远端根本没有模态字段，已穷举证实）。`tags` 不含
-    // `vision` 的 `sn-deepseek-v4-1-flash` 实测能看图（5/5 读对随机数字），
-    // 只认 tags 会让它被 DSH 投影成文本占位符 —— 图片根本发不出去。
-    // 证据与取舍见 `raccoon-product.ts` 的 RACCOON_IMAGE_CAPABILITY_OVERRIDES。
-    supportsImage: raccoonSupportsImage(id, tags)
-  };
-}
-var RaccoonAuth = class extends Service8 {
-  constructor(ctx, options = {}) {
-    const product = options.product ?? RACCOON;
-    super(ctx, options.serviceName ?? `${product.id}Auth`);
-    this.options = options;
-    this.product = product;
-    this.credentialRefName = this.product.defaultCredentialRef;
-  }
-  options;
-  /** 本实例所属的产品配置。 */
-  product;
-  /** 本实例默认读写的凭据 ref 名称。 */
-  credentialRefName;
-  /** 最近一次续期失败的原因（供 `status()` 暴露给 UI）。 */
-  lastRefreshError;
-  /** 注入的 fetch（测试用）；默认为全局 fetch。 */
-  get fetchImpl() {
-    return this.options.fetcher ?? fetch;
-  }
-  /**
-   * 启动登录（微信扫码 + 短信双路径）。
-   *
-   * 起本地服务器承载弹窗页，**立即返回 `loginUrl`** —— 与其余 provider 的
-   * 「两步式」契约一致（`window.open` 只在用户手势窗口内有效，
-   * 不能等流程跑完再返回）。
-   */
-  async startLogin() {
-    return startRaccoonLoginFlow({
-      product: this.product,
-      ...this.options.fetcher === void 0 ? {} : { fetcher: this.options.fetcher }
-    });
-  }
-  /**
-   * 把登录结果落盘成凭据。
-   *
-   * 与 `startLogin` 分开：流程编排（本地服务器 + 轮询 + 表单）在
-   * `raccoon-login-page.ts` 里，本方法只负责「补全用户信息 + 写凭据 +
-   * 静默领取一次性登录奖励」。
-   */
-  async persistLogin(credential, flowOptions = {}) {
-    const refName = flowOptions.refName ?? this.credentialRefName;
-    let enriched = credential;
-    if (credential.nickname === void 0 || credential.user_id === void 0 || credential.phone === void 0) {
-      const info = await fetchRaccoonUserInfo(this.product, credential, this.fetchImpl);
-      enriched = {
-        ...credential,
-        ...info.userId !== void 0 && credential.user_id === void 0 ? { user_id: info.userId } : {},
-        ...info.nickname !== void 0 && credential.nickname === void 0 ? { nickname: info.nickname } : {},
-        ...info.officeIdentity !== void 0 && credential.office_identity === void 0 ? { office_identity: info.officeIdentity } : {},
-        // ⚠️ 手机号专门为**多账号消歧**而存：远端的 `name` 是自动生成的默认名
-        //（实测 `RaccoonAva`），微信扫码不回传微信昵称，故多个账号会重名。
-        ...info.phone !== void 0 && credential.phone === void 0 ? { phone: info.phone } : {}
-      };
-    }
-    const ref = credentialRef9(refName);
-    await this.ctx.credentials.set(ref, JSON.stringify(enriched));
-    this.lastRefreshError = void 0;
-    try {
-      await claimRaccoonLoginReward(this.product, enriched, this.fetchImpl);
-    } catch (error) {
-      this.ctx.logger?.warn?.(
-        `[raccoon] \u767B\u5F55\u540E\u9886\u53D6\u767B\u5F55\u5956\u52B1\u5931\u8D25\uFF08\u4E0D\u5F71\u54CD\u767B\u5F55\uFF09\uFF1A${error instanceof Error ? error.message : String(error)}`
-      );
-    }
-    return {
-      access: JSON.stringify(enriched),
-      expires: decodeJwtExpMs(enriched.access_token) ?? 0,
-      ref,
-      refreshable: isRaccoonRefreshable(enriched)
-    };
-  }
-  /** 只读登录状态。 */
-  async status() {
-    const credential = await this.resolveDefaultCredential();
-    if (credential === void 0) return { configured: false, refreshable: false };
-    const expiresAt = decodeJwtExpMs(credential.access_token);
-    return {
-      configured: true,
-      source: this.credentialRefName,
-      ...expiresAt === void 0 ? {} : { expiresAt },
-      refreshable: isRaccoonRefreshable(credential),
-      ...this.lastRefreshError === void 0 ? {} : { refreshError: this.lastRefreshError }
-    };
-  }
-  /** 解析默认 ref 的凭据。 */
-  async resolveDefaultCredential() {
-    try {
-      const resolved = await this.ctx.credentials.resolve(credentialRef9(this.credentialRefName));
-      return resolved === void 0 ? void 0 : parseRaccoonCredential(resolved.value);
-    } catch {
-      return void 0;
-    }
-  }
-  /**
-   * 续期默认单凭据。
-   *
-   * @throws {RefreshTokenExpiredError} refresh_token 失效（需重新登录）。
-   */
-  async refresh() {
-    const credential = await this.resolveDefaultCredential();
-    if (credential === void 0) throw new RefreshTokenExpiredError8("\u51ED\u636E\u672A\u914D\u7F6E\uFF0C\u8BF7\u5148\u767B\u5F55");
-    if (!isRaccoonRefreshable(credential)) {
-      throw new RefreshTokenExpiredError8("\u51ED\u636E\u7F3A\u5C11 refresh_token\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55");
-    }
-    try {
-      const next = await refreshRaccoonCredential(this.product, credential, this.fetchImpl);
-      await this.ctx.credentials.set(credentialRef9(this.credentialRefName), JSON.stringify(next));
-      this.lastRefreshError = void 0;
-    } catch (error) {
-      const message2 = error instanceof Error ? error.message : String(error);
-      this.lastRefreshError = message2;
-      if (message2.includes("\u91CD\u65B0\u767B\u5F55")) throw new RefreshTokenExpiredError8(message2);
-      throw error;
-    }
-  }
-  /**
-   * 续期**指定 ref**（RPC `account.refresh` / 定时器）。
-   *
-   * ⚠️ 只读写传入的 ref，**不碰**默认单凭据 ref —— 账号池里的是
-   * `RACCOON_ACCOUNT_XXX`，用 `refresh()` 会刷错凭据。
-   * ⚠️ **不触碰** `lastRefreshError`：那属于单凭据路径，
-   * 被多账号操作污染会让 UI 显示错误的失效提示。
-   *
-   * ⚠️ **必须把新过期时间写回账号池**（真实缺陷，用户报障）：
-   * 只更新凭据、不更新账号池，会让 Channel Pack 一直显示「已过期」——
-   * 因为 UI 读的是账号池的 `expiresAt`，而它停留在续期前的旧值。
-   * 实测该账号的 JWT `exp` 已是 15:09（有效），账号池却是 12:02（已过期），
-   * **相差 3.1 小时**，UI 显示「已过期」但发消息完全正常。
-   *
-   * @param pool 账号池；提供时会把新 `expiresAt` / `refreshable` 写回。
-   * @param accountId 账号 id。**调用方已知时请显式传入** ——
-   *   否则只能按凭据内容反查（`findAccountIdByCredential` 遍历账号、
-   *   逐个解析凭据比对，代价高且需要账号池具备凭据访问能力）。
-   */
-  async refreshAccountCredential(refName, pool, accountId) {
-    const ref = credentialRef9(refName);
-    const resolved = await this.ctx.credentials.resolve(ref);
-    if (!resolved) throw new Error("\u51ED\u636E\u672A\u914D\u7F6E");
-    const credential = parseRaccoonCredential(resolved.value);
-    if (!credential) throw new Error("\u51ED\u636E\u89E3\u6790\u5931\u8D25");
-    if (!isRaccoonRefreshable(credential)) {
-      throw new RefreshTokenExpiredError8("\u51ED\u636E\u7F3A\u5C11 refresh_token\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55");
-    }
-    try {
-      const next = await refreshRaccoonCredential(this.product, credential, this.fetchImpl);
-      await this.ctx.credentials.set(ref, JSON.stringify(next));
-      await syncAccountExpiry({
-        pool,
-        provider: this.product.id,
-        credential: next,
-        accessors: RACCOON_EXPIRY_ACCESSORS,
-        accountId,
-        tag: "[raccoon]",
-        warn: (message2) => this.ctx.logger?.warn?.(message2)
-      });
-    } catch (error) {
-      const message2 = error instanceof Error ? error.message : String(error);
-      if (message2.includes("\u91CD\u65B0\u767B\u5F55")) throw new RefreshTokenExpiredError8(message2);
-      throw error;
-    }
-  }
-  /**
-   * 说明：原先这里有一份私有的 `syncAccountExpiry`（把续期后的过期时间写回
-   * 账号池，失败只记日志不上抛）。它已被抽到 `src/expiry-sync.ts` 成为九个
-   * provider 共用的实现 —— 三条硬规矩（失败不反噬、优先用调用方的 accountId、
-   * 反查要传**凭据内容**而非 ref 名）都随之外移并记在那份文件的注释里。
-   */
-  /**
-   * 批量续期本产品的账号。
-   *
-   * ⚠️ **只按 `refreshable` 过滤，不看 `enabled`**：停用只影响账号池的
-   * 自动选号，与「凭据是否需要保持新鲜」无关。早期按 `enabled` 过滤导致
-   * 两个停用账号的 refresh_token 在停用期间被放到失效（真实缺陷，见 AGENTS.md）。
-   *
-   * 单账号失败不影响其他账号（且**必须留日志**：曾完全静默的实现
-   * 让「续期永远失败但 UI 显示可续期」无法排查）。
-   */
-  async refreshAll(pool) {
-    const accounts = await pool.listAccounts(this.product.id);
-    for (const entry of accounts) {
-      if (!entry.refreshable) continue;
-      const resolved = await this.ctx.credentials.resolve(credentialRef9(entry.credentialRef));
-      if (!resolved) continue;
-      const credential = parseRaccoonCredential(resolved.value);
-      if (credential === void 0) continue;
-      if (!isRaccoonExpired(credential)) {
-        const actual = raccoonCredentialExpiresAtMs(credential);
-        if (actual !== void 0 && Math.abs((entry.expiresAt ?? 0) - actual) > 1e3) {
-          try {
-            await pool.updateAccount(entry.id, { expiresAt: actual });
-            this.ctx.logger?.info?.(
-              `[raccoon] \u5DF2\u6821\u6B63\u8D26\u53F7 ${entry.id} \u7684\u6709\u6548\u671F\u663E\u793A\uFF08\u8D26\u53F7\u6C60 ${entry.expiresAt === void 0 ? "\u65E0" : new Date(entry.expiresAt).toISOString()} \u2192 ${new Date(actual).toISOString()}\uFF09`
-            );
-          } catch (error) {
-            this.ctx.logger?.warn?.(
-              `[raccoon] \u6821\u6B63\u8D26\u53F7 ${entry.id} \u7684\u6709\u6548\u671F\u5931\u8D25\uFF08\u4E0D\u5F71\u54CD\u4F7F\u7528\uFF09\uFF1A${error instanceof Error ? error.message : String(error)}`
-            );
-          }
-        }
-        continue;
-      }
-      try {
-        await this.refreshAccountCredential(entry.credentialRef, pool, entry.id);
-      } catch (error) {
-        if (error instanceof RefreshTokenExpiredError8) {
-          this.ctx.logger?.warn?.(`[raccoon] \u8D26\u53F7 ${entry.id} \u7684 refresh_token \u5DF2\u5931\u6548\uFF0C\u9700\u91CD\u65B0\u767B\u5F55`);
-        } else {
-          this.ctx.logger?.warn?.(
-            `[raccoon] \u8D26\u53F7 ${entry.id} \u7EED\u671F\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`
-          );
-        }
-      }
-    }
-  }
-  /** 登出：清除默认单凭据。 */
-  async logout() {
-    await this.ctx.credentials.unset(credentialRef9(this.credentialRefName));
-    this.lastRefreshError = void 0;
-  }
-  /**
-   * 拉取远端模型目录。
-   *
-   * ⚠️ 失败时返回**空数组**：适配器据此回退兜底表。
-   * 让模型目录失败不抛错，是为了不让整个 provider 在模型选择器里报错。
-   */
-  async fetchModels(pool) {
-    const credential = await this.resolveForFetchModels(pool);
-    if (credential === void 0) return [];
-    try {
-      const response = await this.fetchImpl(
-        `${this.product.apiBase}${this.product.llmApiPrefix}/model_catalog`,
-        {
-          method: "GET",
-          headers: {
-            Accept: "application/json",
-            Authorization: `Bearer ${credential.access_token}`,
-            "X-Org-Code": credential.office_identity ?? "",
-            "X-Raccoon-Language": "zh"
-          },
-          signal: AbortSignal.timeout(2e4)
-        }
-      );
-      if (!response.ok) return [];
-      const payload = await response.json();
-      return parseRaccoonModelCatalog(payload);
-    } catch {
-      return [];
-    }
-  }
-  /** 取一个可用凭据（先账号池，再默认 ref）。 */
-  async resolveForFetchModels(pool) {
-    if (pool !== void 0) {
-      try {
-        const available2 = await pool.getAvailableAccount(this.product.id, "");
-        if (available2 !== null && available2 !== void 0) {
-          const credential = available2.credential;
-          if (typeof credential?.access_token === "string") return credential;
-        }
-      } catch {
-      }
-    }
-    return this.resolveDefaultCredential();
-  }
-  /** 查询积分余额（供 Channel Pack 账号卡片）。 */
-  async fetchCreditBalance(credential) {
-    return fetchRaccoonCreditBalance(this.product, credential, this.fetchImpl);
-  }
-  /** 领取一次性登录奖励。 */
-  async claimLoginReward(credential) {
-    return claimRaccoonLoginReward(this.product, credential, this.fetchImpl);
-  }
-  /** 查询一次性登录奖励是否已领。 */
-  async fetchOnboardingStatus(credential) {
-    return fetchRaccoonOnboardingStatus(this.product, credential, this.fetchImpl);
-  }
-  /**
-   * 一次性修复**老账号**的昵称与凭据字段（启动时调用）。
-   *
-   * ## 为什么需要它
-   *
-   * 早期实现有两处不足，导致**已登录的账号不会自动更正**：
-   *
-   * 1. 账号昵称直接用了服务端的 `name`（实测 `RaccoonAva` —— 它是服务端
-   *    **自动生成的默认名**，注册第二个账号时会重名、无法区分）；
-   * 2. 凭据里**没有存 `phone`**（后来才发现 `user_info.phone` 可用于消歧）。
-   *
-   * 光改代码只影响**新登录**的账号，老账号的昵称/凭据仍是旧值。
-   * 故这里主动补一次：读凭据 → 缺 `phone` 就拉一次 `user_info` 补上 →
-   * 用 `buildRaccoonNickname` 重算昵称并写回账号池。
-   *
-   * ## 语义约束
-   *
-   * - **幂等**：昵称已是目标形态时不写（避免每次启动都落盘）。
-   * - **失败不阻塞启动**：单个账号失败只记日志，抛错由调用方 catch。
-   * - **不发写请求**：只调只读的 `user_info`，不碰积分领取端点。
-   * - `buildNickname` 由调用方注入（它依赖 `channel-pack-rpc` 里的纯函数，
-   *   而那个模块依赖本模块 —— 注入避免循环依赖）。
-   *
-   * @returns 被修复的账号 id 列表（供日志）。
-   */
-  async repairAccountNicknames(pool, buildNickname) {
-    const repaired = [];
-    let entries;
-    try {
-      entries = await pool.listAccounts(this.product.id);
-    } catch {
-      return repaired;
-    }
-    for (const entry of entries) {
-      try {
-        const ref = credentialRef9(entry.credentialRef);
-        const resolved = await this.ctx.credentials.resolve(ref);
-        if (!resolved) continue;
-        const credential = parseRaccoonCredential(resolved.value);
-        if (credential === void 0) continue;
-        let next = credential;
-        if (credential.phone === void 0 || credential.user_id === void 0) {
-          const info = await fetchRaccoonUserInfo(this.product, credential, this.fetchImpl);
-          const patched = {
-            ...credential,
-            ...info.phone !== void 0 && credential.phone === void 0 ? { phone: info.phone } : {},
-            ...info.userId !== void 0 && credential.user_id === void 0 ? { user_id: info.userId } : {},
-            ...info.nickname !== void 0 && credential.nickname === void 0 ? { nickname: info.nickname } : {},
-            ...info.officeIdentity !== void 0 && credential.office_identity === void 0 ? { office_identity: info.officeIdentity } : {}
-          };
-          const changed = JSON.stringify(patched) !== JSON.stringify(credential);
-          if (changed) {
-            await this.ctx.credentials.set(ref, JSON.stringify(patched));
-            next = patched;
-          }
-        }
-        const target = buildNickname(next, entry.id);
-        if (target !== entry.nickname) {
-          await pool.updateAccount(entry.id, { nickname: target });
-          repaired.push(entry.id);
-        }
-      } catch (error) {
-        this.ctx.logger?.warn?.(
-          `[raccoon] \u4FEE\u590D\u8D26\u53F7 ${entry.id} \u7684\u6635\u79F0\u5931\u8D25\uFF08\u4E0D\u5F71\u54CD\u4F7F\u7528\uFF09\uFF1A${error instanceof Error ? error.message : String(error)}`
-        );
-      }
-    }
-    return repaired;
-  }
-};
-function parseRaccoonModelCatalog(payload) {
-  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return [];
-  const root = payload;
-  if (root.code !== 0) return [];
-  const data = typeof root.data === "object" && root.data !== null && !Array.isArray(root.data) ? root.data : void 0;
-  if (data === void 0) return [];
-  const categories = Array.isArray(data.categories) ? data.categories : [];
-  const chat = categories.find((c) => {
-    return typeof c === "object" && c !== null && !Array.isArray(c) && c.type === "chat";
-  });
-  if (chat === void 0) return [];
-  const models = Array.isArray(chat.models) ? chat.models : [];
-  const seen = /* @__PURE__ */ new Set();
-  const out = [];
-  for (const raw of models) {
-    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) continue;
-    const model = normalizeRemoteModel(raw);
-    if (model === void 0 || seen.has(model.id)) continue;
-    seen.add(model.id);
-    out.push(model);
-  }
-  return out;
-}
-
 // vendor/channel-pack/src/loomy-balance-rank.ts
 var LOOMY_BALANCE_TIER = Object.freeze({
   /** 有今日赠送额度（`dailyBalance > 0`）—— 优先消耗它（每天刷新、不用会浪费）。 */
@@ -49333,8 +47328,187 @@ var LoomyBalanceSelector = class {
   }
 };
 
+// vendor/channel-pack/src/raccoon.ts
+import { createCipheriv, randomBytes as randomBytes4 } from "node:crypto";
+var RACCOON_API_BASE = "https://xiaohuanxiong.com";
+var RACCOON_POINTS_PREFIX = "/api/web/points/v1";
+var RACCOON_DESKTOP_PREFIX = "/api/web/desktop/v1";
+var RACCOON_PHONE_CIPHER_SECRET = "senseraccoon2023";
+var RACCOON_REQUEST_TIMEOUT_MS = 6e4;
+var RACCOON_LOGIN_TIMEOUT_MS = 5 * 60 * 1e3;
+var RACCOON_QR_STATUS = {
+  pending: "pending",
+  logging: "logging",
+  canceled: "canceled",
+  success: "success"
+};
+function decodeJwtExpMs(token) {
+  if (typeof token !== "string" || token.length === 0) return void 0;
+  const parts = token.split(".");
+  if (parts.length < 2) return void 0;
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1] ?? "", "base64url").toString("utf8"));
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return void 0;
+    const exp = payload.exp;
+    if (typeof exp !== "number" || !Number.isFinite(exp) || exp <= 0) return void 0;
+    return exp * 1e3;
+  } catch {
+    return void 0;
+  }
+}
+function raccoonCredentialExpiresAtMs(credential) {
+  const raw = credential.expires_at;
+  if (typeof raw === "string" && raw.trim().length > 0) {
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed > 0) return parsed;
+  }
+  return decodeJwtExpMs(credential.access_token);
+}
+function isRaccoonExpired(credential) {
+  const expiresAt = raccoonCredentialExpiresAtMs(credential);
+  return expiresAt !== void 0 && expiresAt <= Date.now();
+}
+function isRaccoonRefreshable(credential) {
+  return typeof credential.refresh_token === "string" && credential.refresh_token.trim().length > 0;
+}
+function encryptRaccoonPhone(phone, iv) {
+  const key = Buffer.from(RACCOON_PHONE_CIPHER_SECRET, "utf8");
+  const nonce = iv ?? randomBytes4(16);
+  const cipher = createCipheriv("aes-128-cfb", key, nonce);
+  cipher.setAutoPadding(false);
+  const ciphertext = Buffer.concat([cipher.update(Buffer.from(phone, "utf8")), cipher.final()]);
+  return Buffer.concat([nonce, ciphertext]).toString("base64");
+}
+function formatMultiplier(value) {
+  return String(Number(value.toFixed(4)));
+}
+function raccoonDisplayName(model) {
+  const name2 = typeof model.description === "string" && model.description.length > 0 ? model.description : model.id;
+  const effective = model.effectiveMultiplier;
+  if (typeof effective !== "number" || !Number.isFinite(effective) || effective < 0) return name2;
+  if (effective === 0) return `${name2} \xB7 \u514D\u8D39`;
+  const base = model.baseMultiplier;
+  const hasBase = typeof base === "number" && Number.isFinite(base) && base > 0;
+  if (hasBase && base > effective) {
+    return `${name2} \xB7 x${formatMultiplier(base)}\u2192x${formatMultiplier(effective)}`;
+  }
+  return `${name2} \xB7 x${formatMultiplier(effective)}`;
+}
+function raccoonHeaders(credential, opts = {}) {
+  const headers = {
+    Accept: "application/json",
+    "Content-Type": "application/json",
+    Authorization: `Bearer ${credential.access_token}`,
+    // 个人账号为空串；客户端总是发送该头
+    "X-Org-Code": credential.office_identity ?? "",
+    "X-Raccoon-Language": "zh"
+  };
+  if (opts.platform !== void 0 && opts.platform.length > 0) {
+    headers["X-Client-Platform"] = opts.platform;
+  }
+  if (opts.version !== void 0 && opts.version.length > 0) {
+    headers["X-Client-Version"] = opts.version;
+  }
+  if (credential.device_id !== void 0 && credential.device_id.length > 0) {
+    headers["X-Client-Device-ID"] = credential.device_id;
+  }
+  return headers;
+}
+
+// vendor/channel-pack/src/raccoon-product.ts
+var RACCOON_EFFORT_ON = "on";
+var RACCOON_EFFORT_OFF = "off";
+var RACCOON_EFFORT_NAMES = Object.freeze({
+  [RACCOON_EFFORT_ON]: "\u5F00\u542F",
+  [RACCOON_EFFORT_OFF]: "\u5173\u95ED"
+});
+var RACCOON_REASONING_EFFORTS = Object.freeze([
+  RACCOON_EFFORT_ON,
+  RACCOON_EFFORT_OFF
+]);
+var RACCOON_DEFAULT_EFFORT = RACCOON_EFFORT_ON;
+var RACCOON_FALLBACK_MODELS = [
+  {
+    id: "sn-sensenova-6-8-flash",
+    name: "SenseNova-6.8-Flash \xB7 \u514D\u8D39",
+    contextWindow: 256e3,
+    maxTokens: 63999,
+    supportsImage: true
+  },
+  {
+    id: "sn-sensenova-6-8-flash-lite",
+    name: "SenseNova-6.8-Flash-Lite \xB7 \u514D\u8D39",
+    contextWindow: 256e3,
+    maxTokens: 63999,
+    supportsImage: true
+  },
+  {
+    id: "sn-glm-5-3",
+    name: "GLM-5-3 \xB7 x0.75",
+    contextWindow: 1e6,
+    maxTokens: 1e5,
+    supportsImage: true
+  },
+  {
+    id: "sn-kimi-k3",
+    // ⚠️ 1 倍也要显示（用户报障「为什么 Kimi-K3 没有倍率，ide 是 1 倍，
+    // 1 倍也要显示倍率」）—— 见 `raccoonDisplayName` 的注释。
+    name: "Kimi-K3 \xB7 x1",
+    contextWindow: 1e6,
+    maxTokens: 1e5,
+    supportsImage: true
+  },
+  {
+    id: "sn-glm-5-3-flash",
+    name: "GLM-5-3-Flash \xB7 x0.2\u2192x0.1",
+    contextWindow: 1e6,
+    maxTokens: 1e5,
+    // ⚠️ 远端 tags 不含 `vision`，但**实测能看图**（见 RACCOON_IMAGE_CAPABILITY_OVERRIDES）。
+    supportsImage: true
+  },
+  {
+    id: "sn-deepseek-v4-1-flash",
+    name: "DeepSeek-V4.1-Flash \xB7 x0.25",
+    contextWindow: 1e6,
+    maxTokens: 1e5,
+    // ⚠️ 同上：远端 tags 不含 `vision`，实测 5/5 读对随机数字。
+    supportsImage: true
+  }
+];
+var RACCOON_IMAGE_CAPABILITY_OVERRIDES = /* @__PURE__ */ new Set([
+  "sn-deepseek-v4-1-flash",
+  "sn-glm-5-3-flash"
+]);
+function raccoonSupportsImage(modelId, tags) {
+  if (RACCOON_IMAGE_CAPABILITY_OVERRIDES.has(modelId)) return true;
+  return tags.includes("vision") || tags.includes("image") || tags.includes("image-understanding");
+}
+var RACCOON = {
+  id: "raccoon",
+  // ⚠️ 用『Raccoon (商汤)』而非『Raccoon Work (商汤)』—— 后者在 Channel Pack 的
+  // provider Tab 里**触发换行**（用户报障）。客户端内的品牌名是 `Raccoon Work`，
+  // 但那个词组太长；缩短成 `Raccoon` 后与其余 provider 的标签长度一致
+  displayName: "Raccoon (\u5546\u6C64)",
+  apiBase: RACCOON_API_BASE,
+  authApiPrefix: "/api/web/auth/v1",
+  llmApiPrefix: "/api/web/llm/v2",
+  pointsApiPrefix: "/api/web/points/v1",
+  desktopApiPrefix: "/api/web/desktop/v1",
+  userAgent: "Raccoon Work/1.0.35 (Windows)",
+  clientPlatform: "desktop-windows",
+  clientVersion: "v1.0.35",
+  defaultCredentialRef: "RACCOON_ACCESS_TOKEN",
+  // 实测该网关按**请求体字节**卡（`HTTP_413: request body exceeds 10MB`），
+  // 所以字节目标是主约束；像素预算保证图不至于大到压不进那个字节目标。
+  imagePixelBudget: 64e4,
+  imageMaxBytes: RACCOON_REQUEST_IMAGE_MAX_BYTES,
+  phoneCipherSecret: RACCOON_PHONE_CIPHER_SECRET,
+  aliyunCaptcha: { sceneId: "1pkmy0x3", prefix: "hk1r5l" },
+  fallbackModels: RACCOON_FALLBACK_MODELS
+};
+
 // vendor/channel-pack/src/zcode-auth.ts
-import { Service as Service9 } from "@deepseek-ai/cordis";
+import { Service as Service8 } from "@deepseek-ai/cordis";
 
 // vendor/channel-pack/src/zcode.ts
 var PHONE_RE = /^1[3-9]\d{9}$/;
@@ -49448,7 +47622,7 @@ function zcodeProductById(id) {
 // vendor/channel-pack/src/zcode-captcha.ts
 import { spawn as spawn3, spawnSync } from "node:child_process";
 import { existsSync as existsSync5, mkdtempSync, rmSync, writeFileSync as writeFileSync5 } from "node:fs";
-import { createServer as createServer6 } from "node:net";
+import { createServer as createServer5 } from "node:net";
 import { homedir as homedir2, tmpdir } from "node:os";
 import { basename, isAbsolute, join as join4, posix } from "node:path";
 var ZCODE_CAPTCHA_FALLBACK = {
@@ -49796,7 +47970,7 @@ async function pickFreePort() {
 }
 function isPortFree(port) {
   return new Promise((resolve2) => {
-    const server = createServer6();
+    const server = createServer5();
     server.once("error", () => resolve2(false));
     server.once("listening", () => {
       server.close(() => resolve2(true));
@@ -51154,7 +49328,7 @@ function buildCarrierPageHtml(config) {
 }
 
 // vendor/channel-pack/src/zcode-login.ts
-import { randomBytes as randomBytes6, randomUUID as randomUUID7 } from "node:crypto";
+import { randomBytes as randomBytes5, randomUUID as randomUUID7 } from "node:crypto";
 var ZCODE_ORIGIN = "https://zcode.z.ai";
 var ZCODE_OAUTH_CLI_INIT_URL = `${ZCODE_ORIGIN}/api/v1/oauth/cli/init`;
 var zcodeOauthCliPollUrl = (flowId) => `${ZCODE_ORIGIN}/api/v1/oauth/cli/poll/${encodeURIComponent(flowId)}`;
@@ -51168,7 +49342,7 @@ var ZcodeLoginError = class extends Error {
   kind;
 };
 function generateFlowSecret() {
-  return randomBytes6(32).toString("hex");
+  return randomBytes5(32).toString("hex");
 }
 function generateDeviceMid() {
   return randomUUID7();
@@ -51909,7 +50083,7 @@ async function withTimeout(work, ms) {
     if (timer !== void 0) clearTimeout(timer);
   }
 }
-var ZcodeAuth = class extends Service9 {
+var ZcodeAuth = class extends Service8 {
   product;
   fetchImpl;
   /** 注入的账号池（测试用；生产走 ctx.get）。 */
@@ -53346,7 +51520,7 @@ function emptyCheckinStatus(active, actionRequired = false) {
 }
 
 // vendor/channel-pack/src/zcode-adapter.ts
-import { EMPTY_RESPONSE_CODE as EMPTY_RESPONSE_CODE2, LlmAdapter as LlmAdapter9, LlmError as LlmError13, ReasoningEffortId as ReasoningEffortId9 } from "@deepseek-ai/dsh-llm";
+import { EMPTY_RESPONSE_CODE as EMPTY_RESPONSE_CODE2, LlmAdapter as LlmAdapter8, LlmError as LlmError12, ReasoningEffortId as ReasoningEffortId8 } from "@deepseek-ai/dsh-llm";
 
 // vendor/channel-pack/src/zcode-identity.ts
 var OFFICIAL_CLI_PREFIX = "You are ZCode, an interactive coding agent";
@@ -53437,7 +51611,7 @@ function withContextPrefix(messages, now = /* @__PURE__ */ new Date()) {
 }
 
 // vendor/channel-pack/src/zcode-anthropic.ts
-import { LlmError as LlmError12, ToolCallId as ToolCallId6 } from "@deepseek-ai/dsh-llm";
+import { LlmError as LlmError11, ToolCallId as ToolCallId6 } from "@deepseek-ai/dsh-llm";
 function parseToolArguments(raw) {
   if (raw === void 0 || raw === null) return {};
   if (typeof raw === "object") return raw;
@@ -53665,7 +51839,7 @@ async function* consumeAnthropicSse(body, options) {
       const error = payload.error;
       const message2 = typeof error === "object" && error !== null ? error.message : void 0;
       const type2 = typeof error === "object" && error !== null ? error.type : void 0;
-      throw new LlmError12(
+      throw new LlmError11(
         `${options.label}: ${typeof message2 === "string" ? message2 : JSON.stringify(payload).slice(0, 300)}`,
         // overloaded 是暂时性的，值得重试；其余按服务端错误处理。
         type2 === "overloaded_error" ? "RATE_LIMIT" : "SERVER"
@@ -53760,7 +51934,7 @@ async function* consumeAnthropicSse(body, options) {
     }
   }
   if (!sawAny) {
-    throw new LlmError12(
+    throw new LlmError11(
       `${options.label}: \u6A21\u578B\u8FD4\u56DE\u4E86\u7A7A\u54CD\u5E94\uFF08\u65E0\u4EFB\u4F55 text / thinking / tool \u5185\u5BB9\uFF09`,
       "EMPTY_RESPONSE"
     );
@@ -53931,7 +52105,7 @@ function reasoningEffortLabel(id) {
   if (id.length === 0) return id;
   return id.charAt(0).toUpperCase() + id.slice(1);
 }
-function fallbackToRemote3(model) {
+function fallbackToRemote2(model) {
   return {
     id: model.id,
     name: model.name,
@@ -53946,7 +52120,7 @@ function fallbackToRemote3(model) {
     ...model.defaultReasoningLevel !== void 0 ? { defaultReasoningLevel: model.defaultReasoningLevel } : {}
   };
 }
-function positiveMaxTokens3(value) {
+function positiveMaxTokens2(value) {
   return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : void 0;
 }
 var ZCODE_STREAM_IDLE_RETRY_STEP_MS = 3e4;
@@ -53960,7 +52134,7 @@ function resolveRequestTimeoutMs(product) {
   const raw = Number(process.env.DSH_ZCODE_REQUEST_TIMEOUT_MS);
   return Number.isFinite(raw) ? raw : product.requestTimeoutMs;
 }
-var ZcodeAdapter = class extends LlmAdapter9 {
+var ZcodeAdapter = class extends LlmAdapter8 {
   constructor(options) {
     super();
     this.options = options;
@@ -54017,7 +52191,7 @@ var ZcodeAdapter = class extends LlmAdapter9 {
    * （`AGENTS.md` 记过 Raccoon 的同款用户报障）。
    */
   listAllModels() {
-    const source = this.remoteModels ?? this.product.fallbackModels.map(fallbackToRemote3);
+    const source = this.remoteModels ?? this.product.fallbackModels.map(fallbackToRemote2);
     return source.map((model) => ({ id: model.id, name: model.name }));
   }
   /**
@@ -54041,7 +52215,7 @@ var ZcodeAdapter = class extends LlmAdapter9 {
       });
       if (this.remoteModels !== void 0) return this.remoteModels;
     }
-    return this.product.fallbackModels.map(fallbackToRemote3);
+    return this.product.fallbackModels.map(fallbackToRemote2);
   }
   inputModalitiesFor(model) {
     return model?.supportsImage === true ? ["text", "image"] : ["text"];
@@ -54088,7 +52262,7 @@ var ZcodeAdapter = class extends LlmAdapter9 {
     if (contextWindow !== void 0 && contextWindow > 0) {
       resolved.context = { contextWindow };
     }
-    const maxTokens = positiveMaxTokens3(entry?.maxTokens ?? fallback?.maxTokens);
+    const maxTokens = positiveMaxTokens2(entry?.maxTokens ?? fallback?.maxTokens);
     if (maxTokens !== void 0) resolved.defaultMaxTokens = maxTokens;
     const levels = entry?.reasoningLevels ?? fallback?.reasoningLevels;
     if (levels !== void 0 && levels.length > 0) {
@@ -54105,8 +52279,8 @@ var ZcodeAdapter = class extends LlmAdapter9 {
          *
          * ⚠ `ReasoningEffortId` 是 branded 类型，必须用构造函数（同 qoder 的写法）。
          */
-        efforts: levels.map((id) => ({ id: ReasoningEffortId9(id), name: reasoningEffortLabel(id) })),
-        ...defaultLevel !== void 0 && levels.includes(defaultLevel) ? { defaultEffort: ReasoningEffortId9(defaultLevel) } : {}
+        efforts: levels.map((id) => ({ id: ReasoningEffortId8(id), name: reasoningEffortLabel(id) })),
+        ...defaultLevel !== void 0 && levels.includes(defaultLevel) ? { defaultEffort: ReasoningEffortId8(defaultLevel) } : {}
       };
     }
     return resolved;
@@ -54223,13 +52397,13 @@ var ZcodeAdapter = class extends LlmAdapter9 {
       const all = await this.loadModels();
       const entry = all.find((item) => item.id === options.model);
       if (!this.inputModalitiesFor(entry).includes("image")) {
-        throw new LlmError13(
+        throw new LlmError12(
           `zcode: \u6A21\u578B "${options.model}" \u4E0D\u652F\u6301\u56FE\u7247\u8F93\u5165`,
           "UNSUPPORTED_CONTENT"
         );
       }
       if (this.options.readImage === void 0) {
-        throw new LlmError13(
+        throw new LlmError12(
           "zcode: \u56FE\u7247\u8F93\u5165\u9700\u8981\u9644\u4EF6\u670D\u52A1\uFF08\u5BBF\u4E3B\u672A\u63D0\u4F9B attachments.readImage\uFF09",
           "UNSUPPORTED_CONTENT"
         );
@@ -54287,7 +52461,7 @@ var ZcodeAdapter = class extends LlmAdapter9 {
       }
     }
     const timedOut = () => controller.signal.aborted && options.signal?.aborted !== true;
-    const timeoutError = (cause) => new LlmError13(
+    const timeoutError = (cause) => new LlmError12(
       `zcode: \u8BF7\u6C42\u8D85\u65F6\uFF08${timeoutMs}ms \u5185\u672A\u5B8C\u6210\uFF09\u2014\u2014 \u4E0A\u6E38\u53EF\u80FD\u957F\u65F6\u95F4\u4E0D\u8FD4\u56DE\u6570\u636E`,
       "TIMEOUT",
       cause === void 0 ? void 0 : { cause }
@@ -54368,7 +52542,7 @@ var ZcodeAdapter = class extends LlmAdapter9 {
               break;
             }
           }
-          throw new LlmError13(
+          throw new LlmError12(
             `zcode: ${describeUpstreamError(response.status, text)}`,
             "QUOTA_EXCEEDED",
             { status: response.status }
@@ -54426,7 +52600,7 @@ var ZcodeAdapter = class extends LlmAdapter9 {
           shape: describeZcodeRequestShape(body.system, body.messages),
           now: Date.now()
         }) : void 0;
-        throw new LlmError13(
+        throw new LlmError12(
           `zcode: ${describeUpstreamError(response.status, text, diagnostic)}`,
           httpErrorCodeForZcode(response.status, text),
           { status: response.status }
@@ -54434,7 +52608,7 @@ var ZcodeAdapter = class extends LlmAdapter9 {
       }
       if (switchedAccount) continue;
       if (response === void 0) {
-        throw new LlmError13("zcode: \u4E0A\u6E38\u8BF7\u6C42\u672A\u53D1\u51FA\uFF08\u5185\u90E8\u72B6\u6001\u5F02\u5E38\uFF09", "SERVER");
+        throw new LlmError12("zcode: \u4E0A\u6E38\u8BF7\u6C42\u672A\u53D1\u51FA\uFF08\u5185\u90E8\u72B6\u6001\u5F02\u5E38\uFF09", "SERVER");
       }
       if (response.body === null) {
         if (quotaRound < this.product.quotaSwitchMax) {
@@ -54445,7 +52619,7 @@ var ZcodeAdapter = class extends LlmAdapter9 {
             continue;
           }
         }
-        throw new LlmError13(
+        throw new LlmError12(
           zcodeEntitlementErrorMessage(options.model, tried.size),
           "QUOTA_EXCEEDED"
         );
@@ -54473,7 +52647,7 @@ var ZcodeAdapter = class extends LlmAdapter9 {
               continue;
             }
           }
-          throw new LlmError13(
+          throw new LlmError12(
             zcodeEntitlementErrorMessage(options.model, tried.size),
             "QUOTA_EXCEEDED",
             { cause: error }
@@ -54498,7 +52672,7 @@ var ZcodeAdapter = class extends LlmAdapter9 {
       credential = await this.options.resolveCredential(options.model);
     }
     if (credential === void 0) {
-      throw new LlmError13(
+      throw new LlmError12(
         "zcode: \u6CA1\u6709\u53EF\u7528\u7684\u51ED\u636E \u2014\u2014 \u8BF7\u5728 Channel Pack \u7684 ZCode \u9762\u677F\u70B9\u300C\u6DFB\u52A0\u8D26\u53F7\u300D\u5B8C\u6210\u767B\u5F55\uFF08\u672C\u63D2\u4EF6\u53EA\u7528\u5B83\u81EA\u5DF1\u7684\u6388\u6743\u6D41\u7A0B\uFF0C\u4E0D\u4F1A\u8BFB\u53D6\u672C\u673A ZCode \u5BA2\u6237\u7AEF\u7684\u767B\u5F55\u6001\uFF09",
         "MISSING_CREDENTIAL"
       );
@@ -54537,13 +52711,13 @@ var ZcodeAdapter = class extends LlmAdapter9 {
       if (error instanceof GateAbortedError) throw error;
       if (userSignal?.aborted === true) throw error;
       if (signal.aborted) {
-        throw new LlmError13(
+        throw new LlmError12(
           `zcode: \u8BF7\u6C42\u8D85\u65F6\uFF08${timeoutMs}ms \u5185\u672A\u5B8C\u6210\uFF09\u2014\u2014 \u4E0A\u6E38\u53EF\u80FD\u957F\u65F6\u95F4\u4E0D\u8FD4\u56DE\u6570\u636E`,
           "TIMEOUT",
           { cause: error }
         );
       }
-      throw new LlmError13(
+      throw new LlmError12(
         `zcode: \u8BF7\u6C42\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`,
         "TRANSPORT",
         { cause: error }
@@ -54618,7 +52792,7 @@ var ZcodeAdapter = class extends LlmAdapter9 {
   }
 };
 function isFastEntitlementMiss(error, elapsedMs) {
-  if (!(error instanceof LlmError13)) return false;
+  if (!(error instanceof LlmError12)) return false;
   if (error.code !== EMPTY_RESPONSE_CODE2) return false;
   return elapsedMs < ZCODE_FAST_EMPTY_MS;
 }
@@ -54631,7 +52805,7 @@ async function defaultAdapterSleep(ms, signal) {
   await new Promise((resolve2, reject) => {
     const onAbort = () => {
       clearTimeout(timer);
-      reject(new LlmError13("zcode: \u9000\u907F\u7B49\u5F85\u671F\u95F4\u8BF7\u6C42\u5DF2\u53D6\u6D88", "TRANSPORT"));
+      reject(new LlmError12("zcode: \u9000\u907F\u7B49\u5F85\u671F\u95F4\u8BF7\u6C42\u5DF2\u53D6\u6D88", "TRANSPORT"));
     };
     const timer = setTimeout(() => {
       signal?.removeEventListener("abort", onAbort);
@@ -54720,7 +52894,7 @@ function registerZcodeLlm(ctx, options) {
 }
 
 // vendor/channel-pack/src/channel-pack-rpc.ts
-import { credentialRef as credentialRef13 } from "@deepseek-ai/dsh-credentials";
+import { credentialRef as credentialRef12 } from "@deepseek-ai/dsh-credentials";
 
 // vendor/channel-pack/src/openai-gateway/config.ts
 var DEFAULT_GATEWAY_HOST = "127.0.0.1";
@@ -55236,7 +53410,7 @@ function checkinHeaders(credential, product) {
 function readBool(source, key) {
   return source[key] === true;
 }
-function readNumber3(source, key) {
+function readNumber2(source, key) {
   const value = source[key];
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
@@ -55249,7 +53423,7 @@ function readStringArray(source, key) {
   return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
 }
 var UNPARSABLE_RESPONSE_MESSAGE = "\u8BF7\u6C42\u5931\u8D25\u6216\u54CD\u5E94\u65E0\u6CD5\u89E3\u6790";
-async function postJson2(path2, credential, product, fetcher) {
+async function postJson(path2, credential, product, fetcher) {
   try {
     const response = await fetcher(`${product.endpoint}${path2}`, {
       method: "POST",
@@ -55280,7 +53454,7 @@ function describeNonJsonResponse(status, text) {
   return `\u670D\u52A1\u7AEF\u8FD4\u56DE\u4E86\u975E JSON \u54CD\u5E94\uFF08HTTP ${status}\uFF09\uFF1A${snippet}`;
 }
 async function fetchCheckinStatus(credential, product, fetcher = fetch) {
-  const result = await postJson2(CHECKIN_ACTIVITY_STATUS_PATH, credential, product, fetcher);
+  const result = await postJson(CHECKIN_ACTIVITY_STATUS_PATH, credential, product, fetcher);
   if (!result.ok) return null;
   const body = result.body;
   if (body.code !== 0) return null;
@@ -55290,11 +53464,11 @@ async function fetchCheckinStatus(credential, product, fetcher = fetch) {
   return {
     active: readBool(record, "active"),
     todayCheckedIn: readBool(record, "today_checked_in"),
-    streakDays: readNumber3(record, "streak_days"),
-    dailyCredit: readNumber3(record, "daily_credit"),
-    todayCredit: readNumber3(record, "today_credit"),
+    streakDays: readNumber2(record, "streak_days"),
+    dailyCredit: readNumber2(record, "daily_credit"),
+    todayCredit: readNumber2(record, "today_credit"),
     isStreakDay: readBool(record, "is_streak_day"),
-    totalCredits: readNumber3(record, "total_credits"),
+    totalCredits: readNumber2(record, "total_credits"),
     checkinDates: readStringArray(record, "checkin_dates"),
     activityName: readString3(record, "activity_name"),
     themeName: readString3(record, "theme_name"),
@@ -55302,7 +53476,7 @@ async function fetchCheckinStatus(credential, product, fetcher = fetch) {
   };
 }
 async function claimDailyCheckin(credential, product, fetcher = fetch) {
-  const result = await postJson2(DAILY_CHECKIN_PATH, credential, product, fetcher);
+  const result = await postJson(DAILY_CHECKIN_PATH, credential, product, fetcher);
   if (!result.ok) {
     return { kind: "failed", code: -1, message: result.message };
   }
@@ -55326,8 +53500,8 @@ async function claimDailyCheckin(credential, product, fetcher = fetch) {
   const delayed = readString3(record, "message");
   return {
     kind: "claimed",
-    credit: readNumber3(record, "credit"),
-    streakDays: readNumber3(record, "streak_days"),
+    credit: readNumber2(record, "credit"),
+    streakDays: readNumber2(record, "streak_days"),
     isStreakDay: readBool(record, "is_streak_day"),
     ...delayed.length > 0 ? { delayedMessage: delayed } : {}
   };
@@ -55339,7 +53513,7 @@ function readPreciseNumber(source, baseKey) {
     if (Number.isFinite(parsed)) return parsed;
   }
   if (typeof precise === "number" && Number.isFinite(precise)) return precise;
-  return readNumber3(source, baseKey);
+  return readNumber2(source, baseKey);
 }
 var PACKAGE_STATUS_EXPIRED = 3;
 function parseCreditPackage(entry) {
@@ -55347,7 +53521,7 @@ function parseCreditPackage(entry) {
   const unit = readString3(entry, "CapacityUnit") || readString3(entry, "OriginUnit");
   const status = entry.Status;
   const expiredTime = readString3(entry, "ExpiredTime");
-  const deductionEndTime = readNumber3(entry, "DeductionEndTime");
+  const deductionEndTime = readNumber2(entry, "DeductionEndTime");
   const expiredAt = expiredTime.length > 0 ? Date.parse(expiredTime.replace(" ", "T")) : Number.NaN;
   const active = status !== PACKAGE_STATUS_EXPIRED && !(Number.isFinite(expiredAt) && Date.now() >= expiredAt) && !(deductionEndTime > 0 && Date.now() >= deductionEndTime);
   return {
@@ -55364,7 +53538,7 @@ function parseCreditPackage(entry) {
   };
 }
 async function fetchCreditBalance(credential, product, fetcher = fetch) {
-  const result = await postJson2(USER_RESOURCE_PATH, credential, product, fetcher);
+  const result = await postJson(USER_RESOURCE_PATH, credential, product, fetcher);
   if (!result.ok) return null;
   const body = result.body;
   if (body.code !== 0) return null;
@@ -55617,8 +53791,8 @@ async function fetchMinimaxCreditBalance(credential, fetcher = fetch, product = 
 }
 
 // vendor/channel-pack/src/gemini.ts
-import { randomBytes as randomBytes7 } from "node:crypto";
-import { LlmError as LlmError14, ReasoningEffortId as ReasoningEffortId10 } from "@deepseek-ai/dsh-llm";
+import { randomBytes as randomBytes6 } from "node:crypto";
+import { LlmError as LlmError13, ReasoningEffortId as ReasoningEffortId9 } from "@deepseek-ai/dsh-llm";
 var GEMINI_ENDPOINT_DAILY = "https://daily-cloudcode-pa.googleapis.com";
 var GEMINI_ENDPOINT_SANDBOX = "https://daily-cloudcode-pa.sandbox.googleapis.com";
 var GEMINI_ENDPOINTS = [GEMINI_ENDPOINT_DAILY, GEMINI_ENDPOINT_SANDBOX];
@@ -55728,7 +53902,7 @@ function marshalAlphabetical(value) {
   return sortedStringify(value);
 }
 function newGeminiRequestId(nowMs = Date.now()) {
-  return `agent/${nowMs}/${randomBytes7(4).toString("hex")}`;
+  return `agent/${nowMs}/${randomBytes6(4).toString("hex")}`;
 }
 var GEMINI_UPSTREAM_FLASH = "gemini-3.8-flash";
 var GEMINI_BUDGET_LOW = 1e3;
@@ -55779,7 +53953,7 @@ function geminiCanonicalModelId(modelId) {
 }
 function geminiModelSpec(modelId, effort) {
   if (geminiCanonicalModelId(modelId) !== GEMINI_UPSTREAM_FLASH) {
-    throw new LlmError14(
+    throw new LlmError13(
       `gemini: \u6A21\u578B "${modelId}" \u4E0D\u5728\u672C provider \u76EE\u5F55\u4E2D\uFF08\u4EC5\u652F\u6301 ${GEMINI_UPSTREAM_FLASH}\uFF09`,
       "INVALID_REQUEST",
       // ⚠️ `status` 只落在 `LlmError.failure`（不是顶层属性），且网关的
@@ -55798,8 +53972,8 @@ function geminiModelSpec(modelId, effort) {
 function geminiReasoningInfo(entry) {
   const options = entry.effortOptions;
   if (options === void 0 || options.length === 0) return void 0;
-  const efforts = options.map((id) => ({ id: ReasoningEffortId10(id), name: geminiEffortLabel(id) }));
-  const defaultEffort = entry.defaultEffort !== void 0 && options.includes(entry.defaultEffort) ? ReasoningEffortId10(entry.defaultEffort) : void 0;
+  const efforts = options.map((id) => ({ id: ReasoningEffortId9(id), name: geminiEffortLabel(id) }));
+  const defaultEffort = entry.defaultEffort !== void 0 && options.includes(entry.defaultEffort) ? ReasoningEffortId9(entry.defaultEffort) : void 0;
   return { efforts, ...defaultEffort === void 0 ? {} : { defaultEffort } };
 }
 var GEMINI_SCHEMA_KEYS = /* @__PURE__ */ new Set([
@@ -56281,7 +54455,7 @@ async function creditsHeaders(credential, product) {
     "User-Agent": "Qoder"
   });
 }
-function readNumber4(source, key) {
+function readNumber3(source, key) {
   if (typeof source !== "object" || source === null) return void 0;
   const value = source[key];
   if (typeof value === "number" && Number.isFinite(value)) return value;
@@ -56298,9 +54472,9 @@ function readString4(source, key) {
 }
 var QODER_PLAN_PACKAGE = "\u5957\u9910\u989D\u5EA6";
 function toPackage(name2, quota, options = {}) {
-  const total = readNumber4(quota, "total");
-  const used = readNumber4(quota, "used");
-  const remainingRaw = readNumber4(quota, "remaining");
+  const total = readNumber3(quota, "total");
+  const used = readNumber3(quota, "used");
+  const remainingRaw = readNumber3(quota, "remaining");
   if (total === void 0 && used === void 0 && remainingRaw === void 0) return void 0;
   const totalValue = Math.max(0, total ?? 0);
   const usedValue = Math.max(0, used ?? 0);
@@ -56388,7 +54562,7 @@ function parseQoderCampaigns(body) {
 }
 function benefitAmount(item) {
   if (typeof item !== "object" || item === null) return void 0;
-  return readNumber4(item.benefit, "amount");
+  return readNumber3(item.benefit, "amount");
 }
 async function loadCampaigns(credential, product, fetcher) {
   let response;
@@ -56498,7 +54672,7 @@ async function claimQoderDailyCheckin(credential, product, fetcher = fetch, nowM
 // vendor/channel-pack/src/cline-credits.ts
 var CLINE_CREDITS_TIMEOUT_MS = 3e4;
 var CLINE_BALANCE_SCALE = 1e5;
-function readNumber5(source, key) {
+function readNumber4(source, key) {
   const value = source[key];
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim().length > 0) {
@@ -56533,7 +54707,7 @@ function parseClineBalanceResponse(value) {
   }
   const data = typeof record.data === "object" && record.data !== null && !Array.isArray(record.data) ? record.data : void 0;
   if (data === void 0) return { error: "\u54CD\u5E94\u7F3A\u5C11 data \u5B57\u6BB5" };
-  const rawBalance = readNumber5(data, "balance");
+  const rawBalance = readNumber4(data, "balance");
   if (rawBalance === void 0) return { error: "\u54CD\u5E94\u7F3A\u5C11 balance \u5B57\u6BB5" };
   return { rawBalance };
 }
@@ -56579,7 +54753,7 @@ async function fetchClineCreditBalance(credential, product, fetcher = fetch, opt
 // vendor/channel-pack/src/cline-quota.ts
 var CLINE_QUOTA_TIMEOUT_MS = 3e4;
 var CLINE_USAGE_LIMITS_PATH = "/api/v1/users/me/plan/usage-limits";
-function readNumber6(source, key) {
+function readNumber5(source, key) {
   const value = source[key];
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim().length > 0) {
@@ -56636,7 +54810,7 @@ function parseClineUsageLimits(value) {
     if (type === void 0) continue;
     windows.push({
       type,
-      percentUsed: readNumber6(entry, "percentUsed") ?? 0,
+      percentUsed: readNumber5(entry, "percentUsed") ?? 0,
       // ⚠️ `resetsAt` 是 ISO 字符串。若网关某天回数字时间戳，也不要在这里
       // 猜单位（秒/毫秒），原样转成字符串交由展示层判定 —— 猜错会显示
       // 1970 年或 5 万年后的时间，比不显示更难排查。
@@ -56698,7 +54872,7 @@ var LOBSTERAI_SLOT_PLACEMENT = "desktop_sidebar";
 var LOBSTERAI_SLOT_CONTAINER_API_VERSION = "2";
 var LOBSTERAI_SLOT_PLATFORM = "win32";
 var UNPARSABLE_RESPONSE_MESSAGE2 = "\u8BF7\u6C42\u5931\u8D25\u6216\u54CD\u5E94\u65E0\u6CD5\u89E3\u6790";
-async function requestJson2(url, credential, product, fetcher, init = { method: "GET" }) {
+async function requestJson(url, credential, product, fetcher, init = { method: "GET" }) {
   try {
     const response = await fetcher(url, {
       method: init.method,
@@ -56731,7 +54905,7 @@ function describeNonJsonResponse2(status, text) {
 function readBool2(source, key) {
   return source[key] === true;
 }
-function readNumber7(source, key) {
+function readNumber6(source, key) {
   const value = source[key];
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && /^-?\d+(\.\d+)?$/.test(value.trim())) return Number(value);
@@ -56749,7 +54923,7 @@ async function fetchLobsteraiActivitySlot(credential, product, clientVersion, fe
     containerApiVersion: LOBSTERAI_SLOT_CONTAINER_API_VERSION,
     platform: LOBSTERAI_SLOT_PLATFORM
   });
-  const result = await requestJson2(
+  const result = await requestJson(
     `${product.apiBase}${LOBSTERAI_ACTIVITY_SLOT_PATH}?${query.toString()}`,
     credential,
     product,
@@ -56763,13 +54937,13 @@ async function fetchLobsteraiActivitySlot(credential, product, clientVersion, fe
   return {
     slotState: typeof envelope.data.slotState === "string" ? envelope.data.slotState : "",
     activityCode,
-    configRevision: readNumber7(activity, "configRevision")
+    configRevision: readNumber6(activity, "configRevision")
   };
 }
 async function fetchLobsteraiActivityContext(credential, product, slot2, fetcher = fetch) {
   const query = new URLSearchParams({ configRevision: String(slot2.configRevision) });
   const url = `${product.apiBase}${LOBSTERAI_ACTIVITY_CONTEXT_PATH}/${encodeURIComponent(slot2.activityCode)}/context?${query.toString()}`;
-  const result = await requestJson2(url, credential, product, fetcher);
+  const result = await requestJson(url, credential, product, fetcher);
   if (!result.ok) return null;
   const envelope = parseLobsteraiEnvelope(result.body);
   if (!envelope.ok) return null;
@@ -56798,7 +54972,7 @@ async function claimLobsteraiDailyCheckin(credential, product, clientVersion, fe
     return { kind: "inactive", message: "\u5F53\u524D\u4E0D\u53EF\u7B7E\u5230" };
   }
   const url = `${product.apiBase}${LOBSTERAI_ACTIVITY_CONTEXT_PATH}/${encodeURIComponent(slot2.activityCode)}/actions/check_in`;
-  const result = await requestJson2(url, credential, product, fetcher, {
+  const result = await requestJson(url, credential, product, fetcher, {
     method: "POST",
     body: JSON.stringify({
       configRevision: slot2.configRevision,
@@ -56826,7 +55000,7 @@ async function claimLobsteraiDailyCheckin(credential, product, clientVersion, fe
   };
 }
 async function fetchLobsteraiCreditBalance(credential, product, fetcher = fetch) {
-  const result = await requestJson2(
+  const result = await requestJson(
     `${product.apiBase}${LOBSTERAI_PROFILE_SUMMARY_PATH}`,
     credential,
     product,
@@ -56841,7 +55015,7 @@ async function fetchLobsteraiCreditBalance(credential, product, fetcher = fetch)
     for (const item of items) {
       if (typeof item !== "object" || item === null) continue;
       const record = item;
-      const remaining = readNumber7(record, "creditsRemaining");
+      const remaining = readNumber6(record, "creditsRemaining");
       const type = typeof record.type === "string" ? record.type : "";
       const label = typeof record.label === "string" ? record.label : "";
       const expiresAt = typeof record.expiresAt === "string" ? record.expiresAt : "";
@@ -56881,7 +55055,7 @@ async function fetchLobsteraiCreditBalance(credential, product, fetcher = fetch)
       if (pkg.used <= 0) pkg.used = roundCredits2(Math.max(0, face - pkg.remaining));
     }
   }
-  const total = roundCredits2(Math.max(0, readNumber7(envelope.data, "totalCreditsRemaining")));
+  const total = roundCredits2(Math.max(0, readNumber6(envelope.data, "totalCreditsRemaining")));
   if (total === 0 && packages.length === 0) return null;
   const expiredTotal = roundCredits2(
     packages.reduce((sum, pkg) => sum + (pkg.active ? 0 : Math.max(0, pkg.remaining)), 0)
@@ -56932,7 +55106,7 @@ function readBool3(source, key) {
   if (typeof value === "string") return value.trim().toLowerCase() === "true";
   return false;
 }
-function readNumber8(source, key) {
+function readNumber7(source, key) {
   const value = source[key];
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim().length > 0) {
@@ -57024,9 +55198,9 @@ function parseCreditBalance(metrics) {
     const label = CREDIT_METRIC_LABELS[name2];
     if (label === void 0) continue;
     sawAnyCreditMetric = true;
-    const amount = readNumber8(record, "package_credit_amount");
-    const used = readNumber8(record, "package_credit_used");
-    const remain = readNumber8(record, "package_credit_remain");
+    const amount = readNumber7(record, "package_credit_amount");
+    const used = readNumber7(record, "package_credit_used");
+    const remain = readNumber7(record, "package_credit_remain");
     if (name2 === TOTAL_CREDIT_METRIC) totalRemain = remain;
     if (amount <= 0 && remain <= 0) continue;
     packages.push({
@@ -57079,7 +55253,7 @@ function parseActivity(item) {
     status: readString6(item, "status"),
     // 可领积分数：实测字段名是 `benefitAmount`（值 1000）。
     // 保留另两个候选名作兼容回退，取不到才为 0。
-    amount: readNumber8(item, "benefitAmount") || readNumber8(item, "amount") || readNumber8(item, "creditAmount")
+    amount: readNumber7(item, "benefitAmount") || readNumber7(item, "amount") || readNumber7(item, "creditAmount")
   };
 }
 async function fetchCodeArtsOpsActivitiesDetailed(credential, fetcher = fetch) {
@@ -57142,7 +55316,7 @@ async function claimCodeArtsDailyCheckin(credential, fetcher = fetch) {
       fetcher
     );
   }
-  const claimCredit = readNumber8(claimResult.data, "benefitAmount") || readNumber8(claimResult.data, "credit") || readNumber8(claimResult.data, "credits") || readNumber8(claimResult.data, "creditAmount") || readNumber8(claimResult.data, "amount");
+  const claimCredit = readNumber7(claimResult.data, "benefitAmount") || readNumber7(claimResult.data, "credit") || readNumber7(claimResult.data, "credits") || readNumber7(claimResult.data, "creditAmount") || readNumber7(claimResult.data, "amount");
   return {
     kind: "claimed",
     credit: claimCredit > 0 ? claimCredit : activity.amount,
@@ -57180,7 +55354,7 @@ function classifyTraeCheckinError(httpStatus, code) {
   }
   return { type: "Unknown", cooldownSecs: 0 };
 }
-function readNumber9(source, key) {
+function readNumber8(source, key) {
   const value = source[key];
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
@@ -57194,7 +55368,7 @@ function readClaimCode(body) {
   if (typeof raw === "string" && /^-?\d+$/.test(raw.trim())) return Number(raw.trim());
   return raw === void 0 ? 0 : -1;
 }
-async function postJson3(path2, credential, body, fetcher, userId) {
+async function postJson2(path2, credential, body, fetcher, userId) {
   const uid = userId ?? credential.uid;
   if (uid.length === 0) {
     return { ok: false, message: "\u7F3A\u5C11 user_id\uFF0C\u65E0\u6CD5\u6784\u9020\u8BBE\u5907\u8EAB\u4EFD", httpStatus: 0 };
@@ -57227,7 +55401,7 @@ async function postJson3(path2, credential, body, fetcher, userId) {
   }
 }
 async function fetchTraeCheckinStatus(credential, _product, fetcher = fetch) {
-  const result = await postJson3(TRAE_CHECKIN_STATUS_PATH, credential, "{}", fetcher, credential.uid);
+  const result = await postJson2(TRAE_CHECKIN_STATUS_PATH, credential, "{}", fetcher, credential.uid);
   if (!result.ok) return null;
   const body = result.body;
   const code = readClaimCode(body);
@@ -57235,11 +55409,11 @@ async function fetchTraeCheckinStatus(credential, _product, fetcher = fetch) {
   return {
     active: body.enable === true,
     todayCheckedIn: body.checked_in === true,
-    streakDays: readNumber9(body, "streak_days") || 0,
-    dailyCredit: readNumber9(body, "credits") || 0,
+    streakDays: readNumber8(body, "streak_days") || 0,
+    dailyCredit: readNumber8(body, "credits") || 0,
     todayCredit: 0,
     isStreakDay: false,
-    totalCredits: readNumber9(body, "total_credits") || 0,
+    totalCredits: readNumber8(body, "total_credits") || 0,
     checkinDates: [],
     activityName: "",
     themeName: "",
@@ -57251,7 +55425,7 @@ async function claimTraeDailyCheckin(credential, product, fetcher = fetch, gener
   const doClaim = async () => {
     let lastError = { ok: false, httpStatus: 0, message: "", code: 0 };
     for (let attempt = 0; attempt <= Math.max(0, retryCount); attempt++) {
-      const result = await postJson3(TRAE_CHECKIN_CLAIM_PATH, credential, "{}", fetcher, uid);
+      const result = await postJson2(TRAE_CHECKIN_CLAIM_PATH, credential, "{}", fetcher, uid);
       if (result.ok) {
         const c = readClaimCode(result.body);
         return { ok: true, body: result.body, httpStatus: result.httpStatus, message: "", code: c };
@@ -57301,7 +55475,7 @@ async function claimTraeDailyCheckin(credential, product, fetcher = fetch, gener
   };
 }
 async function fetchTraeCreditBalance(credential, _product, fetcher = fetch) {
-  const result = await postJson3(
+  const result = await postJson2(
     TRAE_ENT_USAGE_PATH,
     credential,
     JSON.stringify({ require_usage: true, req_source: 2 }),
@@ -57322,11 +55496,11 @@ async function fetchTraeCreditBalance(credential, _product, fetcher = fetch) {
     if (typeof base !== "object" || base === null) continue;
     const quota = base.quota;
     if (typeof quota !== "object" || quota === null) continue;
-    const creditsLimit = readNumber9(quota, "credits_limit");
+    const creditsLimit = readNumber8(quota, "credits_limit");
     if (creditsLimit <= 0) continue;
     const usage = entry.usage;
-    const used = typeof usage === "object" && usage !== null ? readNumber9(usage, "credits_amount") : 0;
-    const expireSec = readNumber9(entry, "expire_time");
+    const used = typeof usage === "object" && usage !== null ? readNumber8(usage, "credits_amount") : 0;
+    const expireSec = readNumber8(entry, "expire_time");
     const deductionEndMs = expireSec > 0 ? expireSec * 1e3 : void 0;
     const pkg = {
       // ⚠️ 包名用 `display_desc`（实测"每月登录赠送"/"签到奖励"/"免费"），
@@ -57349,16 +55523,16 @@ async function fetchTraeCreditBalance(credential, _product, fetcher = fetch) {
 }
 
 // vendor/channel-pack/src/account-probe.ts
-import { credentialRef as credentialRef10 } from "@deepseek-ai/dsh-credentials";
-import { createUserMessage, LlmError as LlmError16 } from "@deepseek-ai/dsh-llm";
+import { credentialRef as credentialRef9 } from "@deepseek-ai/dsh-credentials";
+import { createUserMessage, LlmError as LlmError15 } from "@deepseek-ai/dsh-llm";
 
 // vendor/channel-pack/src/gemini-adapter.ts
 import {
   CONTEXT_WINDOW_EXCEEDED_CODE as CONTEXT_WINDOW_EXCEEDED_CODE3,
   isContextWindowExceededError as isContextWindowExceededError3,
-  LlmAdapter as LlmAdapter10,
-  LlmError as LlmError15,
-  ReasoningEffortId as ReasoningEffortId11
+  LlmAdapter as LlmAdapter9,
+  LlmError as LlmError14,
+  ReasoningEffortId as ReasoningEffortId10
 } from "@deepseek-ai/dsh-llm";
 
 // vendor/channel-pack/src/gemini-messages.ts
@@ -57834,7 +56008,7 @@ var GEMINI_TOKEN_COUNT_OVERFLOW = /\btoken\s+count\b[\s\S]{0,60}?\bexceeds?\s+th
 function isGeminiContextOverflow(text) {
   return isContextWindowExceededError3(text) || GEMINI_TOKEN_COUNT_OVERFLOW.test(text);
 }
-var GeminiAdapter = class extends LlmAdapter10 {
+var GeminiAdapter = class extends LlmAdapter9 {
   constructor(options) {
     super();
     this.options = options;
@@ -57925,7 +56099,7 @@ var GeminiAdapter = class extends LlmAdapter10 {
     }
     if (imageRefs.size === 0) return void 0;
     if (entry?.supportsImage !== true) {
-      throw new LlmError15(
+      throw new LlmError14(
         `gemini: \u6A21\u578B "${model}" \u4E0D\u652F\u6301\u56FE\u7247\u8F93\u5165`,
         "UNSUPPORTED_CONTENT"
       );
@@ -57937,7 +56111,7 @@ var GeminiAdapter = class extends LlmAdapter10 {
       if (inline === void 0) {
         const readImage = this.options.readImage;
         if (readImage === void 0) {
-          throw new LlmError15(
+          throw new LlmError14(
             "gemini: \u56FE\u7247\u8F93\u5165\u9700\u8981\u9644\u4EF6\u670D\u52A1\uFF08readImage / readImageRequest \u5747\u672A\u63D0\u4F9B\uFF09",
             "UNSUPPORTED_CONTENT"
           );
@@ -57945,7 +56119,7 @@ var GeminiAdapter = class extends LlmAdapter10 {
         try {
           inline = await readImage(ref);
         } catch (error) {
-          throw new LlmError15(
+          throw new LlmError14(
             "gemini: \u56FE\u7247\u9644\u4EF6\u8BFB\u53D6\u5931\u8D25\uFF1B\u9644\u4EF6\u670D\u52A1\u53EF\u80FD\u672A\u5C31\u7EEA\uFF0C\u6216\u8BE5\u5BF9\u8C61\u5DF2\u4E0D\u5B58\u5728\u3002",
             "UNSUPPORTED_CONTENT",
             { cause: error }
@@ -57953,20 +56127,20 @@ var GeminiAdapter = class extends LlmAdapter10 {
         }
       }
       if (inline === void 0) {
-        throw new LlmError15(
+        throw new LlmError14(
           "gemini: \u56FE\u7247\u9644\u4EF6\u8BFB\u53D6\u4E0D\u5230\u5185\u5BB9\uFF1B\u9644\u4EF6\u670D\u52A1\u53EF\u80FD\u672A\u5C31\u7EEA\uFF0C\u6216\u8BE5\u5BF9\u8C61\u5DF2\u4E0D\u5B58\u5728\u3002",
           "UNSUPPORTED_CONTENT"
         );
       }
       if (inline.data.byteLength > GEMINI_MAX_IMAGE_BYTES_INLINE) {
-        throw new LlmError15(
+        throw new LlmError14(
           `gemini: \u56FE\u7247\u4F53\u79EF ${inline.data.byteLength} \u5B57\u8282\u8D85\u8FC7\u4E0A\u6E38\u5185\u8054\u4E0A\u9650 ${GEMINI_MAX_IMAGE_BYTES_INLINE} \u5B57\u8282`,
           "UNSUPPORTED_CONTENT"
         );
       }
       const data = normalizeBase64(Buffer.from(inline.data).toString("base64"));
       if (data === void 0) {
-        throw new LlmError15("gemini: \u56FE\u7247\u7F16\u7801\u4E0D\u662F\u5408\u6CD5 base64", "UNSUPPORTED_CONTENT");
+        throw new LlmError14("gemini: \u56FE\u7247\u7F16\u7801\u4E0D\u662F\u5408\u6CD5 base64", "UNSUPPORTED_CONTENT");
       }
       images.set(id, { mediaType: inline.mediaType === "" ? "image/png" : inline.mediaType, data });
     }
@@ -57986,7 +56160,7 @@ var GeminiAdapter = class extends LlmAdapter10 {
   async *stream(options) {
     const entry = this.loadModels().find((item) => item.id === geminiCanonicalModelId(options.model));
     if (entry === void 0) {
-      throw new LlmError15(
+      throw new LlmError14(
         `gemini: \u6A21\u578B "${options.model}" \u4E0D\u5728\u672C provider \u76EE\u5F55\u4E2D\uFF08\u4EC5\u652F\u6301 ${GEMINI_UPSTREAM_FLASH}\uFF09`,
         "INVALID_REQUEST",
         // 模型名写错是确定性失败：带上 404，网关才不会把它当 502 让客户端白重试。
@@ -57999,7 +56173,7 @@ var GeminiAdapter = class extends LlmAdapter10 {
       credential = await this.options.resolveCredential(options.model);
     }
     if (credential === void 0 || credential.access_token === "") {
-      throw new LlmError15("gemini: no usable credential; log in first", "MISSING_CREDENTIAL");
+      throw new LlmError14("gemini: no usable credential; log in first", "MISSING_CREDENTIAL");
     }
     const requested = options.reasoningEffort === void 0 ? void 0 : String(options.reasoningEffort);
     const declared = entry === void 0 ? void 0 : geminiReasoningInfo(entry);
@@ -58041,7 +56215,7 @@ var GeminiAdapter = class extends LlmAdapter10 {
             ...options.signal === void 0 ? {} : { signal: options.signal }
           });
           if (probe.error !== void 0) {
-            throw new LlmError15(
+            throw new LlmError14(
               `gemini: \u9879\u76EE\u53F7\u63A2\u6D4B\u5931\u8D25\uFF0C\u672A\u53D1\u63A8\u7406\uFF08\u4E0E\u539F\u7248\u4E00\u81F4\uFF09\u2014 ${probe.error}`,
               "SERVER"
             );
@@ -58080,7 +56254,7 @@ var GeminiAdapter = class extends LlmAdapter10 {
         const wire = marshalAlphabetical(envelope);
         const wireBytes = Buffer.byteLength(wire, "utf8");
         if (wireBytes > GEMINI_MAX_REQUEST_BODY_BYTES) {
-          throw new LlmError15(
+          throw new LlmError14(
             `gemini: \u8BF7\u6C42\u4F53 ${wireBytes} \u5B57\u8282\u8D85\u8FC7\u4E0A\u9650 ${GEMINI_MAX_REQUEST_BODY_BYTES} \u5B57\u8282`,
             CONTEXT_WINDOW_EXCEEDED_CODE3
           );
@@ -58095,8 +56269,8 @@ var GeminiAdapter = class extends LlmAdapter10 {
             signal: options.signal
           });
         } catch (error) {
-          if (error instanceof LlmError15) throw error;
-          throw new LlmError15(
+          if (error instanceof LlmError14) throw error;
+          throw new LlmError14(
             `gemini: \u8BF7\u6C42\u53D1\u9001\u5931\u8D25 \u2014 ${error instanceof Error ? error.message : String(error)}`,
             "TRANSPORT",
             { cause: error }
@@ -58104,7 +56278,7 @@ var GeminiAdapter = class extends LlmAdapter10 {
         }
         if (response.ok) {
           if (response.body === null) {
-            throw new LlmError15("gemini: \u54CD\u5E94\u7F3A\u5C11 body", "EMPTY_RESPONSE");
+            throw new LlmError14("gemini: \u54CD\u5E94\u7F3A\u5C11 body", "EMPTY_RESPONSE");
           }
           const body = response.body;
           try {
@@ -58175,7 +56349,7 @@ var GeminiAdapter = class extends LlmAdapter10 {
               continue;
             }
           }
-          throw new LlmError15(
+          throw new LlmError14(
             `gemini: \u6A21\u578B ${options.model} \u7684\u6240\u6709\u8D26\u53F7\u5747\u4E0D\u53EF\u7528\uFF08\u9650\u6D41\u6216\u989D\u5EA6\u8017\u5C3D\uFF09\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5`,
             "QUOTA_EXCEEDED",
             { status }
@@ -58200,15 +56374,15 @@ var GeminiAdapter = class extends LlmAdapter10 {
     const detail = text === "" ? "" : ` \u2014 ${text.slice(0, 500)}`;
     const message2 = `gemini: HTTP ${status}${detail}`;
     if (status === 400 && isGeminiContextOverflow(text)) {
-      return new LlmError15(message2, CONTEXT_WINDOW_EXCEEDED_CODE3, { status });
+      return new LlmError14(message2, CONTEXT_WINDOW_EXCEEDED_CODE3, { status });
     }
     if (status === 400 && isGeminiQuotaText(text)) {
-      return new LlmError15(message2, "QUOTA_EXCEEDED", { status });
+      return new LlmError14(message2, "QUOTA_EXCEEDED", { status });
     }
-    if (status === 429) return new LlmError15(message2, "RATE_LIMIT", { status });
-    if (status === 403 || status === 404) return new LlmError15(message2, "SERVER", { status });
-    if (status === 401) return new LlmError15(message2, "AUTH", { status });
-    return new LlmError15(message2, httpErrorCode4(status), { status });
+    if (status === 429) return new LlmError14(message2, "RATE_LIMIT", { status });
+    if (status === 403 || status === 404) return new LlmError14(message2, "SERVER", { status });
+    if (status === 401) return new LlmError14(message2, "AUTH", { status });
+    return new LlmError14(message2, httpErrorCode4(status), { status });
   }
 };
 function registerGeminiLlm(ctx, options) {
@@ -58224,7 +56398,7 @@ var PROBE_PROMPT = "\u53EA\u56DE\u7B54\u4E24\u4E2A\u5B57\uFF1A\u6536\u5230";
 var PROBE_SYSTEM = "You are a helpful assistant.";
 var PROBE_TIMEOUT_MS = 12e4;
 function isRateLimitFailure(error) {
-  if (error instanceof LlmError16) {
+  if (error instanceof LlmError15) {
     if (error.code === "RATE_LIMIT" || error.code === "QUOTA_EXCEEDED" || error.code === "QUOTA") return true;
   }
   const message2 = error instanceof Error ? error.message : String(error);
@@ -58233,7 +56407,7 @@ function isRateLimitFailure(error) {
 async function probeWithAdapter(entry, credential, modelId, timeoutMs) {
   if (!isSupportedProvider(entry.provider)) throw new Error("provider-unsupported: \u4E0D\u652F\u6301\u6B64\u6E20\u9053");
   const signal = AbortSignal.timeout(timeoutMs);
-  const ref = credentialRef10(entry.credentialRef);
+  const ref = credentialRef9(entry.credentialRef);
   const lobsteraiProduct = lobsteraiProductById(entry.provider);
   const qoderProduct = qoderProductById(entry.provider);
   const clineProduct = clineProductById(entry.provider);
@@ -58416,7 +56590,7 @@ async function resetAllAccounts(pool, provider) {
 }
 
 // vendor/channel-pack/src/backup.ts
-import { credentialRef as credentialRef11 } from "@deepseek-ai/dsh-credentials";
+import { credentialRef as credentialRef10 } from "@deepseek-ai/dsh-credentials";
 
 // vendor/channel-pack/src/types.ts
 var BACKUP_FORMAT = "channel-pack/backup";
@@ -58431,7 +56605,7 @@ async function exportBackup(pool, credentials) {
   const warnings = [];
   for (const entry of state.accounts) {
     try {
-      const resolved = await credentials.resolve(credentialRef11(entry.credentialRef));
+      const resolved = await credentials.resolve(credentialRef10(entry.credentialRef));
       if (resolved === void 0) {
         warnings.push(`${entry.id}: \u51ED\u636E\u672A\u914D\u7F6E`);
       } else {
@@ -58507,7 +56681,7 @@ async function importBackup(credentials, pool, raw) {
       continue;
     }
     try {
-      await credentials.set(credentialRef11(refName), value);
+      await credentials.set(credentialRef10(refName), value);
       credentialsImported++;
     } catch (error) {
       skipped.push(refName);
@@ -58532,8 +56706,8 @@ async function importBackup(credentials, pool, raw) {
 }
 
 // vendor/channel-pack/src/opencode-rpc.ts
-import { credentialRef as credentialRef12 } from "@deepseek-ai/dsh-credentials";
-import { randomBytes as randomBytes10 } from "node:crypto";
+import { credentialRef as credentialRef11 } from "@deepseek-ai/dsh-credentials";
+import { randomBytes as randomBytes9 } from "node:crypto";
 
 // vendor/channel-pack/src/opencode-product.ts
 var OPENCODE = {
@@ -58641,15 +56815,15 @@ function classifyOpencodeError(status, body, headers) {
 }
 
 // vendor/channel-pack/src/opencode-auth.ts
-import { randomBytes as randomBytes9 } from "node:crypto";
+import { randomBytes as randomBytes8 } from "node:crypto";
 
 // vendor/channel-pack/src/opencode.ts
-import { createHash as createHash6, randomBytes as randomBytes8 } from "node:crypto";
+import { createHash as createHash6, randomBytes as randomBytes7 } from "node:crypto";
 var BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
 var SESSION_TAIL_LENGTH = 26;
 var SESSION_RANDOM_LENGTH = SESSION_TAIL_LENGTH - 12;
 function randomBase62(length) {
-  const bytes = randomBytes8(length);
+  const bytes = randomBytes7(length);
   let out = "";
   for (let i = 0; i < length; i++) out += BASE62[bytes[i] % BASE62.length];
   return out;
@@ -58770,8 +56944,8 @@ function isAnonymousCredential(apiKey) {
 async function ensureDefaultAnonymousSlot(addEntry, writeCredential, listEntries, alreadyHasAnonymous) {
   try {
     if (alreadyHasAnonymous()) return "";
-    const id = `${OPENCODE.id}-anon-${randomBytes9(3).toString("hex")}`;
-    const refName = `OPENCODE_ANON_${randomBytes9(4).toString("hex").toUpperCase()}`;
+    const id = `${OPENCODE.id}-anon-${randomBytes8(3).toString("hex")}`;
+    const refName = `OPENCODE_ANON_${randomBytes8(4).toString("hex").toUpperCase()}`;
     await writeCredential(refName, JSON.stringify({
       api_key: OPENCODE.anonymousKey,
       nickname: "\u533F\u540D\u901A\u9053"
@@ -58981,7 +57155,7 @@ async function handleOpencodeRpc(ctx, pool, method, payload) {
           return done({ accountId: id, existed: true });
         }
         const nickname = typeof req.nickname === "string" && req.nickname.trim().length > 0 ? req.nickname.trim() : `OpenCode ${apiKey.slice(-6)}`;
-        await ctx.credentials.set(credentialRef12(refName), JSON.stringify({
+        await ctx.credentials.set(credentialRef11(refName), JSON.stringify({
           api_key: apiKey,
           nickname,
           // 指纹在此**首次固化**，之后由池里的代次权威重算（见 index.ts 接线注释）。
@@ -59002,11 +57176,11 @@ async function handleOpencodeRpc(ctx, pool, method, payload) {
       }
       case "opencode.addAnonymous": {
         const req = call.payload;
-        const id = `${OPENCODE.id}-anon-${randomBytes10(3).toString("hex")}`;
-        const refName = `OPENCODE_ANON_${randomBytes10(4).toString("hex").toUpperCase()}`;
+        const id = `${OPENCODE.id}-anon-${randomBytes9(3).toString("hex")}`;
+        const refName = `OPENCODE_ANON_${randomBytes9(4).toString("hex").toUpperCase()}`;
         const count2 = pool.listAccountsByProvider(OPENCODE.id).filter((a) => a.id.startsWith(`${OPENCODE.id}-anon-`)).length;
         const nickname = typeof req?.nickname === "string" && req.nickname.trim().length > 0 ? req.nickname.trim() : `\u533F\u540D\u901A\u9053 ${count2 + 1}`;
-        await ctx.credentials.set(credentialRef12(refName), JSON.stringify({
+        await ctx.credentials.set(credentialRef11(refName), JSON.stringify({
           api_key: OPENCODE.anonymousKey,
           nickname
         }));
@@ -59757,7 +57931,7 @@ async function collectCreditsStatus(accounts, product, deps) {
   for (const entry of accounts) {
     let status = null;
     try {
-      const resolved = await deps.resolve(credentialRef13(entry.credentialRef));
+      const resolved = await deps.resolve(credentialRef12(entry.credentialRef));
       if (resolved !== void 0) {
         const credential = JSON.parse(resolved.value);
         status = await fetchStatus(credential, product);
@@ -59788,7 +57962,7 @@ async function collectClaimResults(accounts, product, deps) {
   for (const entry of accounts) {
     let outcome;
     try {
-      const resolved = await deps.resolve(credentialRef13(entry.credentialRef));
+      const resolved = await deps.resolve(credentialRef12(entry.credentialRef));
       if (resolved === void 0) {
         outcome = { kind: "failed", code: -1, message: "\u51ED\u636E\u672A\u914D\u7F6E" };
       } else {
@@ -59833,7 +58007,7 @@ async function collectCreditBalances(accounts, product, deps) {
     let error;
     let extra;
     try {
-      const resolved = await deps.resolve(credentialRef13(entry.credentialRef));
+      const resolved = await deps.resolve(credentialRef12(entry.credentialRef));
       if (resolved === void 0) {
         error = "\u51ED\u636E\u672A\u914D\u7F6E";
       } else {
@@ -59893,27 +58067,9 @@ function providerIdsOf(llm, modelAdapters) {
   const keys = Object.keys(modelAdapters ?? {});
   return keys.length > 0 ? keys.map((id) => ({ id })) : void 0;
 }
-function registerChannelPackRpc(ctx, pool, codearts, buddy, workbuddy, lobsterai, qoder, qoderCn, trae, cline, loomy, raccoon, minimax, zcode, gemini, modelAdapters, config = {}) {
+function registerChannelPackRpc(ctx, pool, auths, modelAdapters, config = {}) {
   ctx.inject(["connection"], (connectionCtx) => {
-    registerChannelPackEndpoints(
-      connectionCtx,
-      pool,
-      codearts,
-      buddy,
-      workbuddy,
-      lobsterai,
-      qoder,
-      qoderCn,
-      trae,
-      cline,
-      loomy,
-      raccoon,
-      minimax,
-      zcode,
-      gemini,
-      modelAdapters,
-      config
-    );
+    registerChannelPackEndpoints(connectionCtx, pool, auths, modelAdapters, config);
   });
 }
 function broadcastCatalogChanged(ctx) {
@@ -59935,7 +58091,8 @@ async function fullCatalogIds(ctx, modelAdapters, provider) {
     return { error: `\u8BFB\u53D6\u6A21\u578B\u5217\u8868\u5931\u8D25\uFF1A${reason}` };
   }
 }
-function registerChannelPackEndpoints(ctx, pool, codearts, buddy, workbuddy, lobsterai, qoder, qoderCn, trae, cline, loomy, raccoon, minimax, zcode, gemini, modelAdapters, config = {}) {
+function registerChannelPackEndpoints(ctx, pool, auths, modelAdapters, config = {}) {
+  const { codearts, buddy, workbuddy, lobsterai, qoder, qoderCn, trae, cline, loomy, raccoon, minimax, zcode, gemini } = auths;
   const connection = ctx.connection ?? ctx.get("connection");
   if (!connection || typeof connection.fetch?.register !== "function") {
     ctx.logger.warn("[channel-pack] connection.fetch not available, RPC endpoints not registered");
@@ -60041,7 +58198,7 @@ function registerChannelPackEndpoints(ctx, pool, codearts, buddy, workbuddy, lob
     const out = [];
     for (const account of accounts) {
       try {
-        const resolved = await ctx.credentials.resolve(credentialRef13(account.credentialRef));
+        const resolved = await ctx.credentials.resolve(credentialRef12(account.credentialRef));
         if (!resolved) {
           out.push(account);
           continue;
@@ -60175,7 +58332,7 @@ function registerChannelPackEndpoints(ctx, pool, codearts, buddy, workbuddy, lob
               nickname = await fetchQoderUserNickname(credential, product);
               if (nickname !== void 0 && loginResult.access.length > 0) {
                 const updated = withQoderNickname(credential, nickname);
-                await ctx.credentials.set(credentialRef13(refName), JSON.stringify(updated));
+                await ctx.credentials.set(credentialRef12(refName), JSON.stringify(updated));
               }
             }
             await pool.updateAccount(id, {
@@ -60630,7 +58787,7 @@ function registerChannelPackEndpoints(ctx, pool, codearts, buddy, workbuddy, lob
         const accounts = await pool.listAllAccounts();
         const entry = accounts.find((a) => a.id === req.accountId);
         if (!entry) return { ok: true, value: { done: false } };
-        const ref = credentialRef13(entry.credentialRef);
+        const ref = credentialRef12(entry.credentialRef);
         const resolved = await ctx.credentials.resolve(ref);
         if (!resolved) return { ok: true, value: { done: false } };
         if (entry.provider === ZCODE.id) {
@@ -60730,7 +58887,7 @@ function registerChannelPackEndpoints(ctx, pool, codearts, buddy, workbuddy, lob
         if (account2 === void 0) {
           return { ok: false, error: { code: "bad-request", message: "\u8D26\u53F7\u4E0D\u5B58\u5728" } };
         }
-        const resolved = await ctx.credentials.resolve(credentialRef13(account2.credentialRef));
+        const resolved = await ctx.credentials.resolve(credentialRef12(account2.credentialRef));
         if (!resolved) {
           return { ok: false, error: { code: "bad-request", message: "\u51ED\u636E\u672A\u914D\u7F6E" } };
         }
@@ -60824,7 +58981,7 @@ function registerChannelPackEndpoints(ctx, pool, codearts, buddy, workbuddy, lob
         if (account2 === void 0) {
           return { ok: false, error: { code: "bad-request", message: "\u8D26\u53F7\u4E0D\u5B58\u5728" } };
         }
-        const resolved = await ctx.credentials.resolve(credentialRef13(account2.credentialRef));
+        const resolved = await ctx.credentials.resolve(credentialRef12(account2.credentialRef));
         if (!resolved) {
           return { ok: false, error: { code: "bad-request", message: "\u51ED\u636E\u672A\u914D\u7F6E" } };
         }
@@ -61069,7 +59226,7 @@ function registerChannelPackEndpoints(ctx, pool, codearts, buddy, workbuddy, lob
         if (req.provider === LOOMY.id) {
           const values = [];
           for (const account2 of accounts) {
-            const resolved = await ctx.credentials.resolve(credentialRef13(account2.credentialRef));
+            const resolved = await ctx.credentials.resolve(credentialRef12(account2.credentialRef));
             if (!resolved) {
               values.push({
                 accountId: account2.id,
@@ -61140,7 +59297,7 @@ function registerChannelPackEndpoints(ctx, pool, codearts, buddy, workbuddy, lob
           const results = [];
           const outcomes = [];
           for (const account2 of accounts) {
-            const resolved = await ctx.credentials.resolve(credentialRef13(account2.credentialRef));
+            const resolved = await ctx.credentials.resolve(credentialRef12(account2.credentialRef));
             let accountOutcomes;
             if (!resolved) {
               accountOutcomes = [{ kind: "failed", code: -1, message: "\u51ED\u636E\u672A\u914D\u7F6E" }];
@@ -61225,7 +59382,7 @@ function registerChannelPackEndpoints(ctx, pool, codearts, buddy, workbuddy, lob
           const { product } = requireQoderFamily(req.provider);
           const values = [];
           for (const account2 of accounts) {
-            const resolved = await ctx.credentials.resolve(credentialRef13(account2.credentialRef));
+            const resolved = await ctx.credentials.resolve(credentialRef12(account2.credentialRef));
             if (!resolved) {
               values.push({
                 accountId: account2.id,
@@ -61330,7 +59487,7 @@ function registerChannelPackEndpoints(ctx, pool, codearts, buddy, workbuddy, lob
         if (req.provider === CLINE.id) {
           const values = [];
           for (const account2 of accounts) {
-            const resolved = await ctx.credentials.resolve(credentialRef13(account2.credentialRef));
+            const resolved = await ctx.credentials.resolve(credentialRef12(account2.credentialRef));
             if (!resolved) {
               values.push({
                 accountId: account2.id,
@@ -61368,7 +59525,7 @@ function registerChannelPackEndpoints(ctx, pool, codearts, buddy, workbuddy, lob
         if (req.provider === LOOMY.id) {
           const values = [];
           for (const account2 of accounts) {
-            const resolved = await ctx.credentials.resolve(credentialRef13(account2.credentialRef));
+            const resolved = await ctx.credentials.resolve(credentialRef12(account2.credentialRef));
             if (!resolved) {
               values.push({
                 accountId: account2.id,
@@ -61404,7 +59561,7 @@ function registerChannelPackEndpoints(ctx, pool, codearts, buddy, workbuddy, lob
         if (req.provider === RACCOON.id) {
           const values = [];
           for (const account2 of accounts) {
-            const resolved = await ctx.credentials.resolve(credentialRef13(account2.credentialRef));
+            const resolved = await ctx.credentials.resolve(credentialRef12(account2.credentialRef));
             if (!resolved) {
               values.push({
                 accountId: account2.id,
@@ -61441,7 +59598,7 @@ function registerChannelPackEndpoints(ctx, pool, codearts, buddy, workbuddy, lob
         if (req.provider === ZCODE.id) {
           const values = [];
           for (const account2 of accounts) {
-            const resolved = await ctx.credentials.resolve(credentialRef13(account2.credentialRef));
+            const resolved = await ctx.credentials.resolve(credentialRef12(account2.credentialRef));
             if (!resolved) {
               values.push({
                 accountId: account2.id,
@@ -61544,7 +59701,7 @@ function registerChannelPackEndpoints(ctx, pool, codearts, buddy, workbuddy, lob
         const accounts = await pool.listAccounts(req.provider);
         const values = [];
         for (const account2 of accounts) {
-          const resolved = await ctx.credentials.resolve(credentialRef13(account2.credentialRef));
+          const resolved = await ctx.credentials.resolve(credentialRef12(account2.credentialRef));
           if (!resolved) {
             values.push({
               accountId: account2.id,
@@ -62284,6 +60441,1898 @@ function registerChannelPackEndpoints(ctx, pool, codearts, buddy, workbuddy, lob
 function reply(rpcId, result) {
   const value = typeof result === "object" && result !== null && result.ok === false ? { ...result, error: { ...result.error, details: {} } } : result;
   return Response.json({ type: "server-response", rpcId, result: value });
+}
+
+// vendor/channel-pack/src/channel-registry.ts
+function mountChannels(ctx, host, specs) {
+  return specs.map((spec) => {
+    const auth = spec.createAuth(ctx);
+    const adapter = spec.registerLlm(ctx, host, auth);
+    return { spec, auth, adapter };
+  });
+}
+function stopChannels(runtimes) {
+  for (const { auth } of runtimes) auth.stop?.();
+}
+
+// vendor/channel-pack/src/raccoon-auth.ts
+import { Service as Service9 } from "@deepseek-ai/cordis";
+import { credentialRef as credentialRef13 } from "@deepseek-ai/dsh-credentials";
+
+// vendor/channel-pack/src/raccoon-credits.ts
+var RACCOON_LOGIN_REWARD_POINTS = 3e3;
+var RACCOON_LOGIN_REWARD_EVENT_NAME = "\u684C\u9762\u7AEF\u767B\u5F55\u5956\u52B1";
+function parseEnvelope(payload, status) {
+  const record = typeof payload === "object" && payload !== null && !Array.isArray(payload) ? payload : {};
+  const code = typeof record.code === "number" ? record.code : status >= 400 ? status : 0;
+  const message2 = typeof record.message === "string" && record.message.length > 0 ? record.message : typeof record.details === "string" ? record.details : "";
+  const data = typeof record.data === "object" && record.data !== null && !Array.isArray(record.data) ? record.data : void 0;
+  return { ok: code === 0, code, message: message2, data };
+}
+function readNumber9(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
+}
+async function requestJson2(url, credential, product, init, fetcher) {
+  try {
+    const response = await fetcher(url, {
+      method: init.method,
+      headers: raccoonHeaders(credential, {
+        platform: product.clientPlatform,
+        version: product.clientVersion
+      }),
+      ...init.body === void 0 ? {} : { body: init.body },
+      signal: AbortSignal.timeout(RACCOON_REQUEST_TIMEOUT_MS)
+    });
+    const parsed = await response.json();
+    return parseEnvelope(parsed, response.status);
+  } catch (error) {
+    return {
+      ok: false,
+      code: -1,
+      message: error instanceof Error ? error.message : String(error),
+      data: void 0
+    };
+  }
+}
+function makePackage2(name2, remaining) {
+  return {
+    name: name2,
+    unit: "\u79EF\u5206",
+    remaining,
+    total: remaining,
+    used: 0,
+    active: true,
+    cycleStartTime: "",
+    cycleEndTime: "",
+    expiredTime: ""
+  };
+}
+async function fetchRaccoonCreditBalance(product, credential, fetcher = fetch) {
+  const envelope = await requestJson2(
+    `${product.apiBase}${RACCOON_POINTS_PREFIX}/balance`,
+    credential,
+    product,
+    { method: "GET" },
+    fetcher
+  );
+  if (!envelope.ok || envelope.data === void 0) return null;
+  const available2 = readNumber9(envelope.data.available_points);
+  if (available2 === void 0) return null;
+  const packages = [];
+  const reward = readNumber9(envelope.data.reward_points);
+  const daily = readNumber9(envelope.data.daily_points);
+  const topup = readNumber9(envelope.data.topup_points);
+  const monthly = readNumber9(envelope.data.monthly_points);
+  if (reward !== void 0) packages.push(makePackage2("\u5956\u52B1\u79EF\u5206", reward));
+  if (daily !== void 0) packages.push(makePackage2("\u6BCF\u65E5\u79EF\u5206", daily));
+  if (monthly !== void 0 && monthly > 0) packages.push(makePackage2("\u4F1A\u5458\u79EF\u5206", monthly));
+  if (topup !== void 0) packages.push(makePackage2("\u5145\u503C\u79EF\u5206", topup));
+  return {
+    total: available2,
+    // 极端情形（服务端只给 total 不给分项）也要有至少一个包，否则 UI 空列表
+    packages: packages.length > 0 ? packages : [makePackage2("\u53EF\u7528\u79EF\u5206", available2)],
+    expiredTotal: 0
+  };
+}
+async function claimRaccoonLoginReward(product, credential, fetcher = fetch) {
+  const envelope = await requestJson2(
+    `${product.apiBase}${RACCOON_DESKTOP_PREFIX}/login/points/grant`,
+    credential,
+    product,
+    { method: "POST" },
+    fetcher
+  );
+  if (!envelope.ok) {
+    return {
+      kind: "failed",
+      code: envelope.code,
+      message: envelope.message.length > 0 ? envelope.message : "\u9886\u53D6\u767B\u5F55\u5956\u52B1\u5931\u8D25"
+    };
+  }
+  if (envelope.data?.granted !== true) {
+    return {
+      kind: "already-claimed",
+      message: "\u8BE5\u8D26\u53F7\u5DF2\u9886\u53D6\u8FC7\u684C\u9762\u7AEF\u767B\u5F55\u5956\u52B1\uFF08\u6BCF\u53F7\u4E00\u6B21\uFF09"
+    };
+  }
+  const popup = typeof envelope.data.popup === "object" && envelope.data.popup !== null ? envelope.data.popup : void 0;
+  const points = readNumber9(popup?.points) ?? RACCOON_LOGIN_REWARD_POINTS;
+  return { kind: "claimed", credit: points, streakDays: 0, isStreakDay: false };
+}
+async function fetchRaccoonOnboardingStatus(product, credential, fetcher = fetch) {
+  const envelope = await requestJson2(
+    `${product.apiBase}${RACCOON_POINTS_PREFIX}/bills?paging.limit=50&paging.offset=0`,
+    credential,
+    product,
+    { method: "GET" },
+    fetcher
+  );
+  if (!envelope.ok || envelope.data === void 0) {
+    return { claimed: false, points: RACCOON_LOGIN_REWARD_POINTS };
+  }
+  const items = Array.isArray(envelope.data.items) ? envelope.data.items : [];
+  let claimed = false;
+  let points = RACCOON_LOGIN_REWARD_POINTS;
+  for (const raw of items) {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) continue;
+    const item = raw;
+    if (item.biz_type !== "reward_grant") continue;
+    if (item.event_name !== RACCOON_LOGIN_REWARD_EVENT_NAME) continue;
+    claimed = true;
+    const billPoints = readNumber9(item.points);
+    if (billPoints !== void 0 && billPoints > 0) points = billPoints;
+    break;
+  }
+  return { claimed, points };
+}
+
+// vendor/channel-pack/src/raccoon-oauth.ts
+import { randomBytes as randomBytes10 } from "node:crypto";
+function parseEnvelope2(payload, status) {
+  const record = typeof payload === "object" && payload !== null && !Array.isArray(payload) ? payload : {};
+  const code = typeof record.code === "number" ? record.code : status >= 400 ? status : 0;
+  const message2 = typeof record.message === "string" ? record.message : "";
+  const details = typeof record.details === "string" ? record.details : "";
+  const data = typeof record.data === "object" && record.data !== null && !Array.isArray(record.data) ? record.data : void 0;
+  return { code, message: message2, details, data };
+}
+function envelopeError(envelope, fallback) {
+  const parts = [envelope.message, envelope.details].filter((s) => s.length > 0);
+  const text = parts.length > 0 ? parts.join(": ") : fallback;
+  return new Error(`raccoon: ${text}`);
+}
+async function postJson3(url, body, fetcher, headers = {}) {
+  let response;
+  try {
+    response = await fetcher(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(RACCOON_REQUEST_TIMEOUT_MS)
+    });
+  } catch (error) {
+    throw new Error(
+      `raccoon: \u8BF7\u6C42\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+  let parsed;
+  try {
+    parsed = await response.json();
+  } catch {
+    throw new Error(`raccoon: \u54CD\u5E94\u4E0D\u662F JSON\uFF08HTTP ${response.status}\uFF09`);
+  }
+  return { envelope: parseEnvelope2(parsed, response.status), status: response.status };
+}
+function generateQrCode() {
+  return randomBytes10(16).toString("hex");
+}
+function buildQrImageUrl(product, code) {
+  const params = new URLSearchParams({ code, appname: "\u5546\u6C64\u5C0F\u6D63\u718A\u5B98\u7F51" });
+  return `${product.apiBase}/login/mp?${params.toString()}`;
+}
+async function pollRaccoonQrLogin(product, code, fetcher = fetch) {
+  let envelope;
+  try {
+    const result = await postJson3(
+      `${product.apiBase}${product.authApiPrefix}/login_with_qrcode_code`,
+      { qrcode_code: code },
+      fetcher
+    );
+    envelope = result.envelope;
+  } catch {
+    return { status: "pending" };
+  }
+  if (envelope.code !== 0 || envelope.data === void 0) return { status: "pending" };
+  const raw = envelope.data.status;
+  const status = typeof raw === "string" ? raw : "";
+  const expiredAt = typeof envelope.data.expired_at === "string" ? envelope.data.expired_at : void 0;
+  if (status === RACCOON_QR_STATUS.canceled) return { status: "canceled" };
+  if (status === RACCOON_QR_STATUS.logging) {
+    return { status: "logging", ...expiredAt !== void 0 ? { expiredAt } : {} };
+  }
+  if (status === RACCOON_QR_STATUS.success) {
+    const accessToken = typeof envelope.data.access_token === "string" ? envelope.data.access_token : "";
+    const refreshToken2 = typeof envelope.data.refresh_token === "string" ? envelope.data.refresh_token : "";
+    if (accessToken.length === 0) return { status: "pending" };
+    const expMs = decodeJwtExpMs(accessToken);
+    return {
+      status: "success",
+      accessToken,
+      refreshToken: refreshToken2,
+      ...expMs !== void 0 ? { expiresAt: String(expMs) } : {}
+    };
+  }
+  return { status: "pending" };
+}
+async function sendRaccoonSmsCode(product, phone, captchaParam, fetcher = fetch) {
+  const { envelope } = await postJson3(
+    `${product.apiBase}${product.authApiPrefix}/send_sms`,
+    {
+      captcha_param: captchaParam,
+      nation_code: "86",
+      phone: encryptRaccoonPhone(phone)
+    },
+    fetcher
+  );
+  if (envelope.code !== 0) {
+    if (envelope.code === 100006) {
+      throw new Error("raccoon: \u56FE\u5F62\u9A8C\u8BC1\u7801\u6821\u9A8C\u5931\u8D25\uFF0C\u8BF7\u91CD\u65B0\u5B8C\u6210\u6ED1\u5757\u9A8C\u8BC1");
+    }
+    throw envelopeError(envelope, "\u4E0B\u53D1\u77ED\u4FE1\u9A8C\u8BC1\u7801\u5931\u8D25");
+  }
+}
+async function loginRaccoonWithSmsCode(product, phone, smsCode, fetcher = fetch) {
+  const { envelope } = await postJson3(
+    `${product.apiBase}${product.authApiPrefix}/login_with_sms`,
+    {
+      nation_code: "86",
+      phone: encryptRaccoonPhone(phone),
+      sms_code: smsCode
+    },
+    fetcher
+  );
+  if (envelope.code !== 0) throw envelopeError(envelope, "\u77ED\u4FE1\u767B\u5F55\u5931\u8D25");
+  return credentialFromEnvelope(envelope);
+}
+function credentialFromEnvelope(envelope) {
+  const data = envelope.data ?? {};
+  const accessToken = typeof data.access_token === "string" ? data.access_token : "";
+  const refreshToken2 = typeof data.refresh_token === "string" ? data.refresh_token : "";
+  if (accessToken.length === 0) {
+    throw new Error("raccoon: \u767B\u5F55\u54CD\u5E94\u7F3A\u5C11 access_token");
+  }
+  const expMs = decodeJwtExpMs(accessToken);
+  const officeIdentity = typeof data.office_identity === "string" ? data.office_identity : "";
+  return {
+    access_token: accessToken,
+    refresh_token: refreshToken2,
+    ...expMs !== void 0 ? { expires_at: String(expMs) } : {},
+    ...officeIdentity.length > 0 ? { office_identity: officeIdentity } : {}
+  };
+}
+async function refreshRaccoonCredential(product, credential, fetcher = fetch) {
+  const { envelope, status } = await postJson3(
+    `${product.apiBase}${product.authApiPrefix}/refresh`,
+    { refresh_token: credential.refresh_token },
+    fetcher
+  );
+  if (status === 401 || envelope.code === 200003) {
+    throw new Error("raccoon: \u767B\u5F55\u6001\u5DF2\u8FC7\u671F\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55");
+  }
+  if (envelope.code !== 0) throw envelopeError(envelope, "\u7EED\u671F\u5931\u8D25");
+  const data = envelope.data ?? {};
+  const accessToken = typeof data.access_token === "string" ? data.access_token : "";
+  if (accessToken.length === 0) {
+    throw new Error("raccoon: \u7EED\u671F\u54CD\u5E94\u7F3A\u5C11 access_token");
+  }
+  const nextRefresh = typeof data.refresh_token === "string" && data.refresh_token.length > 0 ? data.refresh_token : credential.refresh_token;
+  const expMs = decodeJwtExpMs(accessToken);
+  return {
+    ...credential,
+    access_token: accessToken,
+    refresh_token: nextRefresh,
+    ...expMs !== void 0 ? { expires_at: String(expMs) } : {}
+  };
+}
+async function fetchRaccoonUserInfo(product, credential, fetcher = fetch) {
+  try {
+    const response = await fetcher(`${product.apiBase}${product.authApiPrefix}/user_info`, {
+      method: "GET",
+      headers: raccoonHeaders(credential),
+      signal: AbortSignal.timeout(RACCOON_REQUEST_TIMEOUT_MS)
+    });
+    if (!response.ok) return {};
+    const envelope = parseEnvelope2(await response.json(), response.status);
+    if (envelope.code !== 0 || envelope.data === void 0) return {};
+    const userId = typeof envelope.data.id === "string" ? envelope.data.id : "";
+    const nickname = typeof envelope.data.name === "string" ? envelope.data.name : "";
+    const officeIdentity = typeof envelope.data.office_identity === "string" ? envelope.data.office_identity : "";
+    const phone = typeof envelope.data.phone === "string" ? envelope.data.phone : "";
+    return {
+      ...userId.length > 0 ? { userId } : {},
+      ...nickname.length > 0 ? { nickname } : {},
+      ...officeIdentity.length > 0 ? { officeIdentity } : {},
+      ...phone.length > 0 ? { phone } : {}
+    };
+  } catch {
+    return {};
+  }
+}
+
+// vendor/channel-pack/src/raccoon-login-page.ts
+import { createServer as createServer6 } from "node:http";
+
+// vendor/channel-pack/src/raccoon-qr.ts
+var DATA_CODEWORDS = [0, 16, 28, 44, 64, 86, 108, 124, 154, 182, 216];
+var EC_BLOCKS_M = [
+  void 0,
+  { ecPerBlock: 10, groups: [[1, 16]] },
+  { ecPerBlock: 16, groups: [[1, 28]] },
+  { ecPerBlock: 26, groups: [[1, 44]] },
+  { ecPerBlock: 18, groups: [[2, 32]] },
+  { ecPerBlock: 24, groups: [[2, 43]] },
+  { ecPerBlock: 16, groups: [[4, 27]] },
+  { ecPerBlock: 18, groups: [[4, 31]] },
+  { ecPerBlock: 22, groups: [[2, 38], [2, 39]] },
+  { ecPerBlock: 22, groups: [[3, 36], [2, 37]] },
+  { ecPerBlock: 26, groups: [[4, 43], [1, 44]] }
+];
+var GF_EXP = new Uint8Array(512);
+var GF_LOG = new Uint8Array(256);
+{
+  let x = 1;
+  for (let i = 0; i < 255; i++) {
+    GF_EXP[i] = x;
+    GF_LOG[x] = i;
+    x <<= 1;
+    if ((x & 256) !== 0) x ^= 285;
+  }
+  for (let i = 255; i < 512; i++) GF_EXP[i] = GF_EXP[i - 255] ?? 0;
+}
+function gfMul(a, b) {
+  if (a === 0 || b === 0) return 0;
+  return GF_EXP[(GF_LOG[a] ?? 0) + (GF_LOG[b] ?? 0)] ?? 0;
+}
+function polyMul(a, b) {
+  const result = new Array(a.length + b.length - 1).fill(0);
+  for (let i = 0; i < a.length; i++) {
+    for (let j = 0; j < b.length; j++) {
+      result[i + j] ^= gfMul(a[i] ?? 0, b[j] ?? 0);
+    }
+  }
+  return result;
+}
+function rsGeneratorPoly(degree) {
+  let poly = [1];
+  for (let i = 0; i < degree; i++) {
+    poly = polyMul(poly, [1, GF_EXP[i] ?? 0]);
+  }
+  return poly;
+}
+function rsEncode(data, ecCount) {
+  const gen = rsGeneratorPoly(ecCount);
+  const buf = [...data, ...new Array(ecCount).fill(0)];
+  for (let i = 0; i < data.length; i++) {
+    const coef = buf[i] ?? 0;
+    if (coef === 0) continue;
+    for (let j = 0; j < gen.length; j++) {
+      buf[i + j] ^= gfMul(gen[j] ?? 0, coef);
+    }
+  }
+  return buf.slice(data.length);
+}
+function pickVersion(byteLength) {
+  for (let version = 1; version <= 10; version++) {
+    const capacityBits = (DATA_CODEWORDS[version] ?? 0) * 8;
+    const overheadBits = 4 + (version <= 9 ? 8 : 16);
+    if (overheadBits + byteLength * 8 <= capacityBits) return version;
+  }
+  return void 0;
+}
+function buildCodewords(bytes, version) {
+  const blocks = EC_BLOCKS_M[version];
+  if (blocks === void 0) throw new Error(`raccoon: \u4E0D\u652F\u6301\u7684\u4E8C\u7EF4\u7801\u7248\u672C ${version}`);
+  const totalDataCodewords = DATA_CODEWORDS[version] ?? 0;
+  const capacityBits = totalDataCodewords * 8;
+  const bits = [];
+  const pushBits = (value, length) => {
+    for (let i = length - 1; i >= 0; i--) bits.push(value >> i & 1);
+  };
+  pushBits(4, 4);
+  pushBits(bytes.length, version <= 9 ? 8 : 16);
+  for (const byte of bytes) pushBits(byte, 8);
+  const terminator = Math.min(4, capacityBits - bits.length);
+  pushBits(0, terminator);
+  while (bits.length % 8 !== 0) bits.push(0);
+  const PAD_BYTES = [236, 17];
+  for (let i = 0; bits.length < capacityBits; i++) {
+    pushBits(PAD_BYTES[i % 2] ?? 0, 8);
+  }
+  const dataCodewords = [];
+  for (let i = 0; i < bits.length; i += 8) {
+    let byte = 0;
+    for (let j = 0; j < 8; j++) byte = byte << 1 | (bits[i + j] ?? 0);
+    dataCodewords.push(byte);
+  }
+  const dataBlocks = [];
+  const ecBlocks = [];
+  let offset = 0;
+  for (const [count2, dataPerBlock] of blocks.groups) {
+    for (let b = 0; b < count2; b++) {
+      const block = dataCodewords.slice(offset, offset + dataPerBlock);
+      offset += dataPerBlock;
+      dataBlocks.push(block);
+      ecBlocks.push(rsEncode(block, blocks.ecPerBlock));
+    }
+  }
+  const result = [];
+  const maxDataLen = Math.max(...dataBlocks.map((b) => b.length));
+  for (let i = 0; i < maxDataLen; i++) {
+    for (const block of dataBlocks) {
+      if (i < block.length) result.push(block[i] ?? 0);
+    }
+  }
+  for (let i = 0; i < blocks.ecPerBlock; i++) {
+    for (const block of ecBlocks) {
+      result.push(block[i] ?? 0);
+    }
+  }
+  return result;
+}
+function alignmentPositions(version, size) {
+  if (version === 1) return [];
+  const numAlign = Math.floor(version / 7) + 2;
+  const step = Math.ceil((version * 4 + 4) / (numAlign * 2 - 2)) * 2;
+  const result = [6];
+  for (let pos = size - 7; result.length < numAlign; pos -= step) {
+    result.splice(1, 0, pos);
+  }
+  return result;
+}
+function drawFinderPattern(modules, isFunction, size, x, y) {
+  for (let dy = -4; dy <= 4; dy++) {
+    for (let dx = -4; dx <= 4; dx++) {
+      const xx = x + dx;
+      const yy = y + dy;
+      if (xx < 0 || xx >= size || yy < 0 || yy >= size) continue;
+      const dist = Math.max(Math.abs(dx), Math.abs(dy));
+      const dark = dist !== 2 && dist !== 4;
+      modules[yy][xx] = dark;
+      isFunction[yy][xx] = true;
+    }
+  }
+}
+function drawAlignmentPattern(modules, isFunction, x, y) {
+  for (let dy = -2; dy <= 2; dy++) {
+    for (let dx = -2; dx <= 2; dx++) {
+      const dark = Math.max(Math.abs(dx), Math.abs(dy)) !== 1;
+      modules[y + dy][x + dx] = dark;
+      isFunction[y + dy][x + dx] = true;
+    }
+  }
+}
+function drawFunctionPatterns(modules, isFunction, size, version) {
+  for (let i = 0; i < size; i++) {
+    const dark = i % 2 === 0;
+    modules[6][i] = dark;
+    isFunction[6][i] = true;
+    modules[i][6] = dark;
+    isFunction[i][6] = true;
+  }
+  drawFinderPattern(modules, isFunction, size, 3, 3);
+  drawFinderPattern(modules, isFunction, size, size - 4, 3);
+  drawFinderPattern(modules, isFunction, size, 3, size - 4);
+  const positions = alignmentPositions(version, size);
+  const n = positions.length;
+  for (let i = 0; i < n; i++) {
+    for (let j = 0; j < n; j++) {
+      const isCorner = i === 0 && j === 0 || i === 0 && j === n - 1 || i === n - 1 && j === 0;
+      if (isCorner) continue;
+      drawAlignmentPattern(modules, isFunction, positions[i] ?? 0, positions[j] ?? 0);
+    }
+  }
+  drawFormatBits(modules, isFunction, size, 0);
+  if (version >= 7) {
+    let rem = version;
+    for (let i = 0; i < 12; i++) {
+      rem = rem << 1 ^ (rem >>> 11) * 7973;
+    }
+    const bits = version << 12 | rem;
+    for (let i = 0; i < 18; i++) {
+      const dark = (bits >> i & 1) === 1;
+      const a = size - 11 + i % 3;
+      const b = Math.floor(i / 3);
+      modules[b][a] = dark;
+      isFunction[b][a] = true;
+      modules[a][b] = dark;
+      isFunction[a][b] = true;
+    }
+  }
+}
+function drawFormatBits(modules, isFunction, size, mask) {
+  const data = 0 << 3 | mask;
+  let rem = data;
+  for (let i = 0; i < 10; i++) {
+    rem = rem << 1 ^ (rem >>> 9) * 1335;
+  }
+  const bits = (data << 10 | rem) ^ 21522;
+  const set = (x, y, dark) => {
+    modules[y][x] = dark;
+    isFunction[y][x] = true;
+  };
+  const bit = (i) => (bits >> i & 1) === 1;
+  for (let i = 0; i <= 5; i++) set(8, i, bit(i));
+  set(8, 7, bit(6));
+  set(8, 8, bit(7));
+  set(7, 8, bit(8));
+  for (let i = 9; i < 15; i++) set(14 - i, 8, bit(i));
+  for (let i = 0; i < 8; i++) set(size - 1 - i, 8, bit(i));
+  for (let i = 8; i < 15; i++) set(8, size - 7 + (i - 8), bit(i));
+  set(8, size - 8, true);
+}
+function drawCodewords(modules, isFunction, size, codewords) {
+  let i = 0;
+  for (let right = size - 1; right >= 1; right -= 2) {
+    if (right === 6) right = 5;
+    for (let vert = 0; vert < size; vert++) {
+      for (let j = 0; j < 2; j++) {
+        const x = right - j;
+        const upward = (right + 1 & 2) === 0;
+        const y = upward ? size - 1 - vert : vert;
+        if (isFunction[y][x] !== true && i < codewords.length * 8) {
+          const byte = codewords[i >>> 3] ?? 0;
+          modules[y][x] = (byte >> 7 - (i & 7) & 1) === 1;
+          i++;
+        }
+      }
+    }
+  }
+}
+function applyMask(modules, isFunction, size, mask) {
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      if (isFunction[y][x] === true) continue;
+      let invert;
+      switch (mask) {
+        case 0:
+          invert = (x + y) % 2 === 0;
+          break;
+        case 1:
+          invert = y % 2 === 0;
+          break;
+        case 2:
+          invert = x % 3 === 0;
+          break;
+        case 3:
+          invert = (x + y) % 3 === 0;
+          break;
+        case 4:
+          invert = (Math.floor(y / 2) + Math.floor(x / 3)) % 2 === 0;
+          break;
+        case 5:
+          invert = x * y % 2 + x * y % 3 === 0;
+          break;
+        case 6:
+          invert = (x * y % 2 + x * y % 3) % 2 === 0;
+          break;
+        default:
+          invert = ((x + y) % 2 + x * y % 3) % 2 === 0;
+          break;
+      }
+      if (invert) modules[y][x] = !modules[y][x];
+    }
+  }
+}
+function computePenalty(modules, size) {
+  const N1 = 3;
+  const N2 = 3;
+  const N3 = 40;
+  const N4 = 10;
+  let result = 0;
+  for (let y = 0; y < size; y++) {
+    const row = modules[y];
+    result += penaltyForLine(row, size, N1, N3);
+  }
+  for (let x = 0; x < size; x++) {
+    const col = [];
+    for (let y = 0; y < size; y++) col.push(modules[y][x] === true);
+    result += penaltyForLine(col, size, N1, N3);
+  }
+  for (let y = 0; y < size - 1; y++) {
+    for (let x = 0; x < size - 1; x++) {
+      const c = modules[y][x];
+      if (c === modules[y][x + 1] && c === modules[y + 1][x] && c === modules[y + 1][x + 1]) {
+        result += N2;
+      }
+    }
+  }
+  let dark = 0;
+  for (const row of modules) {
+    for (const cell of row) if (cell) dark++;
+  }
+  const total = size * size;
+  const k = Math.ceil(Math.abs(dark * 20 - total * 10) / total) - 1;
+  result += Math.max(0, k) * N4;
+  return result;
+}
+function penaltyForLine(line2, size, N1, N3) {
+  let result = 0;
+  let runLength = 1;
+  for (let i = 1; i < size; i++) {
+    if (line2[i] === line2[i - 1]) {
+      runLength++;
+    } else {
+      if (runLength >= 5) result += N1 + (runLength - 5);
+      runLength = 1;
+    }
+  }
+  if (runLength >= 5) result += N1 + (runLength - 5);
+  const PATTERN_A = [true, false, true, true, true, false, true, false, false, false, false];
+  const PATTERN_B = [false, false, false, false, true, false, true, true, true, false, true];
+  for (let i = 0; i + 11 <= size; i++) {
+    let matchA = true;
+    let matchB = true;
+    for (let j = 0; j < 11; j++) {
+      if (line2[i + j] !== PATTERN_A[j]) matchA = false;
+      if (line2[i + j] !== PATTERN_B[j]) matchB = false;
+      if (!matchA && !matchB) break;
+    }
+    if (matchA) result += N3;
+    if (matchB) result += N3;
+  }
+  return result;
+}
+function buildQrMatrix(text, options = {}) {
+  const level = options.errorCorrection ?? "M";
+  if (level !== "M") {
+    throw new Error(`raccoon: \u4E8C\u7EF4\u7801\u76EE\u524D\u53EA\u652F\u6301\u7EA0\u9519\u7B49\u7EA7 M\uFF08\u6536\u5230 ${level}\uFF09`);
+  }
+  const forcedMask = options.mask;
+  if (forcedMask !== void 0 && (!Number.isInteger(forcedMask) || forcedMask < 0 || forcedMask > 7)) {
+    throw new Error(`raccoon: \u63A9\u7801\u5FC5\u987B\u662F 0..7 \u7684\u6574\u6570\uFF08\u6536\u5230 ${String(forcedMask)}\uFF09`);
+  }
+  const bytes = Array.from(new TextEncoder().encode(text));
+  const version = pickVersion(bytes.length);
+  if (version === void 0) {
+    throw new Error(
+      `raccoon: \u4E8C\u7EF4\u7801\u5185\u5BB9\u8FC7\u957F\uFF08${bytes.length} \u5B57\u8282\uFF0C\u4E0A\u9650 213 \u5B57\u8282\uFF09\uFF0C\u8BF7\u7F29\u77ED\u5185\u5BB9`
+    );
+  }
+  const size = version * 4 + 17;
+  const modules = Array.from({ length: size }, () => new Array(size).fill(false));
+  const isFunction = Array.from({ length: size }, () => new Array(size).fill(false));
+  drawFunctionPatterns(modules, isFunction, size, version);
+  drawCodewords(modules, isFunction, size, buildCodewords(bytes, version));
+  let bestMask = 0;
+  if (forcedMask !== void 0) {
+    bestMask = forcedMask;
+  } else {
+    let bestPenalty = Number.POSITIVE_INFINITY;
+    for (let mask = 0; mask < 8; mask++) {
+      applyMask(modules, isFunction, size, mask);
+      drawFormatBits(modules, isFunction, size, mask);
+      const penalty = computePenalty(modules, size);
+      if (penalty < bestPenalty) {
+        bestPenalty = penalty;
+        bestMask = mask;
+      }
+      applyMask(modules, isFunction, size, mask);
+    }
+  }
+  applyMask(modules, isFunction, size, bestMask);
+  drawFormatBits(modules, isFunction, size, bestMask);
+  return { size, modules };
+}
+function renderQrSvg(text, options = {}) {
+  const px = options.size ?? 158;
+  const margin = options.margin ?? 4;
+  const dark = options.dark ?? "#000000";
+  const light = options.light ?? "#ffffff";
+  const { size, modules } = buildQrMatrix(text);
+  const dim = size + margin * 2;
+  const segments = [];
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      if (modules[y]?.[x] === true) {
+        segments.push(`M${x + margin},${y + margin}h1v1h-1z`);
+      }
+    }
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 ${dim} ${dim}" shape-rendering="crispEdges" role="img"><rect width="${dim}" height="${dim}" fill="${light}"/><path d="${segments.join("")}" fill="${dark}"/></svg>`;
+}
+
+// vendor/channel-pack/src/raccoon-login-page.ts
+var RACCOON_LOGIN_PAGE_PATHS = {
+  login: "/raccoon/login",
+  poll: "/raccoon/poll",
+  smsSend: "/raccoon/sms/send",
+  smsVerify: "/raccoon/sms/verify"
+};
+async function startRaccoonLoginFlow(options = {}) {
+  const product = options.product ?? RACCOON;
+  const fetcher = options.fetcher ?? fetch;
+  const state = {
+    qrCode: generateQrCode(),
+    phone: "",
+    lastExpiredAt: void 0
+  };
+  let resolveResult;
+  let rejectResult;
+  const result = new Promise((resolve2, reject) => {
+    resolveResult = resolve2;
+    rejectResult = reject;
+  });
+  result.catch(() => {
+  });
+  let settled = false;
+  const settleOk = (value) => {
+    if (settled) return;
+    settled = true;
+    resolveResult(value);
+  };
+  const settleErr = (error) => {
+    if (settled) return;
+    settled = true;
+    rejectResult(error);
+  };
+  const server = createServer6((request2, response) => {
+    void handleRequest2(request2, response, { state, product, fetcher, settleOk }).catch(
+      (error) => {
+        try {
+          response.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" }).end(`\u5185\u90E8\u9519\u8BEF\uFF1A${error instanceof Error ? error.message : String(error)}`);
+        } catch {
+        }
+      }
+    );
+  });
+  const port = await listenOnRandomPort3(server);
+  const loginUrl = `http://127.0.0.1:${port}${RACCOON_LOGIN_PAGE_PATHS.login}`;
+  let closed = false;
+  const close = async () => {
+    if (closed) return;
+    closed = true;
+    settleErr(new Error("raccoon: \u767B\u5F55\u6D41\u7A0B\u5DF2\u5173\u95ED"));
+    await new Promise((resolve2) => {
+      server.close(() => resolve2());
+    });
+  };
+  const timeoutMs = options.timeoutMs ?? RACCOON_LOGIN_TIMEOUT_MS;
+  const timer = setTimeout(() => {
+    settleErr(new Error(`raccoon: \u767B\u5F55\u8D85\u65F6\uFF08${Math.round(timeoutMs / 1e3)} \u79D2\u5185\u672A\u5B8C\u6210\uFF09`));
+  }, timeoutMs);
+  timer.unref?.();
+  void result.catch(() => {
+  }).finally(() => {
+    clearTimeout(timer);
+    if (!closed) {
+      closed = true;
+      void new Promise((resolve2) => {
+        server.close(() => resolve2());
+      });
+    }
+  });
+  return { loginUrl, result, close };
+}
+async function handleRequest2(request2, response, deps) {
+  const url = new URL(request2.url ?? "/", `http://127.0.0.1:${request2.socket.localPort ?? 0}`);
+  const { state, product } = deps;
+  if (url.pathname === RACCOON_LOGIN_PAGE_PATHS.login) {
+    response.writeHead(200, { "Content-Type": "text/html; charset=utf-8" });
+    response.end(renderRaccoonLoginPage(product, state.qrCode));
+    return;
+  }
+  if (url.pathname === RACCOON_LOGIN_PAGE_PATHS.poll) {
+    const polled = await pollRaccoonQrLogin(product, state.qrCode, deps.fetcher);
+    if (polled.status === "success" && polled.accessToken !== void 0) {
+      const credential = {
+        access_token: polled.accessToken,
+        refresh_token: polled.refreshToken ?? "",
+        ...polled.expiresAt !== void 0 ? { expires_at: polled.expiresAt } : {}
+      };
+      deps.settleOk(credential);
+      writeJson2(response, { status: "success" });
+      return;
+    }
+    if (polled.expiredAt !== void 0) state.lastExpiredAt = polled.expiredAt;
+    if (polled.status === "canceled") {
+      state.qrCode = generateQrCode();
+    }
+    writeJson2(response, {
+      status: polled.status,
+      ...polled.expiredAt !== void 0 ? { expiredAt: polled.expiredAt } : {},
+      // code 变化时把新二维码给页面（页面据此换图）
+      ...polled.status === "canceled" ? { qr: renderQrSvg(buildQrImageUrl(product, state.qrCode)) } : {}
+    });
+    return;
+  }
+  if (url.pathname === RACCOON_LOGIN_PAGE_PATHS.smsSend && request2.method === "POST") {
+    const body = await readJsonBody2(request2);
+    const phone = typeof body.phone === "string" ? body.phone.trim() : "";
+    const captchaParam = typeof body.captchaParam === "string" ? body.captchaParam : "";
+    if (!/^1[3-9]\d{9}$/.test(phone)) {
+      response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ ok: false, message: "\u8BF7\u8F93\u5165\u6709\u6548\u7684 11 \u4F4D\u624B\u673A\u53F7" }));
+      return;
+    }
+    try {
+      await sendRaccoonSmsCode(product, phone, captchaParam, deps.fetcher);
+      state.phone = phone;
+      writeJson2(response, { ok: true });
+    } catch (error) {
+      writeJson2(response, {
+        ok: false,
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+    return;
+  }
+  if (url.pathname === RACCOON_LOGIN_PAGE_PATHS.smsVerify && request2.method === "POST") {
+    const body = await readJsonBody2(request2);
+    const smsCode = typeof body.smsCode === "string" ? body.smsCode.trim() : "";
+    if (state.phone.length === 0) {
+      response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ ok: false, message: "\u8BF7\u5148\u83B7\u53D6\u624B\u673A\u9A8C\u8BC1\u7801" }));
+      return;
+    }
+    if (smsCode.length === 0) {
+      response.writeHead(400, { "Content-Type": "application/json; charset=utf-8" });
+      response.end(JSON.stringify({ ok: false, message: "\u8BF7\u8F93\u5165\u9A8C\u8BC1\u7801" }));
+      return;
+    }
+    try {
+      const credential = await loginRaccoonWithSmsCode(product, state.phone, smsCode, deps.fetcher);
+      deps.settleOk(credential);
+      writeJson2(response, { ok: true });
+    } catch (error) {
+      writeJson2(response, {
+        ok: false,
+        message: error instanceof Error ? error.message : String(error)
+      });
+    }
+    return;
+  }
+  response.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" }).end("Not found");
+}
+function writeJson2(response, payload) {
+  response.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+  response.end(JSON.stringify(payload));
+}
+async function readJsonBody2(request2) {
+  const chunks = [];
+  let total = 0;
+  for await (const chunk of request2) {
+    const buf = chunk;
+    total += buf.length;
+    if (total > 64 * 1024) throw new Error("\u8BF7\u6C42\u4F53\u8FC7\u5927");
+    chunks.push(buf);
+  }
+  const text = Buffer.concat(chunks).toString("utf-8");
+  if (text.length === 0) return {};
+  try {
+    const parsed = JSON.parse(text);
+    return typeof parsed === "object" && parsed !== null && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    throw new Error("\u8BF7\u6C42\u4F53\u4E0D\u662F\u5408\u6CD5 JSON");
+  }
+}
+function listenOnRandomPort3(server) {
+  return new Promise((resolve2, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address();
+      const port = typeof address === "object" && address !== null ? address.port : 0;
+      if (port === 0) {
+        reject(new Error("raccoon: \u672C\u5730\u767B\u5F55\u9875\u670D\u52A1\u5668\u672A\u80FD\u83B7\u5F97\u7AEF\u53E3"));
+        return;
+      }
+      resolve2(port);
+    });
+  });
+}
+function renderRaccoonLoginPage(product, qrCode) {
+  const code = qrCode ?? generateQrCode();
+  const qrSvg = renderQrSvg(buildQrImageUrl(product, code), { size: 200 });
+  return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Raccoon Work \u767B\u5F55</title>
+<style>
+  :root { color-scheme: light; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif;
+         background: #f5f6f8; color: #1f2329; }
+  .card { background: #fff; border-radius: 12px; padding: 20px 24px 24px; box-shadow: 0 4px 24px rgba(0,0,0,.08);
+          text-align: center; width: 320px; }
+  h1 { font-size: 16px; margin: 0 0 14px; font-weight: 600; }
+  .tabs { display: flex; gap: 4px; background: #f2f3f5; border-radius: 8px; padding: 4px; margin-bottom: 16px; }
+  .tabs button { flex: 1; padding: 7px; font-size: 13px; border: 0; border-radius: 6px;
+                 background: transparent; color: #4e5969; cursor: pointer; }
+  .tabs button[data-active="1"] { background: #fff; color: #1f2329; font-weight: 600;
+                                  box-shadow: 0 1px 3px rgba(0,0,0,.08); }
+  .pane { display: none; }
+  .pane[data-show="1"] { display: block; }
+  /* \u4E8C\u7EF4\u7801\u5BB9\u5668\uFF1ASVG \u81EA\u9002\u5E94\u586B\u5145\uFF08SVG \u81EA\u5E26 width/height \u4E0E viewBox\uFF09 */
+  .qr { width: 200px; height: 200px; display: block; margin: 0 auto; border: 1px solid #eceef1;
+        border-radius: 8px; padding: 6px; box-sizing: content-box; background: #fff; }
+  .qr svg { display: block; width: 100%; height: 100%; }
+  .sub { font-size: 12px; color: #8a9099; margin: 10px 0 0; }
+  .status { margin-top: 12px; font-size: 13px; color: #4e5969; min-height: 20px; }
+  .status[data-tone="ok"] { color: #0f9d58; font-weight: 600; }
+  .status[data-tone="err"] { color: #d93026; }
+  label { display: block; font-size: 12px; color: #8a9099; margin-bottom: 4px; text-align: left; }
+  input { width: 100%; box-sizing: border-box; padding: 8px 10px; font-size: 14px; margin-bottom: 10px;
+          border: 1px solid #d9dde3; border-radius: 6px; }
+  button.primary { width: 100%; padding: 9px; font-size: 14px; border: 0; border-radius: 6px;
+                   background: #8E6BF2; color: #fff; cursor: pointer; }
+  button.primary:disabled { background: #c9cdd4; cursor: not-allowed; }
+  .row { display: flex; gap: 8px; align-items: flex-start; }
+  .row input { margin-bottom: 10px; }
+  #captcha-element { margin-bottom: 10px; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>\u767B\u5F55 Raccoon Work</h1>
+
+    <div class="tabs">
+      <button id="tabQr" data-active="1" type="button">\u5FAE\u4FE1\u626B\u7801</button>
+      <button id="tabSms" data-active="0" type="button">\u77ED\u4FE1\u767B\u5F55</button>
+    </div>
+
+    <div class="pane" id="paneQr" data-show="1">
+      <div class="qr" id="qrBox">${qrSvg}</div>
+      <p class="sub">\u6253\u5F00\u5FAE\u4FE1\u626B\u4E00\u626B\uFF0C\u626B\u63CF\u4E0A\u65B9\u4E8C\u7EF4\u7801</p>
+      <div class="status" id="qrStatus">\u7B49\u5F85\u626B\u7801\u2026</div>
+    </div>
+
+    <div class="pane" id="paneSms" data-show="0">
+      <label for="phone">\u624B\u673A\u53F7</label>
+      <div class="row">
+        <input id="phone" type="tel" inputmode="numeric" maxlength="11" placeholder="\u8BF7\u8F93\u5165 11 \u4F4D\u624B\u673A\u53F7">
+        <button class="primary" id="sendCode" type="button" style="width:auto;white-space:nowrap;padding:9px 12px;">\u83B7\u53D6\u9A8C\u8BC1\u7801</button>
+      </div>
+      <div id="captcha-element"></div>
+      <label for="smsCode">\u9A8C\u8BC1\u7801</label>
+      <input id="smsCode" type="text" inputmode="numeric" maxlength="6" placeholder="\u8BF7\u8F93\u5165 6 \u4F4D\u9A8C\u8BC1\u7801">
+      <button class="primary" id="doLogin" type="button">\u767B\u5F55</button>
+      <div class="status" id="smsStatus"></div>
+    </div>
+  </div>
+
+<script src="https://o.alicdn.com/captcha-frontend/aliyunCaptcha/AliyunCaptcha.js"></script>
+<script>
+(function () {
+  'use strict';
+  var POLL_INTERVAL_MS = 2000;
+  var paths = ${JSON.stringify(RACCOON_LOGIN_PAGE_PATHS)};
+
+  // \u2500\u2500 Tab \u5207\u6362 \u2500\u2500
+  var tabQr = document.getElementById('tabQr');
+  var tabSms = document.getElementById('tabSms');
+  var paneQr = document.getElementById('paneQr');
+  var paneSms = document.getElementById('paneSms');
+  function selectTab(sms) {
+    tabQr.setAttribute('data-active', sms ? '0' : '1');
+    tabSms.setAttribute('data-active', sms ? '1' : '0');
+    paneQr.setAttribute('data-show', sms ? '0' : '1');
+    paneSms.setAttribute('data-show', sms ? '1' : '0');
+  }
+  tabQr.addEventListener('click', function () { selectTab(false); });
+  tabSms.addEventListener('click', function () { selectTab(true); });
+
+  // \u2500\u2500 \u626B\u7801\u8F6E\u8BE2 \u2500\u2500
+  var qrStatus = document.getElementById('qrStatus');
+  var qrBox = document.getElementById('qrBox');
+  var pollTimer = null;
+  function setQrStatus(text, tone) {
+    qrStatus.textContent = text;
+    if (tone) { qrStatus.setAttribute('data-tone', tone); } else { qrStatus.removeAttribute('data-tone'); }
+  }
+  function pollOnce() {
+    fetch(paths.poll).then(function (r) { return r.json(); }).then(function (data) {
+      if (data.status === 'success') {
+        setQrStatus('\u767B\u5F55\u6210\u529F\uFF0C\u53EF\u4EE5\u5173\u95ED\u6B64\u7A97\u53E3\u4E86', 'ok');
+        if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        setTimeout(function () { window.close(); }, 1200);
+        return;
+      }
+      if (data.status === 'logging') { setQrStatus('\u5DF2\u626B\u7801\uFF0C\u8BF7\u5728\u5FAE\u4FE1\u4E2D\u786E\u8BA4\u2026'); return; }
+      if (data.status === 'canceled') {
+        if (data.qr) { qrBox.innerHTML = data.qr; }
+        setQrStatus('\u4E8C\u7EF4\u7801\u5DF2\u5237\u65B0\uFF0C\u8BF7\u91CD\u65B0\u626B\u7801');
+        return;
+      }
+      setQrStatus('\u7B49\u5F85\u626B\u7801\u2026');
+    }).catch(function () {
+      // \u8F6E\u8BE2\u5076\u53D1\u5931\u8D25\u4E0D\u6253\u65AD\uFF08\u4E0B\u4E00\u6B21\u7EE7\u7EED\uFF09
+    });
+  }
+  pollTimer = setInterval(pollOnce, POLL_INTERVAL_MS);
+  pollOnce();
+
+  // \u2500\u2500 \u77ED\u4FE1\u767B\u5F55 \u2500\u2500
+  var smsStatus = document.getElementById('smsStatus');
+  var phoneInput = document.getElementById('phone');
+  var smsCodeInput = document.getElementById('smsCode');
+  var sendBtn = document.getElementById('sendCode');
+  var loginBtn = document.getElementById('doLogin');
+  var captchaInstance = null;
+  var pendingCaptcha = null;
+
+  function setSmsStatus(text, tone) {
+    smsStatus.textContent = text || '';
+    if (tone) { smsStatus.setAttribute('data-tone', tone); } else { smsStatus.removeAttribute('data-tone'); }
+  }
+
+  function submitSmsSend(captchaParam) {
+    var phone = (phoneInput.value || '').trim();
+    if (!/^1[3-9]\\d{9}$/.test(phone)) {
+      setSmsStatus('\u8BF7\u8F93\u5165\u6709\u6548\u7684 11 \u4F4D\u624B\u673A\u53F7', 'err');
+      return;
+    }
+    sendBtn.disabled = true;
+    setSmsStatus('\u53D1\u9001\u4E2D\u2026');
+    fetch(paths.smsSend, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phone: phone, captchaParam: captchaParam || '' })
+    }).then(function (r) { return r.json(); }).then(function (data) {
+      if (data && data.ok) { setSmsStatus('\u9A8C\u8BC1\u7801\u5DF2\u53D1\u9001\uFF0C\u8BF7\u67E5\u6536\u77ED\u4FE1', 'ok'); }
+      else { setSmsStatus((data && data.message) || '\u53D1\u9001\u5931\u8D25\uFF0C\u8BF7\u91CD\u8BD5', 'err'); }
+    }).catch(function () {
+      setSmsStatus('\u53D1\u9001\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u540E\u91CD\u8BD5', 'err');
+    }).finally(function () {
+      sendBtn.disabled = false;
+    });
+  }
+
+  // \u963F\u91CC\u4E91\u6ED1\u5757\uFF1A\u771F\u5B9E\u52A0\u8F7D\u5B98\u65B9\u811A\u672C\uFF08SceneId / prefix \u6765\u81EA\u5BA2\u6237\u7AEF\u914D\u7F6E\uFF09\u3002
+  function initCaptcha() {
+    if (typeof window.initAliyunCaptcha !== 'function') { return false; }
+    window.initAliyunCaptcha({
+      SceneId: '${product.aliyunCaptcha.sceneId}',
+      prefix: '${product.aliyunCaptcha.prefix}',
+      mode: 'popup',
+      element: '#captcha-element',
+      button: '#sendCode',
+      captchaVerifyCallback: function (captchaParam) {
+        pendingCaptcha = captchaParam;
+        submitSmsSend(captchaParam);
+        return { captchaResult: true, bizResult: true };
+      },
+      onBizResultCallback: function () { return null; },
+      getInstance: function (instance) { captchaInstance = instance; return null; },
+      slideStyle: { width: 320, height: 40 },
+      language: 'cn'
+    });
+    return true;
+  }
+  var captchaReady = initCaptcha();
+  sendBtn.addEventListener('click', function () {
+    if (!captchaReady) { captchaReady = initCaptcha(); }
+    if (!captchaReady) {
+      // \u811A\u672C\u672A\u52A0\u8F7D\uFF08\u79BB\u7EBF/\u88AB\u62E6\u622A\uFF09\uFF1A\u9000\u5316\u4E3A\u76F4\u63A5\u63D0\u4EA4\uFF0C\u8BA9\u670D\u52A1\u7AEF\u62A5\u660E\u786E\u539F\u56E0
+      // \uFF08\u5B9E\u6D4B\u4F1A\u56DE captcha_verify_error\uFF0C\u9875\u9762\u636E\u6B64\u63D0\u793A\u7528\u6237\uFF09\u3002
+      setSmsStatus('\u9A8C\u8BC1\u7801\u7EC4\u4EF6\u672A\u52A0\u8F7D\uFF0C\u6B63\u5728\u5C1D\u8BD5\u76F4\u63A5\u53D1\u9001\u2026');
+      submitSmsSend('');
+    }
+  });
+
+  loginBtn.addEventListener('click', function () {
+    var code = (smsCodeInput.value || '').trim();
+    if (!code) { setSmsStatus('\u8BF7\u8F93\u5165\u9A8C\u8BC1\u7801', 'err'); return; }
+    loginBtn.disabled = true;
+    setSmsStatus('\u767B\u5F55\u4E2D\u2026');
+    fetch(paths.smsVerify, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ smsCode: code })
+    }).then(function (r) { return r.json(); }).then(function (data) {
+      if (data && data.ok) {
+        setSmsStatus('\u767B\u5F55\u6210\u529F\uFF0C\u53EF\u4EE5\u5173\u95ED\u6B64\u7A97\u53E3\u4E86', 'ok');
+        setTimeout(function () { window.close(); }, 1200);
+      } else {
+        setSmsStatus((data && data.message) || '\u9A8C\u8BC1\u7801\u4E0D\u6B63\u786E\uFF0C\u8BF7\u91CD\u8BD5', 'err');
+      }
+    }).catch(function () {
+      setSmsStatus('\u767B\u5F55\u5931\u8D25\uFF0C\u8BF7\u68C0\u67E5\u7F51\u7EDC\u540E\u91CD\u8BD5', 'err');
+    }).finally(function () {
+      loginBtn.disabled = false;
+    });
+  });
+})();
+</script>
+</body>
+</html>`;
+}
+
+// vendor/channel-pack/src/raccoon-auth.ts
+var RACCOON_EXPIRY_ACCESSORS = {
+  expiresAtOf: raccoonCredentialExpiresAtMs,
+  refreshableOf: isRaccoonRefreshable,
+  identityOf: (credential) => credential.access_token ?? ""
+};
+var RefreshTokenExpiredError8 = class extends Error {
+  constructor(message2) {
+    super(message2);
+    this.name = "RefreshTokenExpiredError";
+  }
+};
+function parseRaccoonCredential(value) {
+  try {
+    const parsed = JSON.parse(value);
+    return typeof parsed === "object" && parsed !== null && typeof parsed.access_token === "string" ? parsed : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function normalizeRemoteModel(entry) {
+  const id = typeof entry.name === "string" ? entry.name.trim() : "";
+  if (id.length === 0) return void 0;
+  if (entry.visible === false) return void 0;
+  const params = typeof entry.params === "object" && entry.params !== null ? entry.params : {};
+  const description = typeof entry.description === "string" && entry.description.length > 0 ? entry.description : id;
+  const effective = typeof entry.billing_effective_multiplier === "number" ? entry.billing_effective_multiplier : Number.NaN;
+  const base = typeof entry.billing_multiplier === "number" ? entry.billing_multiplier : Number.NaN;
+  const rawStatus = typeof entry.billing_status === "string" ? entry.billing_status : "";
+  const status = rawStatus === "discount" || rawStatus === "limited_free" ? rawStatus : "normal";
+  const statusNote = typeof entry.billing_status_note === "string" ? entry.billing_status_note : "";
+  const meta = {
+    id,
+    description,
+    effectiveMultiplier: effective,
+    baseMultiplier: base,
+    status,
+    statusNote
+  };
+  const readPositiveInt = (value) => {
+    return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : 0;
+  };
+  const tags = Array.isArray(entry.tags) ? entry.tags.filter((t) => typeof t === "string").map((t) => t.toLowerCase()) : [];
+  return {
+    id,
+    name: raccoonDisplayName(meta),
+    contextWindow: readPositiveInt(params.context_window ?? entry.context_window),
+    maxTokens: readPositiveInt(params.max_tokens),
+    // ⚠️ **不能只看 tags**：`vision` 是客户端「Raccoon-Auto 选模」的偏好标签，
+    // 不是服务端能力契约（远端根本没有模态字段，已穷举证实）。`tags` 不含
+    // `vision` 的 `sn-deepseek-v4-1-flash` 实测能看图（5/5 读对随机数字），
+    // 只认 tags 会让它被 DSH 投影成文本占位符 —— 图片根本发不出去。
+    // 证据与取舍见 `raccoon-product.ts` 的 RACCOON_IMAGE_CAPABILITY_OVERRIDES。
+    supportsImage: raccoonSupportsImage(id, tags)
+  };
+}
+var RaccoonAuth = class extends Service9 {
+  constructor(ctx, options = {}) {
+    const product = options.product ?? RACCOON;
+    super(ctx, options.serviceName ?? `${product.id}Auth`);
+    this.options = options;
+    this.product = product;
+    this.credentialRefName = this.product.defaultCredentialRef;
+  }
+  options;
+  /** 本实例所属的产品配置。 */
+  product;
+  /** 本实例默认读写的凭据 ref 名称。 */
+  credentialRefName;
+  /** 最近一次续期失败的原因（供 `status()` 暴露给 UI）。 */
+  lastRefreshError;
+  /** 注入的 fetch（测试用）；默认为全局 fetch。 */
+  get fetchImpl() {
+    return this.options.fetcher ?? fetch;
+  }
+  /**
+   * 启动登录（微信扫码 + 短信双路径）。
+   *
+   * 起本地服务器承载弹窗页，**立即返回 `loginUrl`** —— 与其余 provider 的
+   * 「两步式」契约一致（`window.open` 只在用户手势窗口内有效，
+   * 不能等流程跑完再返回）。
+   */
+  async startLogin() {
+    return startRaccoonLoginFlow({
+      product: this.product,
+      ...this.options.fetcher === void 0 ? {} : { fetcher: this.options.fetcher }
+    });
+  }
+  /**
+   * 把登录结果落盘成凭据。
+   *
+   * 与 `startLogin` 分开：流程编排（本地服务器 + 轮询 + 表单）在
+   * `raccoon-login-page.ts` 里，本方法只负责「补全用户信息 + 写凭据 +
+   * 静默领取一次性登录奖励」。
+   */
+  async persistLogin(credential, flowOptions = {}) {
+    const refName = flowOptions.refName ?? this.credentialRefName;
+    let enriched = credential;
+    if (credential.nickname === void 0 || credential.user_id === void 0 || credential.phone === void 0) {
+      const info = await fetchRaccoonUserInfo(this.product, credential, this.fetchImpl);
+      enriched = {
+        ...credential,
+        ...info.userId !== void 0 && credential.user_id === void 0 ? { user_id: info.userId } : {},
+        ...info.nickname !== void 0 && credential.nickname === void 0 ? { nickname: info.nickname } : {},
+        ...info.officeIdentity !== void 0 && credential.office_identity === void 0 ? { office_identity: info.officeIdentity } : {},
+        // ⚠️ 手机号专门为**多账号消歧**而存：远端的 `name` 是自动生成的默认名
+        //（实测 `RaccoonAva`），微信扫码不回传微信昵称，故多个账号会重名。
+        ...info.phone !== void 0 && credential.phone === void 0 ? { phone: info.phone } : {}
+      };
+    }
+    const ref = credentialRef13(refName);
+    await this.ctx.credentials.set(ref, JSON.stringify(enriched));
+    this.lastRefreshError = void 0;
+    try {
+      await claimRaccoonLoginReward(this.product, enriched, this.fetchImpl);
+    } catch (error) {
+      this.ctx.logger?.warn?.(
+        `[raccoon] \u767B\u5F55\u540E\u9886\u53D6\u767B\u5F55\u5956\u52B1\u5931\u8D25\uFF08\u4E0D\u5F71\u54CD\u767B\u5F55\uFF09\uFF1A${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+    return {
+      access: JSON.stringify(enriched),
+      expires: decodeJwtExpMs(enriched.access_token) ?? 0,
+      ref,
+      refreshable: isRaccoonRefreshable(enriched)
+    };
+  }
+  /** 只读登录状态。 */
+  async status() {
+    const credential = await this.resolveDefaultCredential();
+    if (credential === void 0) return { configured: false, refreshable: false };
+    const expiresAt = decodeJwtExpMs(credential.access_token);
+    return {
+      configured: true,
+      source: this.credentialRefName,
+      ...expiresAt === void 0 ? {} : { expiresAt },
+      refreshable: isRaccoonRefreshable(credential),
+      ...this.lastRefreshError === void 0 ? {} : { refreshError: this.lastRefreshError }
+    };
+  }
+  /** 解析默认 ref 的凭据。 */
+  async resolveDefaultCredential() {
+    try {
+      const resolved = await this.ctx.credentials.resolve(credentialRef13(this.credentialRefName));
+      return resolved === void 0 ? void 0 : parseRaccoonCredential(resolved.value);
+    } catch {
+      return void 0;
+    }
+  }
+  /**
+   * 续期默认单凭据。
+   *
+   * @throws {RefreshTokenExpiredError} refresh_token 失效（需重新登录）。
+   */
+  async refresh() {
+    const credential = await this.resolveDefaultCredential();
+    if (credential === void 0) throw new RefreshTokenExpiredError8("\u51ED\u636E\u672A\u914D\u7F6E\uFF0C\u8BF7\u5148\u767B\u5F55");
+    if (!isRaccoonRefreshable(credential)) {
+      throw new RefreshTokenExpiredError8("\u51ED\u636E\u7F3A\u5C11 refresh_token\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55");
+    }
+    try {
+      const next = await refreshRaccoonCredential(this.product, credential, this.fetchImpl);
+      await this.ctx.credentials.set(credentialRef13(this.credentialRefName), JSON.stringify(next));
+      this.lastRefreshError = void 0;
+    } catch (error) {
+      const message2 = error instanceof Error ? error.message : String(error);
+      this.lastRefreshError = message2;
+      if (message2.includes("\u91CD\u65B0\u767B\u5F55")) throw new RefreshTokenExpiredError8(message2);
+      throw error;
+    }
+  }
+  /**
+   * 续期**指定 ref**（RPC `account.refresh` / 定时器）。
+   *
+   * ⚠️ 只读写传入的 ref，**不碰**默认单凭据 ref —— 账号池里的是
+   * `RACCOON_ACCOUNT_XXX`，用 `refresh()` 会刷错凭据。
+   * ⚠️ **不触碰** `lastRefreshError`：那属于单凭据路径，
+   * 被多账号操作污染会让 UI 显示错误的失效提示。
+   *
+   * ⚠️ **必须把新过期时间写回账号池**（真实缺陷，用户报障）：
+   * 只更新凭据、不更新账号池，会让 Channel Pack 一直显示「已过期」——
+   * 因为 UI 读的是账号池的 `expiresAt`，而它停留在续期前的旧值。
+   * 实测该账号的 JWT `exp` 已是 15:09（有效），账号池却是 12:02（已过期），
+   * **相差 3.1 小时**，UI 显示「已过期」但发消息完全正常。
+   *
+   * @param pool 账号池；提供时会把新 `expiresAt` / `refreshable` 写回。
+   * @param accountId 账号 id。**调用方已知时请显式传入** ——
+   *   否则只能按凭据内容反查（`findAccountIdByCredential` 遍历账号、
+   *   逐个解析凭据比对，代价高且需要账号池具备凭据访问能力）。
+   */
+  async refreshAccountCredential(refName, pool, accountId) {
+    const ref = credentialRef13(refName);
+    const resolved = await this.ctx.credentials.resolve(ref);
+    if (!resolved) throw new Error("\u51ED\u636E\u672A\u914D\u7F6E");
+    const credential = parseRaccoonCredential(resolved.value);
+    if (!credential) throw new Error("\u51ED\u636E\u89E3\u6790\u5931\u8D25");
+    if (!isRaccoonRefreshable(credential)) {
+      throw new RefreshTokenExpiredError8("\u51ED\u636E\u7F3A\u5C11 refresh_token\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55");
+    }
+    try {
+      const next = await refreshRaccoonCredential(this.product, credential, this.fetchImpl);
+      await this.ctx.credentials.set(ref, JSON.stringify(next));
+      await syncAccountExpiry({
+        pool,
+        provider: this.product.id,
+        credential: next,
+        accessors: RACCOON_EXPIRY_ACCESSORS,
+        accountId,
+        tag: "[raccoon]",
+        warn: (message2) => this.ctx.logger?.warn?.(message2)
+      });
+    } catch (error) {
+      const message2 = error instanceof Error ? error.message : String(error);
+      if (message2.includes("\u91CD\u65B0\u767B\u5F55")) throw new RefreshTokenExpiredError8(message2);
+      throw error;
+    }
+  }
+  /**
+   * 说明：原先这里有一份私有的 `syncAccountExpiry`（把续期后的过期时间写回
+   * 账号池，失败只记日志不上抛）。它已被抽到 `src/expiry-sync.ts` 成为九个
+   * provider 共用的实现 —— 三条硬规矩（失败不反噬、优先用调用方的 accountId、
+   * 反查要传**凭据内容**而非 ref 名）都随之外移并记在那份文件的注释里。
+   */
+  /**
+   * 批量续期本产品的账号。
+   *
+   * ⚠️ **只按 `refreshable` 过滤，不看 `enabled`**：停用只影响账号池的
+   * 自动选号，与「凭据是否需要保持新鲜」无关。早期按 `enabled` 过滤导致
+   * 两个停用账号的 refresh_token 在停用期间被放到失效（真实缺陷，见 AGENTS.md）。
+   *
+   * 单账号失败不影响其他账号（且**必须留日志**：曾完全静默的实现
+   * 让「续期永远失败但 UI 显示可续期」无法排查）。
+   */
+  async refreshAll(pool) {
+    const accounts = await pool.listAccounts(this.product.id);
+    for (const entry of accounts) {
+      if (!entry.refreshable) continue;
+      const resolved = await this.ctx.credentials.resolve(credentialRef13(entry.credentialRef));
+      if (!resolved) continue;
+      const credential = parseRaccoonCredential(resolved.value);
+      if (credential === void 0) continue;
+      if (!isRaccoonExpired(credential)) {
+        const actual = raccoonCredentialExpiresAtMs(credential);
+        if (actual !== void 0 && Math.abs((entry.expiresAt ?? 0) - actual) > 1e3) {
+          try {
+            await pool.updateAccount(entry.id, { expiresAt: actual });
+            this.ctx.logger?.info?.(
+              `[raccoon] \u5DF2\u6821\u6B63\u8D26\u53F7 ${entry.id} \u7684\u6709\u6548\u671F\u663E\u793A\uFF08\u8D26\u53F7\u6C60 ${entry.expiresAt === void 0 ? "\u65E0" : new Date(entry.expiresAt).toISOString()} \u2192 ${new Date(actual).toISOString()}\uFF09`
+            );
+          } catch (error) {
+            this.ctx.logger?.warn?.(
+              `[raccoon] \u6821\u6B63\u8D26\u53F7 ${entry.id} \u7684\u6709\u6548\u671F\u5931\u8D25\uFF08\u4E0D\u5F71\u54CD\u4F7F\u7528\uFF09\uFF1A${error instanceof Error ? error.message : String(error)}`
+            );
+          }
+        }
+        continue;
+      }
+      try {
+        await this.refreshAccountCredential(entry.credentialRef, pool, entry.id);
+      } catch (error) {
+        if (error instanceof RefreshTokenExpiredError8) {
+          this.ctx.logger?.warn?.(`[raccoon] \u8D26\u53F7 ${entry.id} \u7684 refresh_token \u5DF2\u5931\u6548\uFF0C\u9700\u91CD\u65B0\u767B\u5F55`);
+        } else {
+          this.ctx.logger?.warn?.(
+            `[raccoon] \u8D26\u53F7 ${entry.id} \u7EED\u671F\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+      }
+    }
+  }
+  /** 登出：清除默认单凭据。 */
+  async logout() {
+    await this.ctx.credentials.unset(credentialRef13(this.credentialRefName));
+    this.lastRefreshError = void 0;
+  }
+  /**
+   * 拉取远端模型目录。
+   *
+   * ⚠️ 失败时返回**空数组**：适配器据此回退兜底表。
+   * 让模型目录失败不抛错，是为了不让整个 provider 在模型选择器里报错。
+   */
+  async fetchModels(pool) {
+    const credential = await this.resolveForFetchModels(pool);
+    if (credential === void 0) return [];
+    try {
+      const response = await this.fetchImpl(
+        `${this.product.apiBase}${this.product.llmApiPrefix}/model_catalog`,
+        {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${credential.access_token}`,
+            "X-Org-Code": credential.office_identity ?? "",
+            "X-Raccoon-Language": "zh"
+          },
+          signal: AbortSignal.timeout(2e4)
+        }
+      );
+      if (!response.ok) return [];
+      const payload = await response.json();
+      return parseRaccoonModelCatalog(payload);
+    } catch {
+      return [];
+    }
+  }
+  /** 取一个可用凭据（先账号池，再默认 ref）。 */
+  async resolveForFetchModels(pool) {
+    if (pool !== void 0) {
+      try {
+        const available2 = await pool.getAvailableAccount(this.product.id, "");
+        if (available2 !== null && available2 !== void 0) {
+          const credential = available2.credential;
+          if (typeof credential?.access_token === "string") return credential;
+        }
+      } catch {
+      }
+    }
+    return this.resolveDefaultCredential();
+  }
+  /** 查询积分余额（供 Channel Pack 账号卡片）。 */
+  async fetchCreditBalance(credential) {
+    return fetchRaccoonCreditBalance(this.product, credential, this.fetchImpl);
+  }
+  /** 领取一次性登录奖励。 */
+  async claimLoginReward(credential) {
+    return claimRaccoonLoginReward(this.product, credential, this.fetchImpl);
+  }
+  /** 查询一次性登录奖励是否已领。 */
+  async fetchOnboardingStatus(credential) {
+    return fetchRaccoonOnboardingStatus(this.product, credential, this.fetchImpl);
+  }
+  /**
+   * 一次性修复**老账号**的昵称与凭据字段（启动时调用）。
+   *
+   * ## 为什么需要它
+   *
+   * 早期实现有两处不足，导致**已登录的账号不会自动更正**：
+   *
+   * 1. 账号昵称直接用了服务端的 `name`（实测 `RaccoonAva` —— 它是服务端
+   *    **自动生成的默认名**，注册第二个账号时会重名、无法区分）；
+   * 2. 凭据里**没有存 `phone`**（后来才发现 `user_info.phone` 可用于消歧）。
+   *
+   * 光改代码只影响**新登录**的账号，老账号的昵称/凭据仍是旧值。
+   * 故这里主动补一次：读凭据 → 缺 `phone` 就拉一次 `user_info` 补上 →
+   * 用 `buildRaccoonNickname` 重算昵称并写回账号池。
+   *
+   * ## 语义约束
+   *
+   * - **幂等**：昵称已是目标形态时不写（避免每次启动都落盘）。
+   * - **失败不阻塞启动**：单个账号失败只记日志，抛错由调用方 catch。
+   * - **不发写请求**：只调只读的 `user_info`，不碰积分领取端点。
+   * - `buildNickname` 由调用方注入（它依赖 `channel-pack-rpc` 里的纯函数，
+   *   而那个模块依赖本模块 —— 注入避免循环依赖）。
+   *
+   * @returns 被修复的账号 id 列表（供日志）。
+   */
+  async repairAccountNicknames(pool, buildNickname) {
+    const repaired = [];
+    let entries;
+    try {
+      entries = await pool.listAccounts(this.product.id);
+    } catch {
+      return repaired;
+    }
+    for (const entry of entries) {
+      try {
+        const ref = credentialRef13(entry.credentialRef);
+        const resolved = await this.ctx.credentials.resolve(ref);
+        if (!resolved) continue;
+        const credential = parseRaccoonCredential(resolved.value);
+        if (credential === void 0) continue;
+        let next = credential;
+        if (credential.phone === void 0 || credential.user_id === void 0) {
+          const info = await fetchRaccoonUserInfo(this.product, credential, this.fetchImpl);
+          const patched = {
+            ...credential,
+            ...info.phone !== void 0 && credential.phone === void 0 ? { phone: info.phone } : {},
+            ...info.userId !== void 0 && credential.user_id === void 0 ? { user_id: info.userId } : {},
+            ...info.nickname !== void 0 && credential.nickname === void 0 ? { nickname: info.nickname } : {},
+            ...info.officeIdentity !== void 0 && credential.office_identity === void 0 ? { office_identity: info.officeIdentity } : {}
+          };
+          const changed = JSON.stringify(patched) !== JSON.stringify(credential);
+          if (changed) {
+            await this.ctx.credentials.set(ref, JSON.stringify(patched));
+            next = patched;
+          }
+        }
+        const target = buildNickname(next, entry.id);
+        if (target !== entry.nickname) {
+          await pool.updateAccount(entry.id, { nickname: target });
+          repaired.push(entry.id);
+        }
+      } catch (error) {
+        this.ctx.logger?.warn?.(
+          `[raccoon] \u4FEE\u590D\u8D26\u53F7 ${entry.id} \u7684\u6635\u79F0\u5931\u8D25\uFF08\u4E0D\u5F71\u54CD\u4F7F\u7528\uFF09\uFF1A${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
+    return repaired;
+  }
+};
+function parseRaccoonModelCatalog(payload) {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return [];
+  const root = payload;
+  if (root.code !== 0) return [];
+  const data = typeof root.data === "object" && root.data !== null && !Array.isArray(root.data) ? root.data : void 0;
+  if (data === void 0) return [];
+  const categories = Array.isArray(data.categories) ? data.categories : [];
+  const chat = categories.find((c) => {
+    return typeof c === "object" && c !== null && !Array.isArray(c) && c.type === "chat";
+  });
+  if (chat === void 0) return [];
+  const models = Array.isArray(chat.models) ? chat.models : [];
+  const seen = /* @__PURE__ */ new Set();
+  const out = [];
+  for (const raw of models) {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) continue;
+    const model = normalizeRemoteModel(raw);
+    if (model === void 0 || seen.has(model.id)) continue;
+    seen.add(model.id);
+    out.push(model);
+  }
+  return out;
+}
+
+// vendor/channel-pack/src/raccoon-adapter.ts
+import { LlmAdapter as LlmAdapter10, LlmError as LlmError16, ReasoningEffortId as ReasoningEffortId11 } from "@deepseek-ai/dsh-llm";
+function isQuotaError(data) {
+  const error = typeof data.error === "object" && data.error !== null ? data.error : data;
+  return String(error.code ?? data.code) === "402" || /积分不足|余额不足|insufficient[_\s]+(?:points|balance|credits)/i.test(
+    String(error.message ?? error.msg ?? "")
+  );
+}
+function raccoonThinkingExtraBody(effort) {
+  if (effort === void 0 || effort.length === 0) return void 0;
+  const type = effort === RACCOON_EFFORT_OFF ? "disabled" : "enabled";
+  return { thinking: { type } };
+}
+function raccoonReasoningInfo() {
+  const efforts = RACCOON_REASONING_EFFORTS.map((id) => ({
+    id: ReasoningEffortId11(id),
+    name: RACCOON_EFFORT_NAMES[id] ?? id
+  }));
+  const defaultEffort = RACCOON_REASONING_EFFORTS.includes(RACCOON_DEFAULT_EFFORT) ? ReasoningEffortId11(RACCOON_DEFAULT_EFFORT) : ReasoningEffortId11(RACCOON_REASONING_EFFORTS[0] ?? RACCOON_EFFORT_ON);
+  return { efforts, defaultEffort };
+}
+function positiveMaxTokens3(value) {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : void 0;
+}
+function fallbackToRemote3(model) {
+  return {
+    id: model.id,
+    name: model.name,
+    contextWindow: model.contextWindow,
+    maxTokens: model.maxTokens,
+    // 兜底表**声明**图片能力（它有该字段）；与 loomy 不同（那边兜底表没有该信息）。
+    supportsImage: model.supportsImage
+  };
+}
+var RaccoonAdapter = class extends LlmAdapter10 {
+  constructor(options) {
+    super();
+    this.options = options;
+    this.product = options.product ?? RACCOON;
+    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fallbackIndex = new Map(this.product.fallbackModels.map((model) => [model.id, model]));
+  }
+  options;
+  product;
+  fetchImpl;
+  /** 兜底模型索引（id → 条目）。 */
+  fallbackIndex;
+  /** 远端模型缓存；未拉取时为 undefined。 */
+  remoteModels;
+  /** 目录加载闸门：并发去重 + 失败/空结果冷却（见 `remote-catalog-gate.ts`）。 */
+  catalogGate = new RemoteCatalogGate();
+  /**
+   * 描述本适配器拥有的 provider 路由。
+   *
+   * 对入参做防御性归一化：DSH 会强制校验 `info.id === provider`，而模型设置页
+   * 会用该 id 计算 `deriveKeyRef(provider)`（内部调 `provider.toUpperCase()`）。
+   * 一旦 provider 不是字符串，直接回退到本产品的 id。
+   */
+  providerInfo(provider) {
+    const id = typeof provider === "string" && provider.length > 0 ? provider : this.product.id;
+    return { id, name: this.product.displayName };
+  }
+  /**
+   * 完整目录（**不套黑名单**），带最终展示名。
+   *
+   * 设置页需要它渲染被关闭的模型 —— 否则那些条目只能凭 `disabledMap` 的 key
+   * 补回，而那条路径拿不到展示名，会退化成裸 id（倍率与模型名随之丢失）。
+   */
+  listAllModels() {
+    const source = this.remoteModels ?? this.product.fallbackModels.map(fallbackToRemote3);
+    return source.map((model) => ({ id: model.id, name: model.name }));
+  }
+  /**
+   * 取远端模型目录；**失败时不把兜底表写进缓存**。
+   *
+   * ⚠ 原实现是 `this.remoteModels = fallback; return fallback` —— 把兜底表当成
+   * 「已加载」记下，于是一次瞬时失败会让该 provider **整个进程生命周期**都只剩
+   * 兜底模型（用户看不到自己的模型，且无从触发重试，只能重启）。
+   * 改为：只缓存**真实远端目录**，兜底表每次现算（纯本地、零成本），
+   * 并用 {@link RemoteCatalogGate} 的冷却挡住「每模型重试一次」的放大。
+   */
+  async loadModels() {
+    if (this.remoteModels !== void 0) return this.remoteModels;
+    const fetchRemote = this.options.fetchRemoteModels;
+    if (fetchRemote !== void 0) {
+      await this.catalogGate.run(async () => {
+        const fetched = await fetchRemote();
+        if (fetched.length === 0) return false;
+        this.remoteModels = fetched;
+        return true;
+      });
+      if (this.remoteModels !== void 0) return this.remoteModels;
+    }
+    return this.product.fallbackModels.map(fallbackToRemote3);
+  }
+  inputModalitiesFor(model) {
+    return model?.supportsImage === true ? ["text", "image"] : ["text"];
+  }
+  async listModels(_provider) {
+    if (!await providerCatalogVisible(this.options.accountPool, this.product.id)) return [];
+    const all = await this.loadModels();
+    const disabled = this.options.accountPool?.disabledModelsFor(this.product.id);
+    const listed = disabled === void 0 || disabled.size === 0 ? all : all.filter((model) => !disabled.has(model.id));
+    return listed.map((model) => ({
+      provider: this.product.id,
+      id: model.id,
+      // 倍率拼进 name（不是 description）：composer 的模型切换菜单只渲染 name。
+      name: model.name,
+      inputModalities: this.inputModalitiesFor(model)
+    }));
+  }
+  async resolveModel(provider, model, _signal) {
+    const all = await this.loadModels();
+    const entry = all.find((item) => item.id === model);
+    const fallback = this.fallbackIndex.get(model);
+    const bareName = fallback !== void 0 ? fallback.name.replace(/ · .*$/, "") : model;
+    const resolved = {
+      provider,
+      id: model,
+      name: entry !== void 0 ? entry.name.replace(/ · .*$/, "") : bareName,
+      inputModalities: this.inputModalitiesFor(entry)
+    };
+    const contextWindow = entry?.contextWindow ?? fallback?.contextWindow;
+    if (contextWindow !== void 0 && contextWindow > 0) {
+      resolved.context = { contextWindow };
+    }
+    const maxTokens = positiveMaxTokens3(entry?.maxTokens ?? fallback?.maxTokens);
+    if (maxTokens !== void 0) resolved.defaultMaxTokens = maxTokens;
+    resolved.reasoning = raccoonReasoningInfo();
+    return resolved;
+  }
+  /**
+   * 兼容 0.1.1-rc.2：新版 `LlmRuntime.prepareCall()` 会调用
+   * `registration.adapter.prepareCall(...)`，而本仓库链接的 dsh-llm 副本
+   * 基类尚未提供该方法。与其余适配器同款 shim。
+   */
+  async prepareCall(provider, model, signal) {
+    return {
+      model: await this.resolveModel(provider, model, signal),
+      stream: (options) => this.stream(options)
+    };
+  }
+  async *stream(options) {
+    const imageRefs = /* @__PURE__ */ new Map();
+    for (const message2 of options.messages) {
+      if (Array.isArray(message2.content)) collectImages3(message2.content, imageRefs);
+    }
+    const all = await this.loadModels();
+    const entry = all.find((item) => item.id === options.model);
+    let imageUrls;
+    if (imageRefs.size > 0) {
+      if (!this.inputModalitiesFor(entry).includes("image")) {
+        throw new LlmError16(`raccoon: \u6A21\u578B "${options.model}" \u4E0D\u652F\u6301\u56FE\u7247\u8F93\u5165`, "UNSUPPORTED_CONTENT");
+      }
+      if (this.options.readImage === void 0) {
+        throw new LlmError16("raccoon: \u56FE\u7247\u8F93\u5165\u9700\u8981\u9644\u4EF6\u670D\u52A1", "UNSUPPORTED_CONTENT");
+      }
+      imageUrls = /* @__PURE__ */ new Map();
+      const readImage = this.options.readImage;
+      for (const [id, ref] of imageRefs) {
+        const projected = await projectRequestImage(ref, {
+          readImageRequest: this.options.readImageRequest,
+          pixelBudget: this.product.imagePixelBudget,
+          maxBytes: this.product.imageMaxBytes
+        });
+        const image = projected ?? await readImage(ref);
+        if (image === void 0) continue;
+        imageUrls.set(id, `data:${image.mediaType};base64,${Buffer.from(image.data).toString("base64")}`);
+      }
+    }
+    let credential = await this.options.resolveCredential(options.model);
+    let accountId = credential === void 0 ? void 0 : await this.options.accountPool?.findAccountIdByCredential(this.product.id, credential.access_token);
+    if (credential === void 0 || isRaccoonExpired(credential)) {
+      credential = await this.options.refresh(accountId || void 0) ?? await this.options.resolveCredential(options.model);
+    }
+    if (credential === void 0 || credential.access_token.length === 0) {
+      throw new LlmError16("raccoon: no usable credential; log in first", "MISSING_CREDENTIAL");
+    }
+    const messages = serializeMessages4(options.messages, imageUrls);
+    const wireMessages = options.system !== void 0 && options.system.length > 0 ? [{ role: "system", content: options.system }, ...messages] : messages;
+    const thinking = raccoonThinkingExtraBody(options.reasoningEffort);
+    const buildBody = () => JSON.stringify({
+      model: options.model,
+      messages: wireMessages,
+      stream: true,
+      ...options.maxTokens !== void 0 ? { max_tokens: options.maxTokens } : {},
+      ...options.temperature !== void 0 ? { temperature: options.temperature } : {},
+      ...options.stop !== void 0 && options.stop.length > 0 ? { stop: options.stop } : {},
+      // ⚠️ tools 必须真的下发到请求体**顶层**：Qoder/TRAE 都因漏发而让模型
+      // 在正文里臆造 XML 工具调用，harness 认不出 → 任务终止。
+      ...options.tools !== void 0 && options.tools.length > 0 ? {
+        tools: options.tools.map((tool) => ({
+          type: "function",
+          function: {
+            name: tool.name,
+            ...tool.description.length > 0 ? { description: tool.description } : {},
+            ...tool.parameters === void 0 ? {} : { parameters: tool.parameters }
+          }
+        }))
+      } : {},
+      // 思考档位（开 / 关）。⚠️ **必须在 `extra_body` 内** —— 实测放顶层会被忽略
+      //（连非法值都不报错）。不传档位时不发该字段，保持服务端默认（= 开）。
+      ...thinking !== void 0 ? { extra_body: thinking } : {}
+    });
+    const headers = () => ({
+      Accept: "text/event-stream",
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${credential?.access_token ?? ""}`,
+      "X-Org-Code": credential?.office_identity ?? "",
+      "X-Raccoon-Language": "zh",
+      "X-Client-Platform": this.product.clientPlatform
+    });
+    const send = async () => {
+      try {
+        return await this.fetchImpl(
+          `${this.product.apiBase}${this.product.llmApiPrefix}/chat/completions`,
+          {
+            method: "POST",
+            headers: headers(),
+            body: buildBody(),
+            signal: options.signal
+          }
+        );
+      } catch (error) {
+        if (options.signal?.aborted) throw error;
+        if (isTransportError4(error)) {
+          throw new LlmError16(
+            `raccoon: transport error: ${error instanceof Error ? error.message : String(error)}`,
+            "TRANSPORT",
+            { cause: error }
+          );
+        }
+        throw error;
+      }
+    };
+    const tried = /* @__PURE__ */ new Set();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (accountId) tried.add(accountId);
+      let emitted = false;
+      try {
+        let response = await send();
+        if (response.status === 401 || response.status === 403) {
+          await response.body?.cancel();
+          const refreshed = await this.options.refresh(accountId || void 0) ?? await this.options.resolveCredential(options.model);
+          if (refreshed === void 0 || refreshed.access_token.length === 0) {
+            throw new LlmError16("raccoon: credential expired and refresh failed", "AUTH", { status: response.status });
+          }
+          credential = refreshed;
+          response = await send();
+        }
+        if (!response.ok) {
+          const errorText = await response.text().catch(() => "");
+          let quota = response.status === 402;
+          try {
+            quota ||= isQuotaError(JSON.parse(errorText));
+          } catch {
+          }
+          throw new LlmError16(
+            `raccoon: ${errorDetail4(errorText)}`,
+            quota ? "QUOTA_EXCEEDED" : httpErrorCode4(response.status),
+            { status: response.status }
+          );
+        }
+        for await (const chunk of consumeOpenAiSse(response, { signal: options.signal }, {
+          label: "raccoon",
+          firstTokenTimeoutMs: resolveFirstTokenTimeoutMs8(),
+          chunkTimeoutMs: resolveChunkTimeoutMs8(),
+          isQuotaError,
+          ...options.maxTokens === void 0 ? {} : { maxTokens: options.maxTokens }
+        })) {
+          emitted = true;
+          yield chunk;
+        }
+        return;
+      } catch (error) {
+        if (options.signal?.aborted || !(error instanceof LlmError16) || error.code !== "QUOTA_EXCEEDED") throw error;
+        if (accountId) {
+          await this.options.accountPool?.updateModelRateLimit(accountId, options.model, nextUtc8DayStartMs());
+        }
+        if (emitted || attempt === 2 || this.options.nextAccount === void 0) throw error;
+        const next = await this.options.nextAccount(options.model, tried);
+        if (next === void 0 || tried.has(next.accountId)) throw error;
+        accountId = next.accountId;
+        credential = next.credential;
+        if (isRaccoonExpired(credential)) {
+          credential = await this.options.refresh(accountId) ?? credential;
+        }
+      }
+    }
+  }
+};
+function resolveFirstTokenTimeoutMs8() {
+  const raw = Number(process.env.DSH_RACCOON_FIRST_TOKEN_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 12e4;
+}
+function resolveChunkTimeoutMs8() {
+  const raw = Number(process.env.DSH_RACCOON_CHUNK_TIMEOUT_MS);
+  return Number.isFinite(raw) && raw > 0 ? raw : 12e4;
+}
+function registerRaccoonLlm(ctx, options) {
+  const product = options.product ?? RACCOON;
+  const adapter = new RaccoonAdapter(options);
+  registerAdapterIdempotent(ctx.llm, [product.id], adapter);
+  return adapter;
+}
+
+// vendor/channel-pack/src/channels/raccoon.ts
+import { credentialRef as credentialRef14 } from "@deepseek-ai/dsh-credentials";
+function createRaccoonChannel(deps) {
+  const { pool } = deps;
+  return {
+    id: RACCOON.id,
+    namespace: "llm-raccoon",
+    createAuth: (ctx) => new RaccoonAuth(ctx),
+    registerLlm: (ctx, host, auth) => {
+      const raccoon = auth;
+      return registerRaccoonLlm(ctx, {
+        credentialRef: credentialRef14(RACCOON.defaultCredentialRef),
+        resolveCredential: async (modelId) => {
+          const available2 = await pool.getAvailableAccount(RACCOON.id, modelId ?? "");
+          if (available2) {
+            reportLedgerAccount(RACCOON.id, available2.entry.id);
+            return available2.credential;
+          }
+          host.throwIfAllAccountsRateLimited(RACCOON, modelId);
+          const resolved = await ctx.credentials.resolve(credentialRef14(RACCOON.defaultCredentialRef));
+          if (!resolved) return void 0;
+          try {
+            return JSON.parse(resolved.value);
+          } catch {
+            return void 0;
+          }
+        },
+        refresh: async (accountId) => {
+          const entry = accountId === void 0 ? void 0 : pool.listAccountsByProvider(RACCOON.id).find((account) => account.id === accountId);
+          if (accountId !== void 0 && entry === void 0) throw new Error("raccoon: account no longer exists");
+          if (entry) await raccoon.refreshAccountCredential(entry.credentialRef, pool, entry.id);
+          else await raccoon.refresh();
+          const resolved = await ctx.credentials.resolve(credentialRef14(entry?.credentialRef ?? RACCOON.defaultCredentialRef));
+          if (!resolved) throw new Error("raccoon: credential no longer exists");
+          return JSON.parse(resolved.value);
+        },
+        nextAccount: async (modelId, tried) => {
+          const next = await pool.getAvailableAccount(RACCOON.id, modelId, tried);
+          if (!next) return void 0;
+          reportLedgerAccount(RACCOON.id, next.entry.id);
+          return { accountId: next.entry.id, credential: next.credential };
+        },
+        // 远端模型目录：委托给 RaccoonAuth.fetchModels（它负责 Bearer 头与
+        // visible 过滤 + raccoonDisplayName 生成含倍率的展示名）。
+        // 失败时返回空数组，由适配器回退兜底表。
+        fetchRemoteModels: () => raccoon.fetchModels(pool),
+        // 图片字节桥接：按模型能力判定（远端 tags 含 vision）。
+        readImage: host.readImage,
+        readImageRequest: host.readImageRequest,
+        accountPool: pool,
+        product: RACCOON
+      });
+    }
+  };
 }
 
 // vendor/channel-pack/src/openai-gateway/server.ts
@@ -64666,7 +64715,7 @@ async function pickBuddyAccount(selector, candidates, options) {
 
 // vendor/channel-pack/src/minimax-auth.ts
 import { Service as Service10 } from "@deepseek-ai/cordis";
-import { credentialRef as credentialRef14 } from "@deepseek-ai/dsh-credentials";
+import { credentialRef as credentialRef15 } from "@deepseek-ai/dsh-credentials";
 
 // vendor/channel-pack/src/minimax-oauth.ts
 import { createHash as createHash8, randomBytes as randomBytes12 } from "node:crypto";
@@ -64938,13 +64987,13 @@ var MinimaxAuth = class extends Service10 {
       ...credential,
       ...options.nickname === void 0 ? {} : { nickname: options.nickname }
     };
-    await this.ctx.credentials.set(credentialRef14(options.refName), JSON.stringify(payload));
+    await this.ctx.credentials.set(credentialRef15(options.refName), JSON.stringify(payload));
     this.lastRefreshError = void 0;
     return { ...credential.account_id === void 0 ? {} : { accountId: credential.account_id } };
   }
   /** 解析默认单凭据。 */
   async resolveDefaultCredential() {
-    const resolved = await this.ctx.credentials.resolve(credentialRef14(this.credentialRefName));
+    const resolved = await this.ctx.credentials.resolve(credentialRef15(this.credentialRefName));
     if (!resolved) return void 0;
     return parseMinimaxCredential(resolved.value);
   }
@@ -64963,7 +65012,7 @@ var MinimaxAuth = class extends Service10 {
         this.fetchImpl,
         this.product
       );
-      await this.ctx.credentials.set(credentialRef14(this.credentialRefName), JSON.stringify(next));
+      await this.ctx.credentials.set(credentialRef15(this.credentialRefName), JSON.stringify(next));
       this.lastRefreshError = void 0;
     } catch (error) {
       const message2 = error instanceof Error ? error.message : String(error);
@@ -64979,7 +65028,7 @@ var MinimaxAuth = class extends Service10 {
    * 也把池值对账（见 `refreshAll` 的注释）。
    */
   async refreshAccountCredential(refName, pool, accountId) {
-    const ref = credentialRef14(refName);
+    const ref = credentialRef15(refName);
     const resolved = await this.ctx.credentials.resolve(ref);
     if (!resolved) throw new Error("\u51ED\u636E\u672A\u914D\u7F6E");
     const credential = parseMinimaxCredential(resolved.value);
@@ -65015,7 +65064,7 @@ var MinimaxAuth = class extends Service10 {
     for (const entry of accounts) {
       if (!entry.refreshable) continue;
       try {
-        const ref = credentialRef14(entry.credentialRef);
+        const ref = credentialRef15(entry.credentialRef);
         const resolved = await this.ctx.credentials.resolve(ref);
         if (!resolved) {
           await pool.updateAccount(entry.id, { refreshable: false });
@@ -65745,7 +65794,7 @@ function registerMinimaxLlm(ctx, options) {
 
 // vendor/channel-pack/src/gemini-auth.ts
 import { Service as Service11 } from "@deepseek-ai/cordis";
-import { credentialRef as credentialRef15 } from "@deepseek-ai/dsh-credentials";
+import { credentialRef as credentialRef16 } from "@deepseek-ai/dsh-credentials";
 
 // vendor/channel-pack/src/channel-fetch.ts
 var import_undici2 = __toESM(require_undici(), 1);
@@ -66260,7 +66309,7 @@ var GeminiAuth = class extends Service11 {
     return queue;
   }
   async readCredential(refName) {
-    const resolved = await this.ctx.credentials.resolve(credentialRef15(refName));
+    const resolved = await this.ctx.credentials.resolve(credentialRef16(refName));
     if (!resolved) return void 0;
     return parseGeminiCredential(resolved.value);
   }
@@ -66300,7 +66349,7 @@ var GeminiAuth = class extends Service11 {
    * 展示名走 `geminiAccountLabel`（邮箱优先，回退 `sub`）。
    */
   async persistLogin(credential, options) {
-    await this.ctx.credentials.set(credentialRef15(options.refName), JSON.stringify(credential));
+    await this.ctx.credentials.set(credentialRef16(options.refName), JSON.stringify(credential));
     return credential.sub === void 0 ? {} : { accountId: credential.sub };
   }
   /** 解析默认单凭据。 */
@@ -66317,7 +66366,7 @@ var GeminiAuth = class extends Service11 {
       throw new GeminiRefreshTokenExpiredError("\u51ED\u636E\u7F3A\u5C11 refresh_token\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55");
     }
     const next = await this.refreshCredential(credential);
-    await this.ctx.credentials.set(credentialRef15(this.credentialRefName), JSON.stringify(next));
+    await this.ctx.credentials.set(credentialRef16(this.credentialRefName), JSON.stringify(next));
   }
   /**
    * 续期**指定 ref**（RPC `account.refresh` / 定时器）。
@@ -66333,7 +66382,7 @@ var GeminiAuth = class extends Service11 {
       if (!isGeminiRefreshable(credential)) {
         throw new GeminiRefreshTokenExpiredError("\u51ED\u636E\u7F3A\u5C11 refresh_token\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55");
       }
-      const ref = credentialRef15(refName);
+      const ref = credentialRef16(refName);
       if (pool === void 0) {
         const next = await this.refreshCredential(credential);
         await this.ctx.credentials.set(ref, JSON.stringify(next));
@@ -66367,7 +66416,7 @@ var GeminiAuth = class extends Service11 {
   async refreshAll(pool) {
     const accounts = await pool.listAccounts(this.product.id);
     for (const entry of accounts) {
-      const ref = credentialRef15(entry.credentialRef);
+      const ref = credentialRef16(entry.credentialRef);
       let credential;
       try {
         const resolved = await this.ctx.credentials.resolve(ref);
@@ -66469,7 +66518,7 @@ var GeminiAuth = class extends Service11 {
     }
     for (const entry of entries) {
       try {
-        const ref = credentialRef15(entry.credentialRef);
+        const ref = credentialRef16(entry.credentialRef);
         const resolved = await this.ctx.credentials.resolve(ref);
         if (!resolved) continue;
         let credential = parseGeminiCredential(resolved.value);
@@ -67557,7 +67606,7 @@ function apply(ctx, config = {}) {
     ctx.logger.warn(`[channel-pack] \u6E05\u7406 WorkBuddy \u65E7\u7248\u8D26\u53F7\u5931\u8D25\uFF1A${String(error)}`);
   });
   const codearts = registerCodeArtsLlm(ctx, {
-    credentialRef: credentialRef16(CODEARTS_CREDENTIAL_REF),
+    credentialRef: credentialRef17(CODEARTS_CREDENTIAL_REF),
     resolveCredential: async () => {
       const available2 = await pool.getAvailableAccount("codearts", "");
       return available2?.credential;
@@ -67573,7 +67622,7 @@ function apply(ctx, config = {}) {
     accountPool: pool
   });
   const resolveBuddyCredentialByRef = async (refName) => {
-    const resolved = await ctx.credentials.resolve(credentialRef16(refName));
+    const resolved = await ctx.credentials.resolve(credentialRef17(refName));
     if (!resolved) return void 0;
     try {
       return JSON.parse(resolved.value);
@@ -67629,7 +67678,7 @@ function apply(ctx, config = {}) {
   };
   const buddy = new BuddyAuth(ctx);
   const buddyAdapter = registerBuddyLlm(ctx, {
-    credentialRef: credentialRef16(BUDDY_CREDENTIAL_REF),
+    credentialRef: credentialRef17(BUDDY_CREDENTIAL_REF),
     resolveCredential: async (modelId) => {
       const picked = await pickBuddyCredential({
         product: CODEBUDDY,
@@ -67647,7 +67696,7 @@ function apply(ctx, config = {}) {
         return available2.credential;
       }
       throwIfAllAccountsRateLimited(CODEBUDDY, modelId);
-      const resolved = await ctx.credentials.resolve(credentialRef16(BUDDY_CREDENTIAL_REF));
+      const resolved = await ctx.credentials.resolve(credentialRef17(BUDDY_CREDENTIAL_REF));
       if (!resolved) return void 0;
       try {
         return JSON.parse(resolved.value);
@@ -67668,7 +67717,7 @@ function apply(ctx, config = {}) {
   });
   const workbuddy = new BuddyAuth(ctx, { product: WORKBUDDY });
   const workbuddyAdapter = registerBuddyLlm(ctx, {
-    credentialRef: credentialRef16(WORKBUDDY.defaultCredentialRef),
+    credentialRef: credentialRef17(WORKBUDDY.defaultCredentialRef),
     resolveCredential: async (modelId) => {
       const picked = await pickBuddyCredential({
         product: WORKBUDDY,
@@ -67687,7 +67736,7 @@ function apply(ctx, config = {}) {
         return available2.credential;
       }
       throwIfAllAccountsRateLimited(WORKBUDDY, modelId);
-      const resolved = await ctx.credentials.resolve(credentialRef16(WORKBUDDY.defaultCredentialRef));
+      const resolved = await ctx.credentials.resolve(credentialRef17(WORKBUDDY.defaultCredentialRef));
       if (!resolved) return void 0;
       try {
         return JSON.parse(resolved.value);
@@ -67706,14 +67755,14 @@ function apply(ctx, config = {}) {
   });
   const lobsterai = new LobsteraiAuth(ctx);
   const lobsteraiAdapter = registerLobsteraiLlm(ctx, {
-    credentialRef: credentialRef16(LOBSTERAI.defaultCredentialRef),
+    credentialRef: credentialRef17(LOBSTERAI.defaultCredentialRef),
     resolveCredential: async (modelId) => {
       const available2 = await pool.getAvailableAccount(LOBSTERAI.id, modelId ?? "");
       if (available2) {
         reportLedgerAccount(LOBSTERAI.id, available2.entry.id);
         return available2.credential;
       }
-      const resolved = await ctx.credentials.resolve(credentialRef16(LOBSTERAI.defaultCredentialRef));
+      const resolved = await ctx.credentials.resolve(credentialRef17(LOBSTERAI.defaultCredentialRef));
       if (!resolved) return void 0;
       try {
         return JSON.parse(resolved.value);
@@ -67738,7 +67787,7 @@ function apply(ctx, config = {}) {
   const qoder = new QoderAuth(ctx);
   const activeQoderAccountId = /* @__PURE__ */ new Map();
   const qoderAdapter = registerQoderLlm(ctx, {
-    credentialRef: credentialRef16(QODER.defaultCredentialRef),
+    credentialRef: credentialRef17(QODER.defaultCredentialRef),
     resolveCredential: async (modelId) => {
       const available2 = await pool.getAvailableAccount(QODER.id, modelId ?? "");
       if (available2) {
@@ -67748,7 +67797,7 @@ function apply(ctx, config = {}) {
       }
       activeQoderAccountId.set(QODER.id, void 0);
       throwIfAllAccountsRateLimited(QODER, modelId);
-      const resolved = await ctx.credentials.resolve(credentialRef16(QODER.defaultCredentialRef));
+      const resolved = await ctx.credentials.resolve(credentialRef17(QODER.defaultCredentialRef));
       if (!resolved) return void 0;
       try {
         return JSON.parse(resolved.value);
@@ -67774,7 +67823,7 @@ function apply(ctx, config = {}) {
   });
   const qoderCn = new QoderAuth(ctx, { product: QODER_CN });
   const qoderCnAdapter = registerQoderLlm(ctx, {
-    credentialRef: credentialRef16(QODER_CN.defaultCredentialRef),
+    credentialRef: credentialRef17(QODER_CN.defaultCredentialRef),
     resolveCredential: async (modelId) => {
       const available2 = await pool.getAvailableAccount(QODER_CN.id, modelId ?? "");
       if (available2) {
@@ -67784,7 +67833,7 @@ function apply(ctx, config = {}) {
       }
       activeQoderAccountId.set(QODER_CN.id, void 0);
       throwIfAllAccountsRateLimited(QODER_CN, modelId);
-      const resolved = await ctx.credentials.resolve(credentialRef16(QODER_CN.defaultCredentialRef));
+      const resolved = await ctx.credentials.resolve(credentialRef17(QODER_CN.defaultCredentialRef));
       if (!resolved) return void 0;
       try {
         return JSON.parse(resolved.value);
@@ -67810,14 +67859,14 @@ function apply(ctx, config = {}) {
   });
   const trae = new TraeAuth(ctx);
   const traeAdapter = registerTraeLlm(ctx, {
-    credentialRef: credentialRef16(TRAE.defaultCredentialRef),
+    credentialRef: credentialRef17(TRAE.defaultCredentialRef),
     resolveCredential: async (modelId) => {
       const available2 = await pool.getAvailableAccount(TRAE.id, modelId ?? "");
       if (available2) {
         reportLedgerAccount(TRAE.id, available2.entry.id);
         return available2.credential;
       }
-      const resolved = await ctx.credentials.resolve(credentialRef16(TRAE.defaultCredentialRef));
+      const resolved = await ctx.credentials.resolve(credentialRef17(TRAE.defaultCredentialRef));
       if (!resolved) return void 0;
       try {
         return JSON.parse(resolved.value);
@@ -67841,14 +67890,14 @@ function apply(ctx, config = {}) {
   let activeClineAccountId = "";
   const clineAdapter = registerClineLlm(ctx, {
     fetchImpl: network.fetch,
-    credentialRef: credentialRef16(CLINE.defaultCredentialRef),
+    credentialRef: credentialRef17(CLINE.defaultCredentialRef),
     resolveCredential: async (modelId) => {
       const available2 = await pool.getAvailableAccount(CLINE.id, modelId ?? "");
       activeClineAccountId = available2?.entry.id ?? "";
       if (activeClineAccountId.length > 0) reportLedgerAccount(CLINE.id, activeClineAccountId);
       if (available2) return available2.credential;
       throwIfAllAccountsRateLimited(CLINE, modelId);
-      const resolved = await ctx.credentials.resolve(credentialRef16(CLINE.defaultCredentialRef));
+      const resolved = await ctx.credentials.resolve(credentialRef17(CLINE.defaultCredentialRef));
       if (!resolved) return void 0;
       try {
         return JSON.parse(resolved.value);
@@ -67874,7 +67923,7 @@ function apply(ctx, config = {}) {
   });
   const loomy = new LoomyAuth(ctx);
   const resolveLoomyCredentialByRef = async (refName) => {
-    const resolved = await ctx.credentials.resolve(credentialRef16(refName));
+    const resolved = await ctx.credentials.resolve(credentialRef17(refName));
     if (!resolved) return void 0;
     try {
       return JSON.parse(resolved.value);
@@ -67887,7 +67936,7 @@ function apply(ctx, config = {}) {
     resolveCredential: resolveLoomyCredentialByRef
   });
   const loomyAdapter = registerLoomyLlm(ctx, {
-    credentialRef: credentialRef16(LOOMY.defaultCredentialRef),
+    credentialRef: credentialRef17(LOOMY.defaultCredentialRef),
     /**
      * 解析本轮该用哪个账号的凭据。
      *
@@ -67925,7 +67974,7 @@ function apply(ctx, config = {}) {
         }
       }
       throwIfAllAccountsRateLimited(LOOMY, modelId);
-      const resolved = await ctx.credentials.resolve(credentialRef16(LOOMY.defaultCredentialRef));
+      const resolved = await ctx.credentials.resolve(credentialRef17(LOOMY.defaultCredentialRef));
       if (!resolved) return void 0;
       try {
         return JSON.parse(resolved.value);
@@ -67938,7 +67987,7 @@ function apply(ctx, config = {}) {
       if (accountId !== void 0 && entry === void 0) throw new Error("loomy: account no longer exists");
       if (entry) await loomy.refreshAccountCredential(entry.credentialRef, pool, entry.id);
       else await loomy.refresh();
-      const resolved = await ctx.credentials.resolve(credentialRef16(entry?.credentialRef ?? LOOMY.defaultCredentialRef));
+      const resolved = await ctx.credentials.resolve(credentialRef17(entry?.credentialRef ?? LOOMY.defaultCredentialRef));
       if (!resolved) throw new Error("loomy: credential no longer exists");
       return JSON.parse(resolved.value);
     },
@@ -67957,7 +68006,7 @@ function apply(ctx, config = {}) {
     // 失败时返回空数组，由适配器回退兜底表。
     fetchRemoteModels: async () => {
       const available2 = await pool.getAvailableAccount(LOOMY.id, "");
-      const resolved = available2 !== null && available2 !== void 0 ? { value: JSON.stringify(available2.credential) } : await ctx.credentials.resolve(credentialRef16(LOOMY.defaultCredentialRef));
+      const resolved = available2 !== null && available2 !== void 0 ? { value: JSON.stringify(available2.credential) } : await ctx.credentials.resolve(credentialRef17(LOOMY.defaultCredentialRef));
       if (resolved === void 0) return [];
       let credential;
       try {
@@ -67977,61 +68026,25 @@ function apply(ctx, config = {}) {
     accountPool: pool,
     product: LOOMY
   });
-  const raccoon = new RaccoonAuth(ctx);
-  const raccoonAdapter = registerRaccoonLlm(ctx, {
-    credentialRef: credentialRef16(RACCOON.defaultCredentialRef),
-    resolveCredential: async (modelId) => {
-      const available2 = await pool.getAvailableAccount(RACCOON.id, modelId ?? "");
-      if (available2) {
-        reportLedgerAccount(RACCOON.id, available2.entry.id);
-        return available2.credential;
-      }
-      throwIfAllAccountsRateLimited(RACCOON, modelId);
-      const resolved = await ctx.credentials.resolve(credentialRef16(RACCOON.defaultCredentialRef));
-      if (!resolved) return void 0;
-      try {
-        return JSON.parse(resolved.value);
-      } catch {
-        return void 0;
-      }
-    },
-    refresh: async (accountId) => {
-      const entry = accountId === void 0 ? void 0 : pool.listAccountsByProvider(RACCOON.id).find((account) => account.id === accountId);
-      if (accountId !== void 0 && entry === void 0) throw new Error("raccoon: account no longer exists");
-      if (entry) await raccoon.refreshAccountCredential(entry.credentialRef, pool, entry.id);
-      else await raccoon.refresh();
-      const resolved = await ctx.credentials.resolve(credentialRef16(entry?.credentialRef ?? RACCOON.defaultCredentialRef));
-      if (!resolved) throw new Error("raccoon: credential no longer exists");
-      return JSON.parse(resolved.value);
-    },
-    nextAccount: async (modelId, tried) => {
-      const next = await pool.getAvailableAccount(RACCOON.id, modelId, tried);
-      if (!next) return void 0;
-      reportLedgerAccount(RACCOON.id, next.entry.id);
-      return { accountId: next.entry.id, credential: next.credential };
-    },
-    // 远端模型目录：委托给 RaccoonAuth.fetchModels（它负责 Bearer 头与
-    // visible 过滤 + raccoonDisplayName 生成含倍率的展示名）。
-    // 失败时返回空数组，由适配器回退兜底表。
-    fetchRemoteModels: () => raccoon.fetchModels(pool),
-    // 图片字节桥接：按模型能力判定（远端 tags 含 vision）。
+  const channelRuntimes = mountChannels(ctx, {
     readImage: makeReadImage(ctx),
-    // ⚠️ raccoon 尤其需要请求版本：该网关按**请求体字节**设限
-    // （实测 `HTTP_413: request body exceeds 10MB`，两张大截图就占掉大半配额）。
     readImageRequest: makeReadImageRequest(ctx),
-    accountPool: pool,
-    product: RACCOON
-  });
+    throwIfAllAccountsRateLimited
+  }, [createRaccoonChannel({ pool })]);
+  const raccoonRuntime = channelRuntimes.find((runtime) => runtime.spec.id === RACCOON.id);
+  if (raccoonRuntime === void 0) throw new Error("channel-pack: raccoon \u672A\u80FD\u5728\u6CE8\u518C\u8868\u4E2D\u88C5\u914D");
+  const raccoon = raccoonRuntime.auth;
+  const raccoonAdapter = raccoonRuntime.adapter;
   const minimax = new MinimaxAuth(ctx);
   const minimaxAdapter = registerMinimaxLlm(ctx, {
-    credentialRef: credentialRef16(MINIMAX.defaultCredentialRef),
+    credentialRef: credentialRef17(MINIMAX.defaultCredentialRef),
     resolveCredential: async (modelId) => {
       const available2 = await pool.getAvailableAccount(MINIMAX.id, modelId ?? "");
       if (available2) {
         reportLedgerAccount(MINIMAX.id, available2.entry.id);
         return available2.credential;
       }
-      const resolved = await ctx.credentials.resolve(credentialRef16(MINIMAX.defaultCredentialRef));
+      const resolved = await ctx.credentials.resolve(credentialRef17(MINIMAX.defaultCredentialRef));
       if (!resolved) return void 0;
       try {
         return JSON.parse(resolved.value);
@@ -68074,14 +68087,14 @@ function apply(ctx, config = {}) {
   const geminiAdapter = registerGeminiLlm(ctx, {
     fetchImpl: network.fetch,
     projectFetcher: network.fetch,
-    credentialRef: credentialRef16(GEMINI.defaultCredentialRef),
+    credentialRef: credentialRef17(GEMINI.defaultCredentialRef),
     resolveCredential: async (modelId) => {
       const available2 = await pool.getAvailableAccount(GEMINI.id, modelId ?? "");
       if (available2) {
         reportLedgerAccount(GEMINI.id, available2.entry.id);
         return available2.credential;
       }
-      const resolved = await ctx.credentials.resolve(credentialRef16(GEMINI.defaultCredentialRef));
+      const resolved = await ctx.credentials.resolve(credentialRef17(GEMINI.defaultCredentialRef));
       if (!resolved) return void 0;
       try {
         return JSON.parse(resolved.value);
@@ -68114,8 +68127,8 @@ function apply(ctx, config = {}) {
     projectCache: geminiProjectCache,
     persistProject: async (value) => {
       const available2 = await pool.getAvailableAccount(GEMINI.id, "");
-      const ref = available2 ? available2.entry.credentialRef : credentialRef16(GEMINI.defaultCredentialRef);
-      await ctx.credentials.set(credentialRef16(ref), value);
+      const ref = available2 ? available2.entry.credentialRef : credentialRef17(GEMINI.defaultCredentialRef);
+      await ctx.credentials.set(credentialRef17(ref), value);
     },
     ...ctx.logger === void 0 ? {} : { logger: ctx.logger }
   });
@@ -68153,7 +68166,7 @@ function apply(ctx, config = {}) {
   };
   const activeZcodeAccountId = /* @__PURE__ */ new Map();
   const zcodeAdapter = registerZcodeLlm(ctx, {
-    credentialRef: credentialRef16(ZCODE.defaultCredentialRef),
+    credentialRef: credentialRef17(ZCODE.defaultCredentialRef),
     resolveCredential: async (modelId) => {
       const available2 = await pool.getAvailableAccount(ZCODE.id, modelId ?? "");
       if (available2) {
@@ -68329,6 +68342,7 @@ function apply(ctx, config = {}) {
     refreshTimer.unref?.();
     ctx.effect(() => () => {
       clearInterval(refreshTimer);
+      stopChannels(channelRuntimes);
       service.stop();
       buddy.stop();
       workbuddy.stop();
@@ -68347,6 +68361,7 @@ function apply(ctx, config = {}) {
     );
   });
   ctx.effect(() => () => {
+    stopChannels(channelRuntimes);
     service.stop();
     buddy.stop();
     workbuddy.stop();
@@ -68365,7 +68380,7 @@ function apply(ctx, config = {}) {
     opencodeAdapter = registerOpencodeLlm(ctx, {
       identitySlots: async () => listIdentitySlots(
         await Promise.all(pool.listAccountsByProvider(OPENCODE.id).map(async (entry) => {
-          const resolved = await ctx.credentials.resolve(credentialRef16(entry.credentialRef)).catch(() => void 0);
+          const resolved = await ctx.credentials.resolve(credentialRef17(entry.credentialRef)).catch(() => void 0);
           let parsed = {};
           if (resolved !== void 0) {
             try {
@@ -68418,7 +68433,7 @@ function apply(ctx, config = {}) {
     });
     void ensureDefaultAnonymousSlot(
       (entry) => pool.addAccount(entry),
-      (refName, value) => ctx.credentials.set(credentialRef16(refName), value),
+      (refName, value) => ctx.credentials.set(credentialRef17(refName), value),
       () => pool.listAccountsByProvider(OPENCODE.id),
       // ⚠️ 判据是「池里有没有匿名条目」而不是「有没有账号」：用户若主动
       // 删光了匿名通道，那是明确选择，不该每次启动又塞回来（删除会像失灵）。
@@ -68460,6 +68475,7 @@ function apply(ctx, config = {}) {
     trae: pruned(TRAE.id, traeAdapter),
     cline: pruned(CLINE.id, clineAdapter),
     loomy: pruned(LOOMY.id, loomyAdapter),
+    // 来自注册表装配（channel-registry.ts），不再手工接线。
     raccoon: pruned(RACCOON.id, raccoonAdapter),
     minimax: pruned(MINIMAX.id, minimaxAdapter),
     gemini: pruned(GEMINI.id, geminiAdapter),
@@ -68470,7 +68486,21 @@ function apply(ctx, config = {}) {
     void geminiSigStore.flush().catch(() => {
     });
   });
-  registerChannelPackRpc(ctx, pool, service, buddy, workbuddy, lobsterai, qoder, qoderCn, trae, cline, loomy, raccoon, minimax, zcode, gemini, modelAdapters, {
+  registerChannelPackRpc(ctx, pool, {
+    codearts: service,
+    buddy,
+    workbuddy,
+    lobsterai,
+    qoder,
+    qoderCn,
+    trae,
+    cline,
+    loomy,
+    raccoon,
+    minimax,
+    zcode,
+    gemini
+  }, modelAdapters, {
     ...config
   });
   mountOpenAiGateway(ctx, pool);

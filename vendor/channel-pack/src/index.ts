@@ -9,7 +9,6 @@ import { registerQoderLlm } from './qoder-adapter.js'
 import { registerTraeLlm } from './trae-adapter.js'
 import { registerClineLlm } from './cline-adapter.js'
 import { registerLoomyLlm, parseLoomyRemoteModels } from './loomy-adapter.js'
-import { registerRaccoonLlm } from './raccoon-adapter.js'
 import { CODEARTS_CREDENTIAL_REF, CodeArtsAuth } from './service.js'
 import { BUDDY_CREDENTIAL_REF, BuddyAuth, createPoolRefresh } from './buddy-auth.js'
 import { LobsteraiAuth } from './lobsterai-auth.js'
@@ -32,6 +31,8 @@ import { hasLegacyNamespaceRegistration, settingsOf, suppressAutoSettingsPage } 
 import type { ImageRequestTarget } from './image-budget.js'
 import { buildRaccoonNickname, registerChannelPackRpc } from './channel-pack-rpc.js'
 import { CODEBUDDY, WORKBUDDY, type BuddyProduct } from './product.js'
+import { mountChannels, stopChannels } from './channel-registry.js'
+import { createRaccoonChannel } from './channels/raccoon.js'
 import { mountOpenAiGateway } from './openai-gateway/index.js'
 import { installLoopResume } from './loop-recovery.js'
 import {
@@ -52,7 +53,6 @@ import type { QoderCredential } from './qoder.js'
 import type { TraeCredential } from './trae.js'
 import type { ClineCredential } from './cline.js'
 import type { LoomyCredential } from './loomy.js'
-import type { RaccoonCredential } from './raccoon.js'
 import { MinimaxAuth } from './minimax-auth.js'
 import { registerMinimaxLlm } from './minimax-adapter.js'
 import { MINIMAX } from './minimax-product.js'
@@ -1080,70 +1080,24 @@ export function apply(ctx: Context, config: { disableOpencode?: boolean; outlet?
   })
 
   // ===== Raccoon Work（商汤小浣熊）服务 =====
-  // 第九个产品线。登录与 Loomy 同型（**本地页承载**的微信扫码 + 短信双路径），
-  // 但**有** refresh 端点（凭据可静默续期），且客户端可能未安装。
+  // 装配细节已迁到 `channels/raccoon.ts` 的注册表条目（见 channel-registry.ts
+  // 模块头说明动机）。这里只负责：按注册表装配 → 保留 auth 实例供下面的
+  // repairAccountNicknames / refreshAll / modelAdapters 使用 → 生命周期由
+  // stopChannels 统一回收。
   //
-  // ⚠️ **不依赖客户端**：官方桌面端靠 `office-raccoon://auth/callback` 自定义协议
-  // 回调，本插件（宿主侧 Node 进程）收不到；故改为「宿主本地生成 code + 自行轮询」，
-  // 完全绕开该回调。凭据存插件自有的 ctx.credentials，不读客户端任何文件。
-  // 见 tests/unit/raccoon-client-independence.spec.ts 的回归防线。
-  //
-  // 服务名由 RaccoonAuth 依 product.id 派生，注册为 ctx.raccoonAuth。
-  // 不注册斜杠命令：入口在 Channel Pack 的 Raccoon 面板。
-  const raccoon = new RaccoonAuth(ctx)
-  const raccoonAdapter = registerRaccoonLlm(ctx, {
-    credentialRef: credentialRef(RACCOON.defaultCredentialRef),
-    resolveCredential: async (modelId?: string) => {
-      // 只从 raccoon 自己的账号池取账号，回退到自己的单凭据 ref，
-      // 保证不会串用其它 provider 的凭据。
-      // provider 实参用 RACCOON.id 而非字面量：写死字面量在改名/多产品场景下
-
-      const available = await pool.getAvailableAccount(RACCOON.id, modelId ?? '')
-
-      // 联合（历史遗留），与 `RaccoonCredential` 无充分重叠，故经 `unknown` 转换。
-      // 运行时安全性由 provider 过滤保证：查询用 `RACCOON.id`，取到的必是 raccoon 凭据。
-      if (available) {
-        // Token 账本（第 2 期）：回报「本笔请求解析出的账号」。
-        reportLedgerAccount(RACCOON.id, available.entry.id)
-        return available.credential as unknown as RaccoonCredential
-      }
-      throwIfAllAccountsRateLimited(RACCOON, modelId)
-      const resolved = await ctx.credentials.resolve(credentialRef(RACCOON.defaultCredentialRef))
-      if (!resolved) return undefined
-      try {
-        return JSON.parse(resolved.value) as RaccoonCredential
-      } catch {
-        return undefined
-      }
-    },
-    refresh: async (accountId?: string) => {
-      const entry = accountId === undefined ? undefined
-        : pool.listAccountsByProvider(RACCOON.id).find(account => account.id === accountId)
-      if (accountId !== undefined && entry === undefined) throw new Error('raccoon: account no longer exists')
-      if (entry) await raccoon.refreshAccountCredential(entry.credentialRef, pool, entry.id)
-      else await raccoon.refresh()
-      const resolved = await ctx.credentials.resolve(credentialRef(entry?.credentialRef ?? RACCOON.defaultCredentialRef))
-      if (!resolved) throw new Error('raccoon: credential no longer exists')
-      return JSON.parse(resolved.value) as RaccoonCredential
-    },
-    nextAccount: async (modelId, tried) => {
-      const next = await pool.getAvailableAccount(RACCOON.id, modelId, tried)
-      if (!next) return undefined
-      reportLedgerAccount(RACCOON.id, next.entry.id)
-      return { accountId: next.entry.id, credential: next.credential as unknown as RaccoonCredential }
-    },
-    // 远端模型目录：委托给 RaccoonAuth.fetchModels（它负责 Bearer 头与
-    // visible 过滤 + raccoonDisplayName 生成含倍率的展示名）。
-    // 失败时返回空数组，由适配器回退兜底表。
-    fetchRemoteModels: () => raccoon.fetchModels(pool),
-    // 图片字节桥接：按模型能力判定（远端 tags 含 vision）。
+  // 迁移动机（三条已发生的故障，不是理论风险）：
+  //  1. 原 stop() 清单在 :1709-1721 与 :1734-1746 各写一份，靠人工同步；
+  //  2. RPC 用 15 个位置形参，注释自述「错位复发 6 次」；
+  //  3. 新增渠道要同时改 5 处，无编译器检查。
+  const channelRuntimes = mountChannels(ctx, {
     readImage: makeReadImage(ctx),
-    // ⚠️ raccoon 尤其需要请求版本：该网关按**请求体字节**设限
-    // （实测 `HTTP_413: request body exceeds 10MB`，两张大截图就占掉大半配额）。
     readImageRequest: makeReadImageRequest(ctx),
-    accountPool: pool,
-    product: RACCOON,
-  })
+    throwIfAllAccountsRateLimited,
+  }, [createRaccoonChannel({ pool })])
+  const raccoonRuntime = channelRuntimes.find(runtime => runtime.spec.id === RACCOON.id)
+  if (raccoonRuntime === undefined) throw new Error('channel-pack: raccoon 未能在注册表中装配')
+  const raccoon = raccoonRuntime.auth as unknown as RaccoonAuth
+  const raccoonAdapter = raccoonRuntime.adapter
 
   // ===== MiniMax Code（中国版）服务 =====
   //
@@ -1706,6 +1660,9 @@ const zcodeAdapter = registerZcodeLlm(ctx, {
     refreshTimer.unref?.()
     ctx.effect(() => () => {
       clearInterval(refreshTimer)
+      // 已迁入注册表的渠道（当前只有 raccoon）由 stopChannels 统一回收；
+      // 未迁入的仍在下面逐行列出 —— 两条路径并存是迁移期的有意状态。
+      stopChannels(channelRuntimes)
       service.stop()
       buddy.stop()
       workbuddy.stop()
@@ -1732,6 +1689,7 @@ const zcodeAdapter = registerZcodeLlm(ctx, {
 
   // 保留旧的 stop scheduler（兼容旧命令）
   ctx.effect(() => () => {
+    stopChannels(channelRuntimes)
     service.stop()
     buddy.stop()
     workbuddy.stop()
@@ -1917,6 +1875,7 @@ const zcodeAdapter = registerZcodeLlm(ctx, {
     trae: pruned(TRAE.id, traeAdapter),
     cline: pruned(CLINE.id, clineAdapter),
     loomy: pruned(LOOMY.id, loomyAdapter),
+    // 来自注册表装配（channel-registry.ts），不再手工接线。
     raccoon: pruned(RACCOON.id, raccoonAdapter),
     minimax: pruned(MINIMAX.id, minimaxAdapter),
     gemini: pruned(GEMINI.id, geminiAdapter),
@@ -1929,7 +1888,23 @@ const zcodeAdapter = registerZcodeLlm(ctx, {
   // 丢的却是「下一轮工具调用能不能带上签名」。
   ctx.effect(() => () => { void geminiSigStore.flush().catch(() => {}) })
 
-  registerChannelPackRpc(ctx, pool, service, buddy, workbuddy, lobsterai, qoder, qoderCn, trae, cline, loomy, raccoon, minimax, zcode, gemini, modelAdapters, {
+  // 按 id 传入而不是按位置 —— 位置传参曾因少传/插队错位复发 6 次
+  //（见 channel-pack-rpc.ts 的 ChannelPackAuths 注释）。
+  registerChannelPackRpc(ctx, pool, {
+    codearts: service,
+    buddy,
+    workbuddy,
+    lobsterai,
+    qoder,
+    qoderCn,
+    trae,
+    cline,
+    loomy,
+    raccoon,
+    minimax,
+    zcode,
+    gemini,
+  }, modelAdapters, {
     ...config,
   })
   // 网关是旁路功能：这里传 `pool` 只为读设置页里的开关，其内部任何失败都已

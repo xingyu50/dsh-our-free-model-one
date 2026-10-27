@@ -824,6 +824,33 @@ export interface ChannelPackRpcConfig {
 }
 
 /**
+ * 渠道 id → Auth 实例。按 id 索引而不是按位置传参。
+ *
+ * 这是本模块唯一接收 auth 实例的入口。改这里之前，13 个 provider 是**位置实参**：
+ * 新增一个 provider 必须追加到末尾、既有的全部调用点跟着补占位，而编译器对错位
+ * 只能说「类型不匹配」，说不出「你漏了谁」——该注释记录过这条规则「历史复发 6 次」。
+ * 改成对象后，漏传一个就是**缺键**，错位在类型层面直接不可能。
+ */
+export interface ChannelPackAuths {
+  readonly codearts: CodeArtsAuth
+  readonly buddy: BuddyAuth
+  readonly workbuddy: BuddyAuth
+  readonly lobsterai: LobsteraiAuth
+  readonly qoder: QoderAuth
+  /** Qoder **中国版**实例（与 `qoder` 同协议、不同 product；RPC 分支按注册表分派）。 */
+  readonly qoderCn: QoderAuth
+  readonly trae: TraeAuth
+  readonly cline: ClineAuth
+  readonly loomy: LoomyAuth
+  readonly raccoon: RaccoonAuth
+  /** MiniMax Code **中国版**实例（OAuth 设备码 + PKCE，与 Qoder 同型但协议不同）。 */
+  readonly minimax: MinimaxAuth
+  readonly zcode: ZcodeAuth
+  /** Gemini（Google Cloud Code Assist 免费线）实例（本地回调 OAuth）。 */
+  readonly gemini: GeminiAuth
+}
+
+/**
  * 注册 Channel Pack 管理 API 端点。
  *
  * `connection` 服务只存在于 Web bundle；这里用**惰性注入**而非插件级静态
@@ -833,29 +860,7 @@ export interface ChannelPackRpcConfig {
 export function registerChannelPackRpc(
   ctx: Context,
   pool: AccountPool,
-  codearts: CodeArtsAuth,
-  buddy: BuddyAuth,
-  workbuddy: BuddyAuth,
-  lobsterai: LobsteraiAuth,
-  qoder: QoderAuth,
-  /** Qoder **中国版**实例（与 `qoder` 同协议、不同 product；RPC 分支按注册表分派）。 */
-  qoderCn: QoderAuth,
-  trae: TraeAuth,
-  cline: ClineAuth,
-  loomy: LoomyAuth,
-  raccoon: RaccoonAuth,
-  /** MiniMax Code **中国版**实例（OAuth 设备码 + PKCE，与 Qoder 同型但协议不同）。 */
-  minimax: MinimaxAuth,
-  zcode: ZcodeAuth,
-  /**
-   * Gemini（Google Cloud Code Assist 免费线）实例（本地回调 OAuth）。
-   *
-   * ⚠️ **必须排在最后一个 provider 形参位**（即 `zcode` 之后、`modelAdapters`
-   * 之前）：本仓库全部 `registerChannelPackRpc` 调用点都是**位置传参**，历史上已因
-   * 少传/插队错位复发 6 次。新 provider 一律**追加**在末尾，既有的 14 个调用点
-   * 才不用逐个补占位。
-   */
-  gemini: GeminiAuth,
+  auths: ChannelPackAuths,
   /**
    * provider → 适配器实例（可选）。
    *
@@ -867,10 +872,7 @@ export function registerChannelPackRpc(
   config: ChannelPackRpcConfig = {},
 ): void {
   ctx.inject(['connection'], (connectionCtx) => {
-    registerChannelPackEndpoints(
-      connectionCtx as Context, pool, codearts, buddy, workbuddy, lobsterai,
-      qoder, qoderCn, trae, cline, loomy, raccoon, minimax, zcode, gemini, modelAdapters, config,
-    )
+    registerChannelPackEndpoints(connectionCtx as Context, pool, auths, modelAdapters, config)
   })
 }
 
@@ -950,22 +952,13 @@ async function fullCatalogIds(
 function registerChannelPackEndpoints(
   ctx: Context,
   pool: AccountPool,
-  codearts: CodeArtsAuth,
-  buddy: BuddyAuth,
-  workbuddy: BuddyAuth,
-  lobsterai: LobsteraiAuth,
-  qoder: QoderAuth,
-  qoderCn: QoderAuth,
-  trae: TraeAuth,
-  cline: ClineAuth,
-  loomy: LoomyAuth,
-  raccoon: RaccoonAuth,
-  minimax: MinimaxAuth,
-  zcode: ZcodeAuth,
-  gemini: GeminiAuth,
+  auths: ChannelPackAuths,
   modelAdapters?: Readonly<Record<string, ModelCatalogSource>>,
   config: ChannelPackRpcConfig = {},
 ): void {
+  // 解构回原来的 13 个名字：本函数体内有 117 处按名字引用它们，改成查表收益
+  // 与风险不成比例。签名收对象是为了让**调用方**不再依赖位置顺序。
+  const { codearts, buddy, workbuddy, lobsterai, qoder, qoderCn, trae, cline, loomy, raccoon, minimax, zcode, gemini } = auths
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const connection = (ctx as any).connection ?? ctx.get('connection')
   if (!connection || typeof connection.fetch?.register !== 'function') {
