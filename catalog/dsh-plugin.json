@@ -13,7 +13,7 @@
   "license": "MIT",
   "source": {
     "repository": "https://github.com/xingyu50/dsh-our-free-model-one",
-    "revision": "219e6c0f033be1e2ed60e3c17ca6bd2e5f3897d7"
+    "revision": "80c735a915d741031da1717522f9ad6d1ec92c2e"
   },
   "x-ecosystem-packaging": {
     "adapterIsolation": "adapter/kernel.js is the only module that may import @deepseek-ai/*; enforced by scripts/catalog-test.mjs",
