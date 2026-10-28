@@ -29,7 +29,9 @@
     "channel-pack": "node scripts/build-channel-pack.mjs",
     "manifest:check": "node scripts/build-manifest.mjs --check",
     "selftest": "node scripts/host-selftest.mjs",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck:all": "npm run typecheck && node scripts/channel-pack-typecheck.mjs && npm run typecheck:standalone",
+    "precommit": "npm run typecheck:all && node scripts/test-all.mjs --mode contributor && node scripts/build-manifest.mjs --check"
   },
   "files": [
     "index.js",

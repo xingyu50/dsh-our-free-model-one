@@ -1,0 +1,28 @@
+{
+  "note": "vendor/channel-pack 在引入本检查之前的既有类型错误。修掉后请运行 node scripts/channel-pack-typecheck.mjs --update 收紧基线。",
+  "errors": [
+    "src/channel-fetch.ts(TS2352)",
+    "src/gemini-adapter.ts(TS2322)",
+    "src/gemini-messages.ts(TS2339)",
+    "src/gemini-messages.ts(TS2339)",
+    "src/gemini-messages.ts(TS2339)",
+    "src/gemini-messages.ts(TS2339)",
+    "src/gemini-messages.ts(TS2367)",
+    "src/minimax-adapter.ts(TS2322)",
+    "src/minimax-messages.ts(TS2339)",
+    "src/minimax-messages.ts(TS2339)",
+    "src/minimax-messages.ts(TS2339)",
+    "src/minimax-messages.ts(TS2339)",
+    "src/minimax-messages.ts(TS2367)",
+    "src/openai-gateway/messages.ts(TS2322)",
+    "src/openai-gateway/messages.ts(TS2322)",
+    "src/openai-gateway/messages.ts(TS2339)",
+    "src/openai-gateway/messages.ts(TS2339)",
+    "src/openai-gateway/messages.ts(TS2339)",
+    "src/openai-gateway/messages.ts(TS2339)",
+    "src/openai-gateway/messages.ts(TS2339)",
+    "src/openai-gateway/messages.ts(TS2352)",
+    "src/openai-gateway/responses.ts(TS2322)",
+    "src/openai-gateway/responses.ts(TS2339)"
+  ]
+}

@@ -163,11 +163,24 @@ if (only !== null && suites.length === 0) {
 const SUITE_TIMEOUT_MS = 60_000
 
 /**
+ * 单个套件的超时覆盖。
+ *
+ * `magpie-policy` 要拉起真实的 68MB 引擎二进制并等它应答，单跑实测 171 秒，
+ * 远超 60 秒的通用上限 —— 于是它在每一次全量运行里都必然超时，无论代码对错。
+ * 一个「必然红」的套件会训练人忽略整份报告，所以给它自己的额度，而不是把
+ * 通用上限抬高到几分钟（那会让真正卡死的套件多等四倍）。
+ */
+const SUITE_TIMEOUT_OVERRIDES = new Map([
+  ['magpie-policy', 300_000],
+])
+
+/**
  * Run a suite while forwarding its output as it arrives. Keeping the output
  * live is important here: a timeout kills the child before a buffered pipe can
  * be read, which used to erase the last check printed by recovery-test.mjs.
  */
-function runSuite(script, args) {
+function runSuite(name, script, args) {
+  const timeoutMs = SUITE_TIMEOUT_OVERRIDES.get(name) ?? SUITE_TIMEOUT_MS
   return new Promise(resolve => {
     const child = spawn(process.execPath, [path.join(scriptsDir, script), ...args], {
       stdio: ['ignore', 'pipe', 'pipe'],
@@ -190,7 +203,7 @@ function runSuite(script, args) {
       timedOut = true
       child.kill()
       forceKillTimer = setTimeout(() => child.kill('SIGKILL'), 500)
-    }, SUITE_TIMEOUT_MS)
+    }, timeoutMs)
     child.once('error', error => {
       spawnError = error
     })
@@ -205,14 +218,14 @@ function runSuite(script, args) {
 const results = []
 console.log(`test mode: ${mode}${mode === 'contributor' ? ' — code checks only; release readiness is checked separately' : ''}`)
 for (const [name, script, args] of suites) {
-  const run = await runSuite(script, args)
+  const run = await runSuite(name, script, args)
   const output = `${run.stdout}${run.stderr}`.trimEnd().split('\n')
   const hung = run.timedOut || run.error !== null || run.signal !== null
   const ok = !hung && run.status === 0
   results.push({ name, ok, ms: run.ms, output })
   console.log(`${ok ? 'ok  ' : 'FAIL'} ${name.padEnd(14)} ${String(run.ms).padStart(5)} ms`)
   if (!ok) {
-    if (run.timedOut) console.log(`       killed at the ${SUITE_TIMEOUT_MS / 1000}s deadline — the live output above is the last diagnostic from the suite`)
+    if (run.timedOut) console.log(`       killed at the ${(SUITE_TIMEOUT_OVERRIDES.get(name) ?? SUITE_TIMEOUT_MS) / 1000}s deadline — the live output above is the last diagnostic from the suite`)
     else if (hung) console.log(`       never finished (${run.error?.message ?? `signal ${run.signal}`})`)
     const detail = output.filter(line => /^(FAIL|✗|Error|error:)/.test(line.trim())).slice(0, 6)
     for (const line of (detail.length > 0 ? detail : output.slice(-12))) console.log(`       ${line}`)

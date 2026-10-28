@@ -1,3 +1,6 @@
+## 提交前
+改完代码运行 `npm run precommit`（三处 typecheck + 全量测试 + manifest 一致性）；红了先修，别推送。
+
 ## Agent skills
 
 ### Issue tracker
