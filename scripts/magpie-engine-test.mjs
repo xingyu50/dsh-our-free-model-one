@@ -329,7 +329,7 @@ async function fixtureTests() {
   assert(!JSON.stringify(starts).includes(gateway.key))
   assert.deepEqual(Object.keys(starts[0]).sort(), ['available', 'error', 'revision', 'state', 'version'])
   assert.equal(logs.length, 1)
-  assert.deepEqual(logs[0], ['Magpie engine started'])
+  assert.deepEqual(logs[0], ['Magpie 引擎已启动'])
   const url = await mount(owned)
   await check('lazy/coalesced start, private XDG directories and secret-free status/logging', async () => {
     const prefs = JSON.parse(await readFile(path.join(settings.config, 'magpie', 'settings.json'), 'utf8'))

@@ -194,8 +194,8 @@
     },
     {
       "path": "src/magpie-engine.js",
-      "size": 52631,
-      "sha256": "18c18bd604aa678d1332f8029efe38168467a8253ce81436cac0395fb9817861"
+      "size": 52632,
+      "sha256": "7347ea472d4a5e06a0b890b911db8b35fdc75d506838d7c099192a13e5360d34"
     },
     {
       "path": "src/magpie-models.js",
@@ -444,8 +444,8 @@
     },
     {
       "path": "vendor/channel-pack/pack.js",
-      "size": 2889480,
-      "sha256": "3eebe18861eac272265018bbc32c1bacbf2ae279e59eb70a5f2aab37d4f3de8b"
+      "size": 2890941,
+      "sha256": "07dda9341f9a4cc53f617245dbc6e5905f7405c888a61196ac9c29ae3ca3e0af"
     },
     {
       "path": "vendor/channel-pack/qoder-auth-wasm.wasm",

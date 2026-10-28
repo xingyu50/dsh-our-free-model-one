@@ -174,6 +174,17 @@ export function utc8DateString(nowMs: number = Date.now()): string {
 }
 
 /**
+ * 「今天（UTC+8）已经过去多少毫秒」—— 即距当日 00:00 的偏移量。
+ *
+ * 与 `utc8DateString` / `nextUtc8DayStartMs` 同一套算术平移，不另立第二份
+ * 日界算法；调用方只取一次 `now()`，避免两次取时在日界附近读出矛盾值。
+ */
+export function utc8MsIntoDay(nowMs: number = Date.now()): number {
+  const shifted = nowMs + QODER_BILLING_UTC_OFFSET_MS
+  return ((shifted % 86_400_000) + 86_400_000) % 86_400_000
+}
+
+/**
  * 今天还没记入时的重试间隔（毫秒）。
  *
  * ⚠️ 必须有：`shouldMarkToday` 为假时 `performRun` 刻意不记日期，原文的兜底是
@@ -581,6 +592,26 @@ export function createAutoCheckin(deps: AutoCheckinDeps): AutoCheckin {
       channels.push({ provider, text: describeChannel(summary) })
     }
 
+    // ⚠️ **日界后的第一个小时不记账**（真实缺陷，2026-10-28）。
+    //
+    // `armNext` 把下一轮正好排在 UTC+8 00:00:00.000，而各渠道的每日额度由
+    // **服务端**换日，不跟着本机闹钟走。线上取证（`~/.our-free-model/
+    // channel-pack/auto-checkin.json`）：lastAt = 2026-10-28T00:00:00.809+08:00、
+    // lastResult = 「2 个渠道：4 个今天已领」—— 那一刻上游四个账号回答的其实
+    // 都是**昨天**的记录；同一批账号当天的真实签到记录后来才出现。
+    // 记成「今天已跑」之后 `armNext` 直接睡到次日日界 ⇒ 当天额度整天漏领，
+    // 用户看到的就是「自动签到开关开着，但没有自动签到」。
+    //
+    // 判据取「距日界不足 RETRY_MS」，而不是给每个渠道配一张刷新时刻表
+    //（那必然漂移，且渠道自己也没公布）：重试链本来就是每小时一轮，拒绝记账
+    // 的代价只是推迟到 01:00 那轮重试，而误记的代价是整天空转。
+    if (utc8MsIntoDay(now()) < RETRY_MS) {
+      deps.warn?.(
+        `[channel-pack] 自动签到未记入今日（刚过日界，${RETRY_MS / 60_000} 分钟后重试）：${describeRun(totals)}`,
+      )
+      return
+    }
+
     if (!shouldMarkToday(totals)) {
       // ⚠️ 刻意**不写** lastDate：让「凭据还没续上 / 网络不通 / 赶在渠道刷新前
       // 跑的那一轮」能在一小时后重试，而不是当天就此放弃（判据见 shouldMarkToday，
@@ -610,10 +641,24 @@ export function createAutoCheckin(deps: AutoCheckinDeps): AutoCheckin {
     deps.warn?.(`[channel-pack] 自动签到完成（${today()}）：${doc.lastResult}`)
   }
 
+  /**
+   * 跑一轮（内部判三道闸）。
+   *
+   * ⚠️ 三个闸原本都是**静默** return。2026-10-28 那次「开关开着却没有自动签到」
+   * 能定位，靠的是 `auto-checkin.json` 里 `lastAt` 恰好留下 809ms 的日界偏移 ——
+   * 如果那个时间戳落在别的值上，日志里一个字都没有，无从查起。所以每个闸
+   * 都记一行 SKIP，让「为什么没跑」在日志里可答。
+   */
   function runIfDue(): Promise<void> {
     if (inflight !== null) return inflight
-    if (!doc.enabled) return Promise.resolve()
-    if (doc.lastDate !== '' && doc.lastDate === today()) return Promise.resolve()
+    if (!doc.enabled) {
+      deps.warn?.('[channel-pack] 自动签到 SKIP：开关未打开')
+      return Promise.resolve()
+    }
+    if (doc.lastDate !== '' && doc.lastDate === today()) {
+      deps.warn?.(`[channel-pack] 自动签到 SKIP：今天（${doc.lastDate}）已记入，等待下一个日界`)
+      return Promise.resolve()
+    }
     running = true
     const task = performRun().catch((error: unknown) => {
       deps.warn?.(`[channel-pack] 自动签到异常: ${String(error)}`)
