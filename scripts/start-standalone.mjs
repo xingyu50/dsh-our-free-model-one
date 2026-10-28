@@ -114,6 +114,22 @@ try {
   if (readerError.code !== 'ENOENT' && !(readerError instanceof SyntaxError)) throw readerError
 }
 
+/**
+ * Resolve a command name to something spawnSync can execute without a shell.
+ *
+ * Only the npm shims need this: npm/npx ship as .cmd files on Windows, and
+ * spawnSync answers ENOENT for the bare name once `shell: true` is gone.
+ * `node` is a real executable and must stay as-is — appending .cmd to it would
+ * break the build step.
+ *
+ * @param {string} cmd
+ * @returns {string}
+ */
+function resolveCommand(cmd) {
+  if (process.platform !== 'win32') return cmd
+  return cmd === 'npm' || cmd === 'npx' ? cmd + '.cmd' : cmd
+}
+
 function run(name, cmd, cmdArgs, opts = {}) {
   const cwd = opts.cwd || ROOT
   if (dryRun) {
@@ -121,7 +137,10 @@ function run(name, cmd, cmdArgs, opts = {}) {
     return 0
   }
   process.stdout.write('\n▶ ' + name + '\n')
-  const res = spawnSync(cmd, cmdArgs, { stdio: 'inherit', cwd, shell: true })
+  // No `shell: true`: Node warns that it concatenates arguments unescaped
+  // (DEP0190). npm is a .cmd shim on Windows, which is the only reason the
+  // shell was there — resolve that per platform instead.
+  const res = spawnSync(resolveCommand(cmd), cmdArgs, { stdio: 'inherit', cwd })
   if (res.error) {
     process.stderr.write('✖ ' + name + ' 无法执行：' + res.error.message + '\n')
     process.exit(1)

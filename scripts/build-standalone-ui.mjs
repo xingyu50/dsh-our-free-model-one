@@ -34,4 +34,6 @@ if (!process.argv.includes('--check')) {
     if (/^[\w-]+\.(js|css)$/.test(name) && !files.has(name)) fs.rmSync(new URL(name, directory), { force: true })
   }
 }
-console.log(`独立端页面生成一致：${assets.length} 个本地资源`)
+// Same rule as build-sponsor: a passing check is worth a line, a build in
+// progress is not. The start script runs this on every launch.
+if (process.argv.includes('--check')) console.log(`独立端页面生成一致：${assets.length} 个本地资源`)

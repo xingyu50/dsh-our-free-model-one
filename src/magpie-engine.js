@@ -656,7 +656,7 @@ export function createMagpieEngine({ dataDir, logger, binary } = {}) {
   })
   const note = () => {
     // Only fixed messages: upstream stdout and stderr include credentials.
-    try { logger?.info?.('Magpie engine started') } catch {}
+    try { logger?.info?.('Magpie 引擎已启动') } catch {}
   }
   const assertOpen = () => {
     if (closed || lifetime.signal.aborted) throw engineError('Engine is closed')
