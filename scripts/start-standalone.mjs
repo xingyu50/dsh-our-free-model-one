@@ -149,24 +149,19 @@ else if (forceInstall) needInstall = true
 else needInstall = !(nodeModulesPresent(ROOT) && nodeModulesPresent(STANDALONE))
 
 if (needInstall) {
-  if (forceInstall) process.stdout.write('· 强制重装依赖（--force-install）\n')
-  else if (skipInstall) process.stdout.write('· 跳过依赖安装（--skip-install）\n')
-  else process.stdout.write('· 未检测到完整的 node_modules，自动安装依赖。\n')
+  // Only the case the user did not ask for is worth a line: an auto-install takes
+  // minutes and they should know why. --force-install / --skip-install are
+  // echoes of what they just typed.
+  if (!forceInstall && !skipInstall) process.stdout.write('· 未检测到完整的 node_modules，自动安装依赖。\n')
   // 这个仓库的 lockfile 把部分包解析到 registry.npmmirror.com，与默认 registry
   // (registry.npmjs.org) 不一致时，npm 会把这些注册表 tarball 归为 type=remote，
   // 一旦环境策略关闭了 allow-remote 就会以 EALLOWREMOTE 失败。
   // CLI 参数优先级高于 npmrc 与环境变量，显式放开即可绕开该判定。
   run('安装根依赖', 'npm', ['ci', '--allow-remote=all'], { cwd: ROOT })
   run('安装 standalone 依赖', 'npm', ['ci', '--allow-remote=all'], { cwd: STANDALONE })
-} else {
-  process.stdout.write('· 依赖已安装，跳过 npm ci（如需重装用 --force-install）。\n')
 }
 
-if (!skipBuild) {
-  run('构建前端', 'node', [BUILD_UI], { cwd: ROOT })
-} else {
-  process.stdout.write('· 跳过前端构建（--skip-build）\n')
-}
+if (!skipBuild) run('构建前端', 'node', [BUILD_UI], { cwd: ROOT })
 
 if (dryRun) {
   process.stdout.write('[dry-run] 启动：' + process.execPath + ' ' + CLI + ' ' + forwarded.join(' ') + '\n')
