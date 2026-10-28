@@ -103,6 +103,13 @@ const CONTENT_FINGERPRINTS: readonly ContentFingerprint[] = [
     replace: 'You are interacting with the user through the DeepSeek Harness Web GUI; the runtime context gives its URL.',
     note: 'DSH 桌面端 2026-10-27 实测：该句与下一句组合触发 502（单句各 200），改写后 200；顺序敏感',
   },
+  {
+    // DSH 桌面端 system 第 8 段的第 2 句。触发条件是**它与上一句连在一起**（空格连接），
+    // 单发该句 200、单发上一句 200、两句空格相连 502；换行连接则 200，反序也 200。
+    find: 'paths resolve from the workspace root',
+    replace: 'paths are relative to the workspace root',
+    note: 'DSH 桌面端 2026-10-28 实测：42 段全扫只有该段 502，逐对扫描只有含该段的相邻对 502，改写后整份 78K system 200',
+  },
 ]
 
 /** 正则元字符转义：把字面量安全地变成**精确**匹配，而不是模式。 */
