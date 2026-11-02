@@ -45,6 +45,8 @@ import { BuddyBalanceSelector, pickBuddyAccount } from './buddy-balance-selector
 import { LOBSTERAI } from './lobsterai-product.js'
 import { QODER, QODER_CN } from './qoder-product.js'
 import { TRAE } from './trae-product.js'
+import { TraeAccountSelector, TraeFailureLedger } from './trae-selection.js'
+import { fetchTraeCreditBalance } from './trae-credits.js'
 import { CLINE } from './cline-product.js'
 import { configureDeadModelStore, withDeadModelPruning } from './dead-model-store.js'
 import type { CodeArtsCredential, BuddyCredential } from './types.js'
@@ -803,6 +805,39 @@ export function apply(ctx: Context, config: { disableOpencode?: boolean; outlet?
   // 服务名由 TraeAuth 依 product.id 派生，注册为 ctx.traeAuth。
   // 不注册斜杠命令：入口在 Channel Pack 的 TRAE 面板。
   const trae = new TraeAuth(ctx)
+
+  /** 按凭据 ref 解析 TRAE 凭据（供选号器与兜底路径共用）。 */
+  const resolveTraeCredentialByRef = async (refName: string): Promise<TraeCredential | undefined> => {
+    const resolved = await ctx.credentials.resolve(credentialRef(refName))
+    if (!resolved) return undefined
+    try {
+      return JSON.parse(resolved.value) as TraeCredential
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * TRAE 的**轮转选号器**（多号分流）。
+   *
+   * 与 Loomy/Buddy 的余额分档不同：TRAE 的积分是**一次性、有到期日**的包，
+   * 且没有批量余额端点（N 个号 = N 次 HTTP）。故这里只在**付费模型**上查余额
+   * （`creditsRate === 0` 的免费模型直接走轮转，零额外请求），查到的到期时间
+   * 只用于「快作废的号插队」，平时严格等权轮转 —— 详见 `trae-selection.ts`。
+   */
+  const traeSelector = new TraeAccountSelector({
+    resolveCredential: resolveTraeCredentialByRef,
+    // ⚠️ 必须用 channel 的网络出口（用户配了代理而 trae 直连不通时，
+    // 这里不注入就会绕过代理、静默退回 `globalThis.fetch`）。
+    fetchBalance: credential => fetchTraeCreditBalance(credential, TRAE, network.fetch),
+  })
+
+  /** TRAE 的连续失败账本（3 连败才冷却，指数增长封顶 30 分钟）。 */
+  const traeFailureLedger = new TraeFailureLedger({
+    updateModelRateLimit: (accountId, modelId, resetAtMs) =>
+      pool.updateModelRateLimit(accountId, modelId, resetAtMs),
+  })
+
   const traeAdapter = registerTraeLlm(ctx, {
     credentialRef: credentialRef(TRAE.defaultCredentialRef),
     resolveCredential: async (modelId?: string) => {
@@ -810,12 +845,11 @@ export function apply(ctx: Context, config: { disableOpencode?: boolean; outlet?
       // 传空串会让 `getAvailableAccount` 的限流过滤整体短路
       //（`if (modelId.length === 0) return true`）→ 被标记限流的账号仍被选中，
       // 换号形同虚设（用户报障「没有切换」的根因之一）。
-      const available = await pool.getAvailableAccount(TRAE.id, modelId ?? '')
-      // Token 账本（第 2 期）：回报「本笔请求解析出的账号」。
-      if (available) {
-        reportLedgerAccount(TRAE.id, available.entry.id)
-        return available.credential as TraeCredential
-      }
+      //
+      // 走轮转选号器（与 `nextAccount` 同一个）：首发的选号也必须是轮转的，
+      // 否则「平时等权轮转」只在换号时才生效，首发仍钉死在第一个号。
+      const picked = await pickTraeSelection(modelId ?? '')
+      if (picked !== undefined) return picked.credential
       const resolved = await ctx.credentials.resolve(credentialRef(TRAE.defaultCredentialRef))
       if (!resolved) return undefined
       try {
@@ -834,8 +868,58 @@ export function apply(ctx: Context, config: { disableOpencode?: boolean; outlet?
     // 但模态按模型判定（远端 `display_config.multimodal`），故这里只负责读字节。
     readImage: makeReadImage(ctx),
     accountPool: pool,
+    nextAccount: async (modelId, tried) => {
+      const picked = await pickTraeSelection(modelId, tried)
+      if (picked === undefined) return undefined
+      return picked
+    },
+    failureLedger: traeFailureLedger,
     product: TRAE,
   })
+
+  /**
+   * 按 TRAE 的轮转 / 快作废插队策略选一个账号。
+   *
+   * 抽成局部函数而非内联两遍：首发（`resolveCredential`）与换号（`nextAccount`）
+   * 必须走**同一套**策略 —— 两处若各写一遍，「平时轮转」就只在其中一条路径生效。
+   *
+   * @param modelId - 本轮模型；空串表示「未知模型」（`refresh` 等无模型上下文的场合）。
+   * @param tried - 本次请求已失败的账号 id，实现会跳过它们。
+   * @returns 选中的账号与凭据；池为空或全部不可用时 `undefined`。
+   */
+  async function pickTraeSelection(
+    modelId: string,
+    tried: ReadonlySet<string> = new Set<string>(),
+  ): Promise<{ accountId: string; credential: TraeCredential } | undefined> {
+    const candidates = pool.listAccountsByProvider(TRAE.id)
+      // 与池内其余选号路径同款：停用账号永不参与。
+      .filter(entry => entry.enabled)
+      .filter(entry => !tried.has(entry.id))
+      // 冷却中的账号跳过（冷却写进 `modelRateLimits`，见 `TraeFailureLedger`）。
+      .filter((entry) => {
+        if (modelId.length === 0) return true
+        const resetAt = entry.modelRateLimits?.[modelId]
+        return resetAt === undefined || resetAt === 0 || Date.now() >= resetAt
+      })
+      .map(entry => ({ id: entry.id, credentialRef: entry.credentialRef }))
+    if (candidates.length === 0) {
+      // 全被「冷却中」排除 ≠ 没有账号：此时用户该做的是等解禁，不是重新登录。
+      // 让池把「最近一个什么时候解禁」翻成人话，避免落进下面的通用兜底。
+      throwIfAllAccountsRateLimited(TRAE, modelId)
+      return undefined
+    }
+    // 免费模型不查余额（`creditsRate === 0`）；查不到远端目录时按付费处理。
+    const freeModel = modelId.length > 0 && await traeAdapter.isFreeModel(modelId)
+    const picked = await traeSelector.select(modelId, candidates, freeModel)
+    if (picked === undefined) {
+      // 候选都在、但凭据一个都解析不出来 → 也按「不可用」报，别静默退到默认凭据。
+      throwIfAllAccountsRateLimited(TRAE, modelId)
+      return undefined
+    }
+    // Token 账本（第 2 期）：回报「本笔请求解析出的账号」。
+    reportLedgerAccount(TRAE.id, picked.accountId)
+    return picked
+  }
 
   // ===== Cline（Cline 桌面端 / Cline API）服务 =====
   // 第七个产品线，协议与前面六者**都不同源**：登录是 **WorkOS 设备码轮询**

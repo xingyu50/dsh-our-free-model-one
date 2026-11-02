@@ -319,6 +319,12 @@ async function verifySourceRegressions({ ctx, adapters, call, creds }) {
   const { verifyChannelPrFixes } = await import('./channel-pr-fixes-test.mjs')
   await verifyChannelPrFixes()
   await verifyLoopResumeEvents()
+  {
+    const { TraeAdapter } = await import('../vendor/channel-pack/src/trae-adapter.ts')
+    const { TraeFailureLedger } = await import('../vendor/channel-pack/src/trae-selection.ts')
+    const { verifyTraeRotation } = await import('./trae-rotation-test.mjs')
+    await verifyTraeRotation({ TraeAdapter, TraeFailureLedger })
+  }
   // 目录 `efforts` 的键序不是强度序（`dfmodel` 实测是 high/max/low），
   // 官方客户端还会按强度稳定排序；这条回归保证下发给 DSH 的档位序也是强度序。
   {

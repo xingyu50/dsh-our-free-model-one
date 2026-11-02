@@ -37,7 +37,8 @@ import {
   type TraeRemoteModel,
 } from './trae.js'
 import { TRAE, type TraeFallbackModel, type TraeProduct } from './trae-product.js'
-import { classifyTraeError, recordsTraeRateLimit, shouldRotateTraeAccount } from './trae-errors.js'
+import { classifyTraeError, shouldRotateTraeAccount, type TraeErrorKind } from './trae-errors.js'
+import type { TraeFailureLedger } from './trae-selection.js'
 import { normalizeHarnessMessages } from './message-shape.js'
 import { createBlankReasoningSuppressor, createReasoningLoopDetector, hasUsableToolName, isProseTruncatedByStopString, isReasoningLoopGuardEnabled, isTruncatedArguments, normalizeToolArguments, readWithIdleTimeout, reasoningLoopFailure, resolveEmptyResponseReason, resolveToolPairing, splitThinkTaggedContent, stripBareThinkCloseTagIfEnabled, stripCourseLeakFromHistoryContent, stripCourseLeakIfEnabled } from './sse.js'
 import {
@@ -155,8 +156,14 @@ function resolveChunkTimeoutMs(): number {
 /** 限流重置时间的本地兜底（毫秒，1 小时）。 */
 const TRAE_RATE_LIMIT_FALLBACK_MS = 3_600_000
 
-/** 单次请求最多换几个账号（含首次），防雪崩。 */
-const TRAE_MAX_ROTATE = 3
+/**
+ * 单次请求换号预算的**下限**（含首次）。
+ *
+ * 实际预算是「池内启用账号数」，最少本值。早期实现是写死 3：10 个账号也
+ * 只试 3 个，用户加号毫无收益 —— 而「多号分流」正是加号的全部目的。
+ * 仍保留一个下限，是为「池里只有 1~2 个号」时不至于一次都不换。
+ */
+const TRAE_MIN_ROTATE_BUDGET = 3
 
 /**
  * **流内**（SSE `event:error`）可换号错误的哨兵码。
@@ -194,6 +201,23 @@ function isRotatableStreamError(code: number): boolean {
 }
 
 /**
+ * 流内错误码 → 真实类别（供失败账本按类别决定「计不计数」）。
+ *
+ * 与 {@link classifyTraeError} 的分类**必须一致**，否则同一种错误在 HTTP 层与
+ * 流内会被记成两套冷却时长：
+ * - 1005 → `hard-plan`（套餐权益不足）
+ * - 4008 → `quota-exceeded`（积分耗尽）
+ * - 4011 → `soft-rate`（频率超限）
+ *
+ * 其余取值不会走到这里（{:isRotatableStreamError} 已先过滤）。
+ */
+function streamErrorKindOf(code: number): TraeErrorKind {
+  if (code === 1005) return 'hard-plan'
+  if (code === 4008) return 'quota-exceeded'
+  return 'soft-rate'
+}
+
+/**
  * 机器指纹轮换间隔（每 N 次请求换一代，仅在显式启用时生效）。
  *
  * 对齐 `Trae2api-cn/src/trae_client.py:220` 的 `max_uses = 3 + rand(0,2)`：
@@ -226,6 +250,26 @@ export interface TraeAdapterOptions {
   fetchImpl?: typeof fetch
   /** 多账号池（用于限流时切换账号）。 */
   accountPool?: AccountPool
+  /**
+   * 取「下一个要尝试的账号」。
+   *
+   * 未提供时退回 {@link AccountPool.getAvailableAccount}（即「手动顺序优先」），
+   * 这样单独构造适配器（如 `account-probe.ts`）不必实现任何选号策略。
+   * 生产入口传的是带有**轮转 + 紧急插队**策略的一份（见 `trae-selection.ts`）。
+   *
+   * `tried` 含本次已失败的账号，实现**必须**据此跳过 —— 否则会在 A/B 之间空转。
+   */
+  nextAccount?: (
+    modelId: string,
+    tried: ReadonlySet<string>,
+  ) => Promise<{ accountId: string; credential: TraeCredential } | undefined>
+  /**
+   * 连续失败账本（`trae-selection.ts` 的 {@link TraeFailureLedger}）。
+   *
+   * 未提供时**不写任何限流标记** —— 冷却是优化而非正确性要求，缺了它请求仍
+   * 会换号重试，只是坏号不会被挤出候选。
+   */
+  failureLedger?: TraeFailureLedger
   /**
    * 读取图片附件的原始字节（内联为 `data:` URL 用）。
    *
@@ -607,6 +651,14 @@ export class TraeAdapter extends LlmAdapter {
    * {@link TraeAdapter.machineIdGeneration}）。
    */
   private sendCount = 0
+  /**
+   * 最近一次**流内** `event:error` 的真实类别。
+   *
+   * 流内错误抛的是哨兵码 {@link TRAE_ROTATABLE_STREAM_ERROR}（它在适配器外部
+   * 毫无意义），故真实类别必须带外传递 —— 否则失败账本会把 1005/4008/4011
+   * 一律当成同一个类别，冷却时长与「该不该计数」都会判错。
+   */
+  private streamErrorKind: TraeErrorKind = 'none'
 
   constructor(private readonly options: TraeAdapterOptions) {
     super()
@@ -636,6 +688,35 @@ export class TraeAdapter extends LlmAdapter {
       this.remoteMeta = new Map(models.map((model) => [model.id, model]))
       return true
     })
+  }
+
+  /**
+   * 该模型是否**免费**（不消耗积分）。
+   *
+   * 判据是远端目录里的 `creditsRate`（倍率）为 0 —— 与模型选择器的展示
+   * 同源（`traeDisplayName` 把 0 显示成「免费」）。
+   *
+   * ⚠️ **只在能确认时返回 true**：远端目录没拉到、模型不在目录里、
+   * `creditsRate` 缺失，一律 `false`（= 按付费处理）。
+   *
+   * 保守方向是刻意的：把付费模型误判成免费，选号就会跳过余额查询，
+   * 于是「快到期优先」失效，额度平摊回到「谁先谁用」—— 这不会烧钱，
+   * 但会让本次「多号分流」的全部目的落空；反过来，把免费模型误判成付费，
+   * 代价只是多查几次余额（60 秒缓存，且免费模型本来也不多）。
+   * 两种误判的代价不对等，故取后者。
+   *
+   * ⚠️ **兜底表没有倍率字段**（`TraeFallbackModel` 刻意不写死价格 ——
+   * 编译期快照会过期）。故远端拉取失败时**所有**模型都返回 `false`。
+   *
+   * ⚠️ 远端目录是懒加载的，必须先 `await this.ensureRemoteModels()`：
+   * 漏掉这一步会让本方法**静默失效**（永远读到空的 `remoteMeta`）。
+   */
+  async isFreeModel(modelId: string | undefined): Promise<boolean> {
+    if (typeof modelId !== 'string' || modelId.length === 0) return false
+    await this.ensureRemoteModels()
+    const meta = this.remoteMeta.get(modelId)
+    if (meta === undefined) return false
+    return meta.creditsRate === 0
   }
 
   /**
@@ -1045,147 +1126,219 @@ export class TraeAdapter extends LlmAdapter {
 
     const body = JSON.stringify(bodyObj)
 
-    // 4. 发送请求（401/403 时刷新一次凭据后重试）
-    let response = await this.send(credential, body, options)
-    if (!response.ok && (response.status === 401 || response.status === 403)) {
-      await this.options.refresh()
-      // 与主路径一致：按本模型选号（跳过正在限流的账号）。
-      const refreshed = await this.options.resolveCredential(options.model)
-      if (refreshed === undefined || refreshed.access_token.length === 0) {
-        throw new LlmError('trae: credential expired and refresh failed', 'AUTH', { status: response.status })
-      }
-      credential = refreshed
-      response = await this.send(credential, body, options)
-    }
-    if (!response.ok) {
-      let errorText = await response.text().catch(() => '')
-      let lastStatus = response.status
-      let lastKind = classifyTraeError(response.status, errorText)
-
-      if (this.options.accountPool && shouldRotateTraeAccount(lastKind)) {
-        const tried = new Set<string>()
-        if (currentAccountId) tried.add(currentAccountId)
-
-        const maxRotate = TRAE_MAX_ROTATE - 1
-        for (let round = 0; round < maxRotate; round++) {
-          if (currentAccountId && recordsTraeRateLimit(lastKind)) {
-            await this.options.accountPool.updateModelRateLimit(
-              currentAccountId,
-              options.model,
-              Date.now() + TRAE_RATE_LIMIT_FALLBACK_MS,
-            )
-          }
-          const next = await this.options.accountPool.getAvailableAccount(
-            this.product.id, options.model, tried,
-          )
-          if (!next || tried.has(next.entry.id)) break
-          tried.add(next.entry.id)
-          credential = next.credential as TraeCredential
-          currentAccountId = next.entry.id
-          response = await this.send(credential, body, options)
-          if (response.ok) {
-            yield* this.consumeSse(response, options)
-            return
-          }
-          errorText = await response.text().catch(() => '')
-          lastStatus = response.status
-          lastKind = classifyTraeError(response.status, errorText)
-          if (!shouldRotateTraeAccount(lastKind)) break
-        }
-        throw new LlmError(
-          `trae: 模型 ${options.model} 所有账号均不可用（${errorDetail(errorText)}）`,
-          lastKind === 'quota-exceeded' ? 'QUOTA_EXCEEDED' : httpErrorCode(lastStatus),
-          { status: lastStatus },
-        )
-      }
-
-      if (lastKind === 'quota-exceeded') {
-        throw new LlmError(`trae: 积分不足（${errorDetail(errorText)}）`, 'QUOTA_EXCEEDED', { status: lastStatus })
-      }
-      throw new LlmError(`trae: ${errorDetail(errorText)}`, httpErrorCode(lastStatus), { status: lastStatus })
-    }
-
-    // 5. 消费 SSE 流（SOLO → OpenAI 转换）
+    // 4. 发送 + 5. 消费 SSE —— **同一个重试循环**
     //
-    // ## 两条重试路径，共用同一个循环
+    // ## 为什么要合并（本次修复的真实缺陷）
     //
-    // ① **空响应**（HTTP 200 但一个事件都没发）→ 重试一次（同账号）；
-    // ② **流内可换号错误**（`event:error` 1005/4008/4011，见
-    //    {@link TRAE_ROTATABLE_STREAM_ERROR}）→ **换号重发**。
+    // 早期实现分成两段：「HTTP 非 2xx 的换号循环」与「HTTP 200 之后的流内
+    // 换号循环」。两段互不知情，于是换号成功后直接 `yield* consumeSse(...)`
+    // **落在 HTTP 换号循环之外** —— 若这次流仍抛哨兵码
+    // （{@link TRAE_ROTATABLE_STREAM_ERROR}），异常会原样漏给 DSH，
+    // 而该码不在 DSH 的错误分类里，用户看到的是一个内部字符串。
     //
-    // 两者都**只在尚未产出任何 chunk 时**才允许：`consumeSse` 保证空响应
-    // 错误只在首个事件前抛；流内错误则由 `!gotAnyContent` 把关。因此不存在
-    // 「已经吐了一半再重放」的重复计费与重复执行工具风险（对齐 CN 项目的
-    // `TRAE_REMOTE_WORK_FALLBACK` 语义）。
-    const triedStreamAccounts = new Set<string>()
-    if (currentAccountId.length > 0) triedStreamAccounts.add(currentAccountId)
-    let rotateBudget = TRAE_MAX_ROTATE - 1
+    // 合并后只有一处「发一次、判一次、要么消费、要么换号」的逻辑：
+    // 无论第几次换号、无论失败发生在 HTTP 层还是流内，都回到同一起点。
+    //
+    // ## 三条内部重试（①② 不消耗换号预算、不换号）
+    //
+    // ① 401/403 → 刷新凭据后**同账号**再发一次（`refreshedOnce`）；
+    // ② 空响应（HTTP 200 但一个事件都没发）→ **同账号**再发一次（`emptyRetried`）；
+    // ③ 流内可换号错误 → 换号重发（消耗预算）。
+    //
+    // ①② 都只允许一次：`consumeSse` 保证空响应错误只在首个事件前抛出，
+    // 流内错误则由 `!gotAnyContent` 把关，故不存在「吐了一半再重放」的
+    // 重复计费与重复执行工具风险（对齐 CN 项目的 `TRAE_REMOTE_WORK_FALLBACK`）。
+    const tried = new Set<string>()
+    if (currentAccountId.length > 0) tried.add(currentAccountId)
+    let rotationsLeft = this.rotationBudget() - 1
+    let refreshedOnce = false
+    let emptyRetried = false
+    let lastStatus = 0
+    let lastKind: TraeErrorKind = 'none'
+    let lastText = ''
 
-    for (let attempt = 0; ; attempt++) {
-      try {
-        yield* this.consumeSse(response, options)
-        return
-      } catch (error) {
-        // ② 流内可换号错误 → 标记当前账号 + 取下一个账号重发。
-        if (error instanceof LlmError && error.code === TRAE_ROTATABLE_STREAM_ERROR) {
-          // 无账号池、或换号预算用尽 → 如实抛出（去掉哨兵码，换真实语义）。
-          if (this.options.accountPool === undefined || rotateBudget <= 0) {
-            throw new LlmError(error.message, 'QUOTA_EXCEEDED')
-          }
-          if (options.signal?.aborted) throw error
+    for (;;) {
+      const response = await this.send(credential, body, options)
 
-          rotateBudget -= 1
-          // 标记当前账号在本模型上受限（UI 据此亮「限额重置」徽章）。
-          //
-          // ⚠️ 与 HTTP 层同款：只标记**该模型**，该账号在别的模型上仍可用。
-          if (currentAccountId.length > 0) {
-            await this.options.accountPool.updateModelRateLimit(
-              currentAccountId,
-              options.model,
-              Date.now() + TRAE_RATE_LIMIT_FALLBACK_MS,
-            )
+      if (!response.ok) {
+        lastText = await response.text().catch(() => '')
+        lastStatus = response.status
+        lastKind = classifyTraeError(lastStatus, lastText)
+
+        // ① 凭据刚过期：刷新一次后同账号重发（不换号、不计数）。
+        if (!refreshedOnce && (lastStatus === 401 || lastStatus === 403)) {
+          refreshedOnce = true
+          await this.options.refresh()
+          // 与主路径一致：按本模型选号（跳过正在限流的账号）。
+          const refreshed = await this.options.resolveCredential(options.model)
+          if (refreshed === undefined || refreshed.access_token.length === 0) {
+            throw new LlmError('trae: credential expired and refresh failed', 'AUTH', { status: lastStatus })
           }
-          // 取下一个账号。
-          //
-          // ⚠️ **必须传真实 modelId 且传 `tried`**：
-          // - 传空串会让限流过滤整体短路（`if (modelId.length === 0) return true`），
-          //   刚标记的账号立刻又被选中 —— 换号形同虚设；
-          // - 不传 `tried` 会在 A/B 之间反复空转（Qoder 已踩过，见
-          //   `qoder-adapter.ts` 的 `switchAccountOnQuota` 注释）。
-          const next = await this.options.accountPool.getAvailableAccount(
-            this.product.id, options.model, triedStreamAccounts,
-          )
-          if (next === null || next === undefined || triedStreamAccounts.has(next.entry.id)) {
-            throw new LlmError(error.message, 'QUOTA_EXCEEDED')
-          }
-          triedStreamAccounts.add(next.entry.id)
-          credential = next.credential as TraeCredential
-          currentAccountId = next.entry.id
-          response = await this.send(credential, body, options)
-          if (!response.ok) {
-            const text = await response.text().catch(() => '')
-            const kind = classifyTraeError(response.status, text)
-            if (!shouldRotateTraeAccount(kind)) {
-              throw new LlmError(`trae: ${errorDetail(text)}`, httpErrorCode(response.status), { status: response.status })
-            }
-            // 新账号在 HTTP 层就失败 → 继续下一轮（受 rotateBudget 约束）。
-            continue
-          }
+          credential = refreshed
           continue
         }
 
-        // ① 空响应重试（同账号，一次）。
+        await this.recordFailure(options.model, currentAccountId, lastKind, lastStatus, lastText)
+
+        // 不可换号类（client 等）→ 如实报错，不换号。
+        if (!shouldRotateTraeAccount(lastKind)) {
+          throw this.failureError(options.model, lastKind, lastStatus, lastText, false)
+        }
+        // 用户取消 → 如实报错，绝不再换号重发（否则取消后还在后台打上游）。
+        if (options.signal?.aborted) {
+          throw this.failureError(options.model, lastKind, lastStatus, lastText, false)
+        }
+        // 预算用尽 → 报「所有账号均不可用」（与池耗尽同一文案，用户不需要
+        // 区分「试完了」与「没得试」：两种情况他能做的事完全一样）。
+        if (rotationsLeft <= 0) {
+          throw this.failureError(options.model, lastKind, lastStatus, lastText, true)
+        }
+
+        rotationsLeft -= 1
+        const next = await this.pickNextAccount(options.model, tried)
+        if (next === undefined) {
+          throw this.failureError(options.model, lastKind, lastStatus, lastText, true)
+        }
+        tried.add(next.accountId)
+        credential = next.credential
+        currentAccountId = next.accountId
+        continue
+      }
+
+      try {
+        yield* this.consumeSse(response, options)
+        this.options.failureLedger?.noteSuccess(currentAccountId, options.model)
+        return
+      } catch (error) {
+        // ② 流内可换号错误（`event:error` 1005/4008/4011）→ 当作一次失败处理。
+        if (error instanceof LlmError && error.code === TRAE_ROTATABLE_STREAM_ERROR) {
+          if (options.signal?.aborted) throw error
+          // 流内错误没有 HTTP 状态码；真实类别记在 {@link TraeAdapter.streamErrorKind}。
+          const kind = this.streamErrorKind
+          this.streamErrorKind = 'none'
+          lastKind = kind
+          lastStatus = 0
+          lastText = error.message
+          await this.recordFailure(options.model, currentAccountId, kind, 0, error.message)
+
+          if (this.rotationBudget() <= 1 || rotationsLeft <= 0) {
+            throw new LlmError(error.message, 'QUOTA_EXCEEDED')
+          }
+          rotationsLeft -= 1
+          const next = await this.pickNextAccount(options.model, tried)
+          if (next === undefined) throw new LlmError(error.message, 'QUOTA_EXCEEDED')
+          tried.add(next.accountId)
+          credential = next.credential
+          currentAccountId = next.accountId
+          continue
+        }
+
+        // ③ 空响应 → 同账号再发一次。
         const empty = error instanceof LlmError
           && error.message.includes('upstream returned no events')
-        if (!empty || attempt >= 1) throw error
+        if (!empty || emptyRetried) throw error
         if (options.signal?.aborted) throw error
-        response = await this.send(credential, body, options)
-        if (!response.ok) {
-          const text = await response.text().catch(() => '')
-          throw new LlmError(`trae: ${errorDetail(text)}`, httpErrorCode(response.status), { status: response.status })
-        }
+        emptyRetried = true
+        continue
       }
     }
+
+  }
+
+  /**
+   * 本次请求最多尝试几个账号（含首次）。
+   *
+   * = 池内**启用**账号数，最少 {@link TRAE_MIN_ROTATE_BUDGET}。
+   *
+   * 早期实现写死 `TRAE_MAX_ROTATE = 3`：10 个账号也只试 3 个 —— 而「多加几个号
+   * 分摊额度」正是用户加号的全部目的。改成按池大小自适应后，加号立刻生效。
+   * 留一个下限，是为了池里只有 1~2 个号时不至于一次都不换。
+   *
+   * ⚠️ 没有账号池（单凭据模式）时返回 1：无号可换，不做无谓的重试。
+   */
+  private rotationBudget(): number {
+    const pool = this.options.accountPool
+    if (pool === undefined) return 1
+    const enabled = pool.listAccountsByProvider(this.product.id).filter(entry => entry.enabled).length
+    return Math.max(TRAE_MIN_ROTATE_BUDGET, enabled)
+  }
+
+  /**
+   * 取下一个要尝试的账号。
+   *
+   * 优先走 `nextAccount`（生产入口注入的**轮转 + 紧急插队**策略，
+   * 见 `trae-selection.ts`）；未注入时退回池的「手动顺序优先」。
+   *
+   * ⚠️ **必须传真实 modelId 且传 `tried`**：
+   * - 传空串会让限流过滤整体短路（`if (modelId.length === 0) return true`），
+   *   刚标记的账号立刻又被选中 —— 换号形同虚设；
+   * - 不传 `tried` 会在 A/B 之间反复空转（Qoder 已踩过，见
+   *   `qoder-adapter.ts` 的 `switchAccountOnQuota` 注释）。
+   */
+  private async pickNextAccount(
+    modelId: string,
+    tried: ReadonlySet<string>,
+  ): Promise<{ accountId: string; credential: TraeCredential } | undefined> {
+    if (this.options.nextAccount !== undefined) {
+      return await this.options.nextAccount(modelId, tried)
+    }
+    const pool = this.options.accountPool
+    if (pool === undefined) return undefined
+    const next = await pool.getAvailableAccount(this.product.id, modelId, tried)
+    if (next === null || next === undefined || tried.has(next.entry.id)) return undefined
+    return { accountId: next.entry.id, credential: next.credential as TraeCredential }
+  }
+
+  /**
+   * 记一次失败（交给失败账本决定「要不要写限流标记」）。
+   *
+   * 账本负责三件事：连续失败达阈值才冷却、5xx/client/模型繁忙不计数、
+   * 指数增长封顶。这里只做转发 —— 判据全在 `trae-selection.ts` 里，
+   * 以便单测直接覆盖而不用构造整个适配器。
+   *
+   * 没有账本时退回旧行为？**不退**：不写任何标记。冷却是优化，
+   * 缺了它请求仍会换号重试（`shouldRotateTraeAccount` 独立判断），
+   * 只是坏号不会被挤出候选。宁可少写一个徽章，也不写一个错的。
+   */
+  private async recordFailure(
+    modelId: string,
+    accountId: string,
+    kind: TraeErrorKind,
+    status: number,
+    body: string,
+  ): Promise<void> {
+    if (this.options.failureLedger === undefined) return
+    if (accountId.length === 0) return
+    await this.options.failureLedger.noteFailure(accountId, modelId, { kind, status, body })
+  }
+
+  /** 组装换号耗尽/不可换号时的最终错误。 */
+  private failureError(
+    modelId: string,
+    kind: TraeErrorKind,
+    status: number,
+    body: string,
+    exhausted: boolean,
+  ): LlmError {
+    if (exhausted) {
+      return new LlmError(
+        `trae: 模型 ${modelId} 所有账号均不可用（${errorDetail(body)}）`,
+        kind === 'quota-exceeded' ? 'QUOTA_EXCEEDED' : httpErrorCode(status),
+        status >= 100 && status <= 599 ? { status } : {},
+      )
+    }
+    if (kind === 'quota-exceeded') {
+      return new LlmError(
+        `trae: 积分不足（${errorDetail(body)}）`,
+        'QUOTA_EXCEEDED',
+        status >= 100 && status <= 599 ? { status } : {},
+      )
+    }
+    return new LlmError(
+      `trae: ${errorDetail(body)}`,
+      httpErrorCode(status),
+      status >= 100 && status <= 599 ? { status } : {},
+    )
   }
 
   /** 发起一次 chat 请求；网络失败映射为可重试的 TRANSPORT 错误。 */
@@ -1522,6 +1675,8 @@ export class TraeAdapter extends LlmAdapter {
                   if (ev.errorCode !== undefined && ev.errorMessage !== undefined) {
                     const message = traeStreamErrorMessage(ev.errorCode, ev.errorMessage, options.model)
                     if (isRotatableStreamError(ev.errorCode) && !gotAnyContent) {
+                      // 真实类别带外传给失败账本（哨兵码本身不含语义，见 streamErrorKind）。
+                      this.streamErrorKind = streamErrorKindOf(ev.errorCode)
                       throw new LlmError(message, TRAE_ROTATABLE_STREAM_ERROR)
                     }
                     // 4001（模型不可调用）不换号：换账号也是同一模型被拒。
