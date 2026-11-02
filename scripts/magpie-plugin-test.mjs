@@ -10,6 +10,7 @@ import path from 'node:path'
 import http from 'node:http'
 import { skipWithoutEngineBinary } from './lib/engine-binary.mjs'
 import { listenLoopback } from './lib/loopback-port.mjs'
+import { removeScratch } from './lib/tmp-scratch.mjs'
 
 if (skipWithoutEngineBinary('magpie-plugin')) process.exit(0)
 
@@ -328,5 +329,5 @@ try {
   }
   assert.equal(path.dirname(path.resolve(scratch)), path.resolve(os.tmpdir()))
   assert.ok(path.basename(scratch).startsWith('ofm-magpie-plugin-'))
-  fs.rmSync(scratch, { recursive: true, force: true })
+  await removeScratch(scratch)
 }

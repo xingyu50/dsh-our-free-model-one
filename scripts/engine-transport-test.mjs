@@ -8,6 +8,7 @@ import { loopbackFetch } from '../src/loopback-fetch.js'
 import { createMagpieEngine } from '../src/magpie-engine.js'
 import { createMagpieModels } from '../src/magpie-models.js'
 import { skipWithoutEngineBinary } from './lib/engine-binary.mjs'
+import { removeScratch } from './lib/tmp-scratch.mjs'
 
 // The real engine is a per-platform build; a runner without one has nothing to start.
 if (skipWithoutEngineBinary('engine-transport')) process.exit(0)
@@ -107,5 +108,5 @@ try {
   server.closeAllConnections()
   if (server.listening) await new Promise(resolve => server.close(resolve))
   assert.equal(path.dirname(scratch), fs.realpathSync(os.tmpdir()))
-  fs.rmSync(scratch, { recursive: true, force: true })
+  await removeScratch(scratch)
 }

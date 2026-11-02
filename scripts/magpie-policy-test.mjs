@@ -22,6 +22,7 @@ import { createMagpieModels } from '../src/magpie-models.js'
 import { assertEngineMutation, deniedModel, filterEngineJSON, isDeniedChannel } from '../src/magpie-policy.js'
 import { pinnedEngineEntry } from './lib/engine-binary.mjs'
 import { listenLoopback } from './lib/loopback-port.mjs'
+import { removeScratch } from './lib/tmp-scratch.mjs'
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ofm-magpie-policy-'))
 const saved = new Map()
@@ -262,5 +263,5 @@ try {
     if (value === undefined) delete process.env[name]
     else process.env[name] = value
   }
-  fs.rmSync(scratch, { recursive: true, force: true })
+  await removeScratch(scratch)
 }

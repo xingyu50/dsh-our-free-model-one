@@ -21,7 +21,7 @@ import { listenLoopback } from './loopback-port.mjs'
 for (const name of ['OUR_FREE_MODEL_BASE', 'OUR_FREE_MODEL_KILO_BASE']) {
   if (process.env[name] === undefined) {
     const dead = http.createServer()
-    await new Promise(resolve => dead.listen(0, '127.0.0.1', resolve))
+    await listenLoopback(dead)
     process.env[name] = `http://127.0.0.1:${dead.address().port}`
     await new Promise(resolve => dead.close(resolve))
   }
@@ -110,10 +110,12 @@ export async function stubUpstream({ listing = [], answer = () => ({ body: chatF
       else setTimeout(send, verdict.delayMs).unref?.()
     })
   })
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  // The stub's base is fetched a line later by every suite that uses it, so the
+  // port has to be one `fetch` will dial — see lib/loopback-port.mjs.
+  const port = await listenLoopback(server)
   server.unref()
   return {
-    base: `http://127.0.0.1:${server.address().port}`,
+    base: `http://127.0.0.1:${port}`,
     requests,
     api,
     close: () => new Promise(resolve => server.close(resolve)),

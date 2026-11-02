@@ -9,6 +9,7 @@ import { createMagpieEngine } from '../src/magpie-engine.js'
 import { createApiRoutes } from '../index.js'
 import { structuralRejection } from '../src/trust.js'
 import { listenLoopback } from './lib/loopback-port.mjs'
+import { removeScratch } from './lib/tmp-scratch.mjs'
 
 const require = createRequire(import.meta.url)
 const { chromium } = require(process.env.OFM_PLAYWRIGHT_MODULE ?? 'D:/Cache/npm-global/node_modules/playwright')
@@ -83,5 +84,5 @@ try {
   server?.closeAllConnections()
   if (server?.listening) await new Promise(resolve => server.close(resolve))
   assert.equal(path.dirname(scratch), fs.realpathSync(os.tmpdir()))
-  fs.rmSync(scratch, { recursive: true, force: true })
+  await removeScratch(scratch)
 }
