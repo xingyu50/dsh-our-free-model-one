@@ -174,13 +174,34 @@ try {
   ctx.loomyAuth.claimDailyQuota = async () => { automaticClaims++; return { kind: 'claimed', credit: 1, streakDays: 1, isStreakDay: false } }
   await call('usage.autoCheckin', { enabled: true })
   let automatic
-  for (let n = 0; n < 100; n++) {
+  for (let n = 0; n < 200; n++) {
     automatic = (await call('usage.autoCheckin', {})).value.autoCheckin
-    if (!automatic.running && automatic.ranToday) break
+    // 「跑完了」的判据是 claim 已经发生过且不再 running —— 不能等 ranToday，
+    // 理由见下面的日界窗口。
+    if (automaticClaims === 1 && !automatic.running) break
     await new Promise(resolve => setImmediate(resolve))
   }
-  assert.equal(automatic.ranToday, true, 'automatic check-in actually completed')
-  assert.equal(automatic.running, false)
+  assert.equal(automatic.running, false, 'the automatic run finished')
+  /**
+   * ⚠️ 日界后第一个小时（UTC+8 00:00–01:00）**不能**断言 ranToday（2026-11-03 修）。
+   *
+   * `performRun` 在这段时间刻意不写 `lastDate`（见 vendor/channel-pack/src/auto-checkin.ts:595-613）：
+   * 那一刻各渠道回答的还是昨天的记录，记成今天会让下一轮直接睡到次日日界、整天漏签。
+   * 本用例此前无条件断言 `ranToday === true`，于是同一个 commit 在 23:52 变绿、在 00:45
+   * 变红 —— 判据依赖运行时刻，与代码无关。真正的判据是「签到确实发生过」（下面那条
+   * automaticClaims），ranToday 只在窗口外才成立。
+   */
+  const msIntoUtc8Day = () => {
+    // 与 office-hour 无关：口径必须与 auto-checkin.ts 的 utc8MsIntoDay 一致（算术平移 +8h，
+    // 偏移量同 model-queue.ts 的 QODER_BILLING_UTC_OFFSET_MS），不用本机时区。
+    const shifted = Date.now() + 8 * 3_600_000
+    return ((shifted % 86_400_000) + 86_400_000) % 86_400_000
+  }
+  if (msIntoUtc8Day() >= 3_600_000) {
+    assert.equal(automatic.ranToday, true, 'automatic check-in recorded today')
+  } else {
+    assert.equal(automatic.ranToday, false, 'inside the day-boundary window the run deliberately does not record today')
+  }
   assert.equal(automatic.channels.some(entry => ['unsupported-alpha', 'unsupported-beta'].includes(entry.provider)), false, 'unsupported accounts are not automatic check-in candidates')
   assert.equal(fetched.length, beforeUnsupportedFetch, 'automatic check-in sends no unsupported upstream request')
   assert.equal(automaticClaims, 1, 'supported channel actually signed in')
