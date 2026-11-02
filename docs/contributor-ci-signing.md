@@ -26,11 +26,17 @@
 ```bash
 npm run test:contributor
 npm install
-npm run typecheck
+npm run typecheck:all
+npm run generated:check
 git diff --check
 ```
 
-项目没有构建步骤。类型检查仅覆盖 adapter；不得称其覆盖整个插件。
+项目没有编译或打包步骤。类型检查分三层：`npm run typecheck` 只查 `adapter/`；
+`typecheck:all` 另跑 vendor/channel-pack（对冻结基线）与 standalone 前端 ——
+CI 的 `typecheck` job 用的是后者，单说「类型检查覆盖 adapter」会低估它实际覆盖的
+范围。`generated:check` 只比字节：`vendor/channel-pack/pack.js` 是否等于其源码
+构建出的结果、`packages/standalone/channels/business.mjs` 是否等于该 bundle。
+改了 `vendor/channel-pack/src` 或 `src/` 里被内联的部分就要重建，否则这一步会红。
 
 贡献者模式仍运行 catalog 的结构、来源及 adapter 隔离检查；只将发布字节和
 最近内容 revision 的对齐交给维护者。清单与目录完整性记录之间的一致性仍检查。

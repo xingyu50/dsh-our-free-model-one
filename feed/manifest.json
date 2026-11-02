@@ -1,7 +1,7 @@
 {
   "version": "2.7.2",
   "base": "../",
-  "publishedAt": "2026-11-02T14:58:19.852Z",
+  "publishedAt": "2026-11-02T17:33:40.586Z",
   "notes": "",
   "files": [
     {
@@ -51,8 +51,8 @@
     },
     {
       "path": "package.json",
-      "size": 3649,
-      "sha256": "f944d05267d7a02fd237bbeb48c0ef5ab42a9255494445d79de395c543cb16e7"
+      "size": 3714,
+      "sha256": "6c688c805f4502e4d6aaee48368e1bec1a8ad7fc17380d21f903131123049149"
     },
     {
       "path": "src/adapter.js",
@@ -475,5 +475,5 @@
       "sha256": "b2cbbd38d5461521f40d8fbd947bfa9be641481602eaec0f1fc5d29cca8d7e5f"
     }
   ],
-  "signature": "pM3ZUa3FrcSD2KHixyh1LMr2Li6x8XstXv5JQMHFRVUMa1EdbRVNCMPpagjnYv66aaFzPtF0O6z1rkmjAaKMDw=="
+  "signature": "Gput73BOTaGccMqNAS6gRR3lWqKWaLiPj8x1RN2diiJy8RN69mA5hjE07tuZ79r8rJ2PpUrjpXrYsDDSA7iqAg=="
 }

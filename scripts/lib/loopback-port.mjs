@@ -31,19 +31,37 @@ const REFUSED_ABOVE_PRIVILEGED = [
  * The refused list as the running Node actually defines it.
  *
  * Read from the bundled undici source rather than hardcoded, because the list
- * belongs to that dependency and a hand-copied one silently drifts. The literal
- * above stays as a floor: on a Node whose internals cannot be read this way the
- * helper still refuses the ports this repository has actually seen fail.
+ * belongs to that dependency and a hand-copied one silently drifts. There is no
+ * public API for it: undici's copy is not exposed through
+ * `process.getBuiltinModule` (measured: `internal/deps/undici/undici` comes back
+ * `undefined`), so `process.binding('natives')` is the only route. It is
+ * DEP0111, and on Node 24 that warning is printed only under
+ * `--pending-deprecation` (measured) — a test fixture is the right place to
+ * take that risk over a hand-maintained list of 82 numbers.
+ *
+ * The literal above stays as a floor. When the internals cannot be read the
+ * helper says so on stderr instead of silently narrowing to the literal: a
+ * suite that later fails on `bad port` should be traceable to this line.
  */
 function refusedFromNode() {
   try {
     const natives = process.binding('natives')
     const source = natives['internal/deps/undici/undici']
-    if (typeof source !== 'string') return []
-    const table = source.match(/var badPorts = [\s\S]*?\];/)
-    if (table === null) return []
+    if (typeof source !== 'string') {
+      console.warn('loopback-port: this Node does not expose undici internals; falling back to the built-in list')
+      return []
+    }
+    // Undici writes it as `var badPorts = (\n /** @type {const} */\n [ "1", … ];`,
+    // so the initialiser is not a bare array literal — anchored on the name and the
+    // first `];` instead of on `= [`, which matched nothing on Node 24.
+    const table = source.match(/var badPorts[\s\S]*?\];/)
+    if (table === null) {
+      console.warn('loopback-port: the shape of undici\'s badPorts changed; falling back to the built-in list')
+      return []
+    }
     return [...table[0].matchAll(/"([0-9]+)"/g)].map(match => Number(match[1]))
-  } catch {
+  } catch (error) {
+    console.warn(`loopback-port: could not read undici's badPorts (${error?.message ?? error}); falling back to the built-in list`)
     return []
   }
 }
@@ -51,7 +69,7 @@ function refusedFromNode() {
 const REFUSED_PORTS = new Set([...REFUSED_ABOVE_PRIVILEGED, ...refusedFromNode()])
 
 /** @param {number} port @returns {boolean} */
-export function isFetchRefusedPort(port) {
+function isFetchRefusedPort(port) {
   return REFUSED_PORTS.has(port)
 }
 

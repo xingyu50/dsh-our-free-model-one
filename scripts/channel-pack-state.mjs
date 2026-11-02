@@ -52,6 +52,14 @@ function readJson(file) {
   }
 }
 
+/**
+ * 状态文档被半写坏是常规形态（升级中断、编辑器截断），排查脚本不能先崩。
+ * 任何非字符串的字段都按空串显示，空供应商名至少还能看出「这里有个账号」。
+ */
+function asText(value) {
+  return typeof value === 'string' ? value : value === undefined || value === null ? '' : String(value)
+}
+
 /** `permanent-locks.json` 兼容带 schema 与裸表两种形态（见 permanent-lock-store.ts 的 locksFieldOf）。 */
 function locksOf(parsed) {
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return {}
@@ -89,7 +97,7 @@ const locksFile = path.join(directory, 'permanent-locks.json')
 const state = readJson(stateFile)
 const locksDoc = readJson(locksFile)
 
-const accounts = Array.isArray(state.value?.accounts) ? state.value.accounts : []
+const accounts = Array.isArray(state.value?.accounts) ? state.value.accounts.filter(a => typeof a === 'object' && a !== null) : []
 const locks = locksOf(locksDoc.value)
 const disabledModels = state.value?.disabledModels
 const report = {
@@ -123,8 +131,11 @@ if (jsonMode) {
   console.log(state.exists ? `state.json   ${stateFile}` : `state.json   ${stateFile}（不存在：账号池还没落盘过，或用的是 settings 后端）`)
   if (state.error !== undefined) console.log(`  ⚠ 读取失败：${state.error}`)
   console.log(locksDoc.exists ? `锁定表       ${locksFile}` : `锁定表       ${locksFile}（不存在）`)
+  // 「读不懂」和「没锁」是两件事：不报这一行，一份坏掉的锁定表会被读成「没有任何 provider 锁定」。
+  if (locksDoc.error !== undefined) console.log(`  ⚠ 读取失败：${locksDoc.error}`)
   const locked = Object.keys(locks)
-  console.log(`锁定永久积分 ${locked.length === 0 ? '（无）' : locked.join(', ')}`)
+  const lockText = locksDoc.error !== undefined ? '（读不出来，见上）' : locked.length === 0 ? '（无）' : locked.join(', ')
+  console.log(`锁定永久积分 ${lockText}`)
   if (report.legacyLoomyMirror && locks.loomy !== true) {
     console.log('  ⚠ state.json 里 loomyPermanentLocked=true 只是镜像，权威表里没锁 —— 以锁定表为准')
   }
@@ -140,11 +151,12 @@ if (jsonMode) {
     for (const account of report.accounts) {
       const flag = account.enabled ? '' : '（已停用）'
       const expiry = typeof account.expiresAt === 'number' ? ` · 凭据到期 ${describeDeadline(account.expiresAt, now, '已过期')}` : ''
-      console.log(`  ${account.provider.padEnd(10)} ${account.id} · ${account.nickname}${flag}${expiry}`)
+      const provider = asText(account.provider) || '（无 provider）'
+      console.log(`  ${provider.padEnd(10)} ${asText(account.id) || '（无 id）'} · ${asText(account.nickname)}${flag}${expiry}`)
       for (const [model, entry] of Object.entries(account.rateLimits)) console.log(`      ${model}: ${entry.text}`)
     }
   }
-  const disabled = disabledModels === undefined ? [] : Object.entries(disabledModels)
+  const disabled = typeof disabledModels === 'object' && disabledModels !== null && !Array.isArray(disabledModels) ? Object.entries(disabledModels).filter(([, models]) => typeof models === 'object' && models !== null) : []
   console.log('')
   if (disabled.length === 0) console.log('停用模型     （无）')
   else {

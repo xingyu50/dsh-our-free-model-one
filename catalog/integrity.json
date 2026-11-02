@@ -49,8 +49,8 @@
     },
     {
       "path": "package.json",
-      "size": 3649,
-      "sha256": "f944d05267d7a02fd237bbeb48c0ef5ab42a9255494445d79de395c543cb16e7"
+      "size": 3714,
+      "sha256": "6c688c805f4502e4d6aaee48368e1bec1a8ad7fc17380d21f903131123049149"
     },
     {
       "path": "src/adapter.js",

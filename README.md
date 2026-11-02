@@ -646,6 +646,7 @@ node scripts/picker-test.mjs # 选择器只广播可用的模型，且永不广�
 node scripts/tui-test.mjs # 无 web server 的 composition 中插件仍能启动并输出模型
 node scripts/host-selftest.mjs # Host 半身端到端，会真实出网
 node scripts/build-manifest.mjs # 发布：重新生成 feed/manifest.json（发布文件哈希清单）
+npm run state:channel-pack # 只读：渠道包账号池、按模型的限流解禁时刻、锁定永久积分
 ```
 
 发布清单必须使用发布私钥签名（--key  或 OFM_MANIFEST_KEY 环境变量），

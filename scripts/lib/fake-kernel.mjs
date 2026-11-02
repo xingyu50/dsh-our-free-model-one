@@ -10,6 +10,8 @@
  */
 import http from 'node:http'
 
+import { listenLoopback } from './loopback-port.mjs'
+
 // The offline discipline is "no suite reaches the network", and the plugin now
 // mounts two keyless producers: the free lane and the Kilo channel. A suite
 // that boots the whole plugin but pins only one base would silently send the
@@ -272,8 +274,12 @@ export class FakeRequest {
  */
 export async function freePort() {
   const probe = http.createServer()
-  await new Promise(resolve => probe.listen(0, '127.0.0.1', resolve))
-  const { port } = probe.address()
+  // The port is handed back and then fetched, so it must be one `fetch` will
+  // dial — `listen(0)` alone is not enough on Windows, where the dynamic range
+  // starts at 1024 and the OS hands ports out in sequence (see
+  // lib/loopback-port.mjs for the measurements). Every caller sets a base from
+  // this value and fetches it a moment later.
+  const port = await listenLoopback(probe)
   await new Promise(resolve => probe.close(resolve))
   return port
 }
