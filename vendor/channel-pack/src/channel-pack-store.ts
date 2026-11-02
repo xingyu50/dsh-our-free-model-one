@@ -328,9 +328,12 @@ class MemoryStore implements ChannelPackStore {
  * 用户侧同样表现为恢复后该面板为空。⇒ 靠人眼维护本表已经漏过**三次**（第三次是
  * gemini，2026-10-03）。
  *
- * 现在由 `scripts/channel-providers-test.mjs` 守：它不读这张表，而是真写一份
- * `refs:`、真让 FileStore 从它重建索引，断言 `client.js` 的每个 provider 都恢复得
- * 出来 —— 漏加一行时该用例立刻变红并点名是哪个 provider。
+ * 现在由 `scripts/channel-providers-test.mjs` 两条互补的用例守：
+ * ① 真写一份 `refs:`、真让 FileStore 从它重建索引，断言 `client.js` 的每个 provider
+ * 都恢复得出来（走真实恢复路径，不看表本身）；
+ * ② 用下方导出的 {@link SUPPORTED_PROVIDERS} 与客户端清单求集合差，挡住「往表里加、
+ * 客户端没加」的反方向 —— ①只能发现表里少一行，发现不了多一行。
+ * 漏加时该用例立刻变红并点名是哪个 provider。
  *
  * ⚠️ **必须与 `src/channel-pack-rpc.ts` 的 `account.create` 生成的 ref 前缀一致**
  * （那里是 `${provider.toUpperCase()}_ACCOUNT_${suffix}`）。**新增 provider 时

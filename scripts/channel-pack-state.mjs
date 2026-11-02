@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 /**
- * 只读地看一眼渠道包的运行时状态：账号、按模型的解禁时刻、永久积分锁定。
+ * 只读地看一眼渠道包的运行时状态：账号、按模型的解禁时刻、锁定永久积分。
  *
  * ## 为什么需要它
  *
  * 这些状态住在两个 JSON 文档里（`state.json` 与 `permanent-locks.json`），
- * 而「为什么这次没切号 / 为什么这个号在冷却」只能从里面读出来。此前唯一的
+ * 而「为什么这次没选这个号 / 为什么这个号在冷却」只能从里面读出来。此前唯一的
  * 入口是面板 —— 面板要跑起来、要登录、还要点进对应 provider 才看得见，命令行里
  * 完全无法回答（本机实测 `~/.dsh/channel-pack` 长期不存在，因为桌面端把状态写在
  * 另一个 home 里，用户根本不知道去哪找）。
@@ -14,7 +14,7 @@
  *
  * 本脚本**不写任何文件**，也不 import 渠道包源码（那需要 registerHooks +
  * typescript 转译）。home 的解析就地复刻 `vendor/channel-pack/src/channel-pack-store.ts`
- * 的 `resolveChannelPackHome` 四级优先 —— 复刻而不是 import，是因为那四条判断本身
+ * 的 `resolveChannelPackHome`，但只复刻**三级**（见 resolveHome） —— 复刻而不是 import，是因为那几条判断本身
  * 稳定（改它会同时影响七八个状态文档，代价远大于收益），而多引入一条转译链会让
  * 「排查一个显示问题」变成「先修一个转译问题」。
  *
@@ -27,10 +27,13 @@ import path from 'node:path'
 const jsonMode = process.argv.includes('--json')
 
 /**
- * 与 `channel-pack-store.ts` 的 `resolveChannelPackHome` 同序：显式覆盖 → DSH_HOME → ~/.dsh。
+ * 与 `channel-pack-store.ts` 的 `resolveChannelPackHome` 同序，但只有三级：
+ * 显式覆盖 → `$DSH_HOME` → `~/.dsh`。
  *
- * 命令行没有 ctx，故 `ctx.profileContext.home` 那一级无法参与判定（那是运行期注入的）。
- * 但 `DSH_CHANNEL_PACK_STATE_DIR` 本来就是指向它用的覆盖项，点它最省事。
+ * ⚠️ 源码里的优先级是**四**级，本脚本缺的那一级是 `ctx.profileContext.home` ——
+ * 它由运行期注入，命令行里拿不到。当 profile home 与 `$DSH_HOME` **不相等**时，
+ * 本脚本显示的是 `$DSH_HOME` 那一份，可能不是面板实际读写的那一份；要核对就用
+ * `DSH_CHANNEL_PACK_STATE_DIR` 直接指过去。
  */
 function resolveHome() {
   const override = process.env.DSH_CHANNEL_PACK_STATE_DIR
@@ -121,7 +124,7 @@ if (jsonMode) {
   if (state.error !== undefined) console.log(`  ⚠ 读取失败：${state.error}`)
   console.log(locksDoc.exists ? `锁定表       ${locksFile}` : `锁定表       ${locksFile}（不存在）`)
   const locked = Object.keys(locks)
-  console.log(`永久积分锁定 ${locked.length === 0 ? '（无）' : locked.join(', ')}`)
+  console.log(`锁定永久积分 ${locked.length === 0 ? '（无）' : locked.join(', ')}`)
   if (report.legacyLoomyMirror && locks.loomy !== true) {
     console.log('  ⚠ state.json 里 loomyPermanentLocked=true 只是镜像，权威表里没锁 —— 以锁定表为准')
   }

@@ -3,9 +3,11 @@
  * provider 表的护栏：新增 provider 时漏登记，会让该 provider 的账号在
  * state.json 缺失时**静默消失**（凭据还在 .credentials.yaml 里，只是索引建不出来）。
  *
- * 这个缺陷已经发生三次（minimax 2026-10-02、opencode 2026-10-01、gemini 2026-10-03），
- * 三次都是靠人眼维护 vendor/channel-pack/src/channel-pack-store.ts 的
- * REF_PREFIX_TO_PROVIDER 漏掉一行造成的。原先的守卫是一个指向
+ * 这个缺陷已经发生三次，三次都是靠人眼维护 vendor/channel-pack/src/channel-pack-store.ts
+ * 的 REF_PREFIX_TO_PROVIDER 掉队造成的 —— 前两次是漏加一行（minimax 2026-10-02、
+ * opencode 2026-10-01），第三次之前这张表一开始就只摘了 6 项、少了 5 个 provider
+ * （见 channel-pack-store.ts:319-322），到 gemini（2026-10-03）已经是第三次复发。
+ * 原先的守卫是一个指向
  * tests/unit/channel-pack-store.spec.ts 的注释 —— 那个文件在本仓库从不存在，
  * 所以「合并新增 provider 的分支前先跑它」从未真正可执行。
  *
@@ -76,7 +78,8 @@ function clientProviderIds() {
   assert.ok(end > start, 'CHANNEL_PROVIDERS 是一段可以从源码里切出来的数组')
   const block = source.slice(start, end)
   const ids = [...block.matchAll(/\{ id: '([a-z0-9]+)',/g)].map(match => match[1])
-  assert.ok(ids.length >= 10, `客户端清单至少 10 项，实际解析到 ${ids.length} 项`)
+  // 不写「至少 10 项」这类手抄下限：那份数字会漂移，而漂移正是本文件要挡的东西。
+  assert.ok(ids.length > 0, '客户端清单解析出了至少一个 provider')
   return ids
 }
 

@@ -52,18 +52,13 @@ jobs:
           node-version: 22
       - run: npm run test:release
 
-  # Every TypeScript seam the repo ships is checked here, not just `adapter/`:
-  # `npm run typecheck:all` also runs `scripts/channel-pack-typecheck.mjs` (the
-  # vendored pack, against a frozen baseline) and the standalone frontend. Until
-  # this job ran the aggregate, the pack and the frontend had no type checking
-  # on any branch — a break there stayed invisible until someone ran precommit
-  # locally. Lifecycle scripts stay disabled in both installs, same as below.
+  # Every TypeScript seam, not just `adapter/` — the root tsconfig covers only
+  # that directory, so the vendored pack and the standalone frontend were
+  # unchecked on every branch until this job ran the aggregate.
   #
-  # `generated:check` rides along because it needs the same two installs and
-  # costs under a second: it compares the shipped bundle against
-  # `vendor/channel-pack/src` and the standalone channel file against the
-  # bundle. Without it a stale bundle is committed and every user installs code
-  # older than the sources it claims to be built from.
+  # `generated:check` needs the same installs and costs under a second: it ties
+  # the shipped bundle to `vendor/channel-pack/src` and the standalone channel
+  # file to the bundle, so a stale one cannot be committed.
   typecheck:
     runs-on: ubuntu-latest
     steps:
