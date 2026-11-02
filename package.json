@@ -28,10 +28,12 @@
     "manifest": "node scripts/build-manifest.mjs",
     "channel-pack": "node scripts/build-channel-pack.mjs",
     "manifest:check": "node scripts/build-manifest.mjs --check",
+    "regen": "node scripts/build-channel-pack.mjs && node scripts/build-standalone-channels.mjs && node scripts/build-manifest.mjs",
+    "generated:check": "node scripts/build-channel-pack.mjs --check && node scripts/build-standalone-channels.mjs --check",
     "selftest": "node scripts/host-selftest.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "typecheck:all": "npm run typecheck && node scripts/channel-pack-typecheck.mjs && npm run typecheck:standalone",
-    "precommit": "npm run typecheck:all && node scripts/test-all.mjs --mode contributor && node scripts/build-manifest.mjs --check"
+    "precommit": "npm run typecheck:all && npm run generated:check && node scripts/test-all.mjs --mode contributor && node scripts/build-manifest.mjs --check"
   },
   "files": [
     "index.js",

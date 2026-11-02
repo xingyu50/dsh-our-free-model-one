@@ -52,8 +52,18 @@ jobs:
           node-version: 22
       - run: npm run test:release
 
-  # The adapter seam (and only it) is kept under strict TypeScript checking. This
-  # job installs development dependencies without running lifecycle scripts.
+  # Every TypeScript seam the repo ships is checked here, not just `adapter/`:
+  # `npm run typecheck:all` also runs `scripts/channel-pack-typecheck.mjs` (the
+  # vendored pack, against a frozen baseline) and the standalone frontend. Until
+  # this job ran the aggregate, the pack and the frontend had no type checking
+  # on any branch — a break there stayed invisible until someone ran precommit
+  # locally. Lifecycle scripts stay disabled in both installs, same as below.
+  #
+  # `generated:check` rides along because it needs the same two installs and
+  # costs under a second: it compares the shipped bundle against
+  # `vendor/channel-pack/src` and the standalone channel file against the
+  # bundle. Without it a stale bundle is committed and every user installs code
+  # older than the sources it claims to be built from.
   typecheck:
     runs-on: ubuntu-latest
     steps:
@@ -62,7 +72,9 @@ jobs:
         with:
           node-version: 22
       - run: npm install --ignore-scripts
-      - run: npm run typecheck
+      - run: npm ci --prefix packages/standalone --ignore-scripts
+      - run: npm run typecheck:all
+      - run: npm run generated:check
 
   standalone-frontend:
     runs-on: ubuntu-latest
