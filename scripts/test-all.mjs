@@ -67,6 +67,7 @@ const suites = [
   ['chan-relay', 'chan-relay-test.mjs', []],
   ['channel-pack', 'channel-pack-test.mjs', []],
   ['channel-registry', 'channel-registry-test.mjs', []],
+  ['channel-providers', 'channel-providers-test.mjs', []],
   ['combo-validation', 'combo-validation-test.mjs', []],
   ['channel-auto-checkin-daily', 'auto-checkin-daily-test.mjs', []],
   ['channel-auto-checkin-boundary', 'auto-checkin-boundary-test.mjs', []],

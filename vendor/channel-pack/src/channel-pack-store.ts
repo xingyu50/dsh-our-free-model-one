@@ -324,16 +324,19 @@ class MemoryStore implements ChannelPackStore {
  * **无法从 `.credentials.yaml` 的 `refs:` 恢复**，用户侧表现为「重装 / 迁移后
  * 这几个面板的账号凭空消失，只能重新登录」。凭据本体一直完好，只是索引建不出来。
  *
- * ② **2026-10-02 同型复发**：上游合并第 12 个 provider `minimax` 时**又漏加了本表**
- * —— `tests/unit/channel-pack-store.spec.ts` 的派生用例当场变红（期望 12 项、实得 11 项），
- * 但那条用例没在合并前跑到。⇒ 教训：**合并任何「新增 provider」的分支前先跑它**；
- * 靠人眼维护本表已经漏过两次。
+ * ② **2026-10-02 同型复发**：上游合并第 12 个 provider `minimax` 时**又漏加了本表**，
+ * 用户侧同样表现为恢复后该面板为空。⇒ 靠人眼维护本表已经漏过**三次**（第三次是
+ * gemini，2026-10-03）。
+ *
+ * 现在由 `scripts/channel-providers-test.mjs` 守：它不读这张表，而是真写一份
+ * `refs:`、真让 FileStore 从它重建索引，断言 `client.js` 的每个 provider 都恢复得
+ * 出来 —— 漏加一行时该用例立刻变红并点名是哪个 provider。
  *
  * ⚠️ **必须与 `src/channel-pack-rpc.ts` 的 `account.create` 生成的 ref 前缀一致**
  * （那里是 `${provider.toUpperCase()}_ACCOUNT_${suffix}`）。**新增 provider 时
  * 漏加本表 = 该 provider 的账号在状态文档丢失后静默消失**。
  *
- * ⚠️ 本表的顺序与客户端 `plugin-src/client/channel-pack.js` 的 `PROVIDERS` **保持一致** ——
+ * ⚠️ 本表的顺序与本仓库 `client.js` 的 `CHANNEL_PROVIDERS` **保持一致** ——
  * 派生用例不校验顺序（恢复顺序由 refs 文件决定），但两者对齐后便于逐项核对。
  */
 const REF_PREFIX_TO_PROVIDER: ReadonlyArray<readonly [string, string]> = [
@@ -356,11 +359,22 @@ const REF_PREFIX_TO_PROVIDER: ReadonlyArray<readonly [string, string]> = [
   // ⚠️ 第 14 个 provider（gemini，2026-10-03）—— 同款坑第 **三** 次。
   // 漏加 = `GEMINI_ACCOUNT_*` 的账号在 `state.json` 缺失时静默消失
   //（凭据还在 `.credentials.yaml` 里，只是索引建不出来，用户只能重新授权）。
-  // 本表与客户端 `PROVIDERS` 的一致性由
-  // `tests/unit/channel-pack-store.spec.ts` 的「恢复表覆盖客户端 PROVIDERS 的全部
-  // provider（从真实清单派生）」用例锁死 —— 合并新增 provider 前**先跑它**。
+  // 本表与客户端 `CHANNEL_PROVIDERS` 的一致性由 `scripts/channel-providers-test.mjs`
+  // 锁死（从真实清单派生）—— 合并新增 provider 前**先跑它**。
   ['GEMINI', 'gemini'],
 ]
+
+/**
+ * 已登记的 provider id 清单，**由恢复表派生**（不另手抄一份）。
+ *
+ * 导出是给 `scripts/channel-providers-test.mjs` 用的：那条守卫要断言
+ * 「客户端 `CHANNEL_PROVIDERS` 的每一项都在本表里」，直接比对清单比从
+ * `.credentials.yaml` 反推更早失败、失败信息也更具体。恢复路径本身另有
+ * 用例覆盖（真的写一份 refs、真的让 FileStore 重建索引）。
+ */
+export const SUPPORTED_PROVIDERS: readonly string[] = Object.freeze(
+  REF_PREFIX_TO_PROVIDER.map(([, id]) => id),
+)
 
 /** 已实现渠道的统一判定，拒绝未知渠道且不依赖旧产品黑名单。 */
 export function isSupportedProvider(provider: unknown): provider is string {
