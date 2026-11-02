@@ -32,6 +32,7 @@ import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 let failures = 0
 const check = (name, actual, expected) => {
@@ -125,7 +126,7 @@ async function startGateway(github, patch = {}, upstreamPort = relay.port) {
     ...rest,
   }
   const server = createGatewayServer(env, { authFetch: github.impl })
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  await listenLoopback(server)
   return { server, dir, base: `http://127.0.0.1:${server.address().port}/eac` }
 }
 
@@ -160,7 +161,7 @@ const chatBody = JSON.stringify({ model: MODEL, messages: [{ role: 'user', conte
 
 const relayHandle = startRelay()
 const relay = { server: relayHandle.server, seen: relayHandle.seen, port: 0 }
-await new Promise(resolve => relay.server.listen(0, '127.0.0.1', resolve))
+await listenLoopback(relay.server)
 relay.port = relay.server.address().port
 
 // ── 0b. the gate's GitHub transport ─────────────────────────────────────────
@@ -411,7 +412,7 @@ try {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eac-delivery-expiry-'))
   const gate = createAuthGate({ GITHUB_CLIENT_ID: 'test', GITHUB_CLIENT_SECRET: 'test', USER_STORE_KEY: SIGNING, REQUIRE_USER_TOKEN: '1', MOUNT_PREFIX: '/eac' }, { now: () => clock, fetchImpl: gh.impl, storePath: path.join(dir, 'users.json'), log() {} })
   const server = http.createServer((req, res) => gate.handle(req, res, new URL(req.url, 'http://localhost')))
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  await listenLoopback(server)
   const base = `http://127.0.0.1:${server.address().port}/eac`
   const authorize = async link => {
     const start = await get(`${base}/auth/github/start?link=${link}`)
@@ -494,7 +495,7 @@ try {
     res.writeHead(200, { 'content-type': 'application/json' })
     res.end(JSON.stringify({ data: [{ id: MODEL }] }))
   })
-  await new Promise(resolve => holdRelay.listen(0, '127.0.0.1', resolve))
+  await listenLoopback(holdRelay)
   const holdPort = holdRelay.address().port
 
   const githubLeak = makeGithubStub()

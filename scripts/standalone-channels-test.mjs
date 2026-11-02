@@ -8,6 +8,7 @@ import { signSealedRequest, lane } from '../src/eac.js'
 import { createStandaloneEac } from '../packages/standalone/eac.mjs'
 import { createCredentials } from '../packages/standalone/channels/credentials.mjs'
 import { attachments } from '../packages/standalone/channels/images.mjs'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ofm-channels-'))
 const dataDir = path.join(scratch, 'app')
@@ -109,7 +110,7 @@ const upstream = http.createServer(async (req, res) => {
     res.end(frames(signed ? 'eac-ok' : 'account-ok', Array.isArray(body.tools) && body.tools.length > 0))
   } else json(res, { data: { Response: { Data: { Accounts: [] } } } })
 })
-await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve))
+await listenLoopback(upstream)
 const fixture = `http://127.0.0.1:${upstream.address().port}`
 process.env.OFM_TEST_UPSTREAM = fixture
 process.env.OUR_FREE_MODEL_BASE = fixture

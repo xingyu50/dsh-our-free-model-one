@@ -2,6 +2,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import http from 'node:http'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 await test('classified stream failures survive every local forwarding protocol', async t => {
   const originalBase = process.env.OUR_FREE_MODEL_BASE
@@ -19,7 +20,7 @@ await test('classified stream failures survive every local forwarding protocol',
     upstream.closeAllConnections()
     await new Promise(resolve => upstream.close(resolve))
   })
-  await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve))
+  await listenLoopback(upstream)
   const base = `http://127.0.0.1:${upstream.address().port}`
   process.env.OUR_FREE_MODEL_BASE = base
   process.env.OUR_FREE_MODEL_KILO_BASE = base

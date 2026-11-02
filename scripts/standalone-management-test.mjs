@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { once } from 'node:events'
 import { verifyLoginLaunchers, verifyLoginTerminal } from './standalone-login-terminal-test.mjs'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ofm-management-'))
 const dataDir = path.join(scratch, 'data')
@@ -39,8 +40,7 @@ const upstream = http.createServer((req, res) => {
     }
   })
 })
-upstream.listen(0, '127.0.0.1')
-await once(upstream, 'listening')
+await listenLoopback(upstream)
 const base = `http://127.0.0.1:${upstream.address().port}`
 process.env.OUR_FREE_MODEL_BASE = base
 process.env.OUR_FREE_MODEL_KILO_BASE = base

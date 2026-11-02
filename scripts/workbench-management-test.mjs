@@ -3,9 +3,9 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import http from 'node:http'
-import { once } from 'node:events'
 import { startStandalone } from '../packages/standalone/service.mjs'
 import { pinnedEngineEntry } from './lib/engine-binary.mjs'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ofm-workbench-http-'))
 const upstream = http.createServer(async (req, res) => {
@@ -21,8 +21,7 @@ let service
 let checks = 0
 const check = async (name, action) => { await action(); checks++; console.log(`ok ${name}`) }
 try {
-  upstream.listen(0, '127.0.0.1')
-  await once(upstream, 'listening')
+  await listenLoopback(upstream)
   service = await startStandalone({ dataDir: path.join(scratch, 'data'), port: 0, refresh: false,
     subscriptionOptions: { home: path.join(scratch, 'empty-home') }, workbenchOptions: { env: { PATH: '' }, home: scratch },
     logger: { info() {}, warn() {} },

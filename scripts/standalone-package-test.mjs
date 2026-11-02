@@ -5,10 +5,10 @@ import path from 'node:path'
 import crypto from 'node:crypto'
 import http from 'node:http'
 import { spawn, execFileSync } from 'node:child_process'
-import { once } from 'node:events'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { buildStandalonePackage, repositoryRoot, standaloneSourceFiles } from './pack-standalone.mjs'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 const args = process.argv.slice(2)
 if (args.length === 1 && args[0] === '--sources-only') {
@@ -119,8 +119,7 @@ const fixture = http.createServer((req, res) => {
     }
   })
 })
-fixture.listen(0, '127.0.0.1')
-await once(fixture, 'listening')
+await listenLoopback(fixture)
 const upstream = `http://127.0.0.1:${fixture.address().port}`
 const preload = path.join(scratch, 'offline-fixture.mjs')
 fs.writeFileSync(preload, `

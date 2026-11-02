@@ -33,6 +33,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 let failures = 0
 const check = (name, actual, expected) => {
@@ -74,10 +75,7 @@ async function checkBodyLimits(temporary) {
   let server
   try {
     server = createGatewayServer(env)
-    await new Promise((resolve, reject) => {
-      server.once('error', reject)
-      server.listen(0, '127.0.0.1', resolve)
-    })
+    await listenLoopback(server)
     const endpoint = 'http://127.0.0.1:' + server.address().port + '/v1/chat/completions'
     for (const [name, body, bytes, expected] of cases) {
       check(name + ': fixture bytes', Buffer.byteLength(body, 'utf8'), bytes)
@@ -283,7 +281,7 @@ const { createGatewayServer, resetAnalytics, poolProbe } = await import('../work
       res.end()
     })
   })
-  await new Promise(resolve => relay.listen(0, '127.0.0.1', resolve))
+  await listenLoopback(relay)
   relay.unref()
   const relayBase = `http://127.0.0.1:${relay.address().port}`
 
@@ -356,7 +354,7 @@ const { createGatewayServer, resetAnalytics, poolProbe } = await import('../work
       res.end('{"error":{"message":"unexpected relay route"}}')
     })
   })
-  await new Promise(resolve => relay.listen(0, '127.0.0.1', resolve))
+  await listenLoopback(relay)
   relay.unref()
 
   // A local HTTP shell around the REAL worker module: every request the suite
@@ -383,7 +381,7 @@ const { createGatewayServer, resetAnalytics, poolProbe } = await import('../work
       res.end(await response.text())
     })
   })
-  await new Promise(resolve => shell.listen(0, '127.0.0.1', resolve))
+  await listenLoopback(shell)
   shell.unref()
   const gatewayBase = `http://127.0.0.1:${shell.address().port}/v1`
   const workerCredential = { mode: 'worker', base: gatewayBase, signingSecret: GATEWAY_SECRET }
@@ -452,7 +450,7 @@ const { createGatewayServer, resetAnalytics, poolProbe } = await import('../work
       res.end('<!DOCTYPE html>\n<!--[if lt IE 7]> <html class="no-js ie6 oldie" lang="en-US"> <![endif]-->\n<html><head><title>error</title></head><body>error code</body></html>')
     })
   })
-  await new Promise(resolve => htmlProxy.listen(0, '127.0.0.1', resolve))
+  await listenLoopback(htmlProxy)
   htmlProxy.unref()
   const htmlCredential = { mode: 'worker', base: `http://127.0.0.1:${htmlProxy.address().port}/v1`, signingSecret: GATEWAY_SECRET }
   const listingFailure = await fetchSealedListing(htmlCredential).then(() => null, error => error)
@@ -480,7 +478,7 @@ const { createGatewayServer, resetAnalytics, poolProbe } = await import('../work
       res.end('<!DOCTYPE html><html><head><title>宝塔免费WAF</title></head><body>Nginx 缓冲区溢出</body></html>')
     })
   })
-  await new Promise(resolve => wafProxy.listen(0, '127.0.0.1', resolve))
+  await listenLoopback(wafProxy)
   wafProxy.unref()
   const wafCredential = { mode: 'worker', base: `http://127.0.0.1:${wafProxy.address().port}/v1`, signingSecret: GATEWAY_SECRET }
   const wafListing = await fetchSealedListing(wafCredential).then(() => null, error => error)
@@ -593,7 +591,7 @@ const { createGatewayServer, resetAnalytics, poolProbe } = await import('../work
       res.end(JSON.stringify({ data: [{ id: 'deepseek-ai/deepseek-v4.1-flash' }] }))
     })
   })
-  await new Promise(resolve => nodeRelay.listen(0, '127.0.0.1', resolve))
+  await listenLoopback(nodeRelay)
   nodeRelay.unref()
   const nodeEnv = {
     UPSTREAM_URL: `http://127.0.0.1:${nodeRelay.address().port}/v1`,
@@ -602,7 +600,7 @@ const { createGatewayServer, resetAnalytics, poolProbe } = await import('../work
     RATE_LIMIT_PER_MINUTE: '2',
   }
   const nodeServer = createGatewayServer(nodeEnv)
-  await new Promise(resolve => nodeServer.listen(0, '127.0.0.1', resolve))
+  await listenLoopback(nodeServer)
   nodeServer.unref()
   const nodeBase = `http://127.0.0.1:${nodeServer.address().port}/v1`
 
@@ -627,11 +625,11 @@ const { createGatewayServer, resetAnalytics, poolProbe } = await import('../work
     resetAnalytics()
     poolProbe.fetchImpl = async () => new Response(JSON.stringify({ stargazers_count: 4 }), { status: 200, headers: { 'content-type': 'application/json' } })
     const poolRelay = http.createServer((req, res) => { req.resume(); req.on('end', () => { res.writeHead(404); res.end() }) })
-    await new Promise(resolve => poolRelay.listen(0, '127.0.0.1', resolve))
+    await listenLoopback(poolRelay)
     poolRelay.unref()
     const formulaEnv = { UPSTREAM_URL: `http://127.0.0.1:${poolRelay.address().port}/v1`, UPSTREAM_API_KEY: 'sk-x', SIGNING_SECRETS: GATEWAY_SECRET }
     const formulaServer = createGatewayServer(formulaEnv)
-    await new Promise(resolve => formulaServer.listen(0, '127.0.0.1', resolve))
+    await listenLoopback(formulaServer)
     formulaServer.unref()
     const formula = await (await fetch(`http://127.0.0.1:${formulaServer.address().port}/pool`)).json()
     check('the pool snapshot derives capacity from the provisioning formula', [formula.ok, formula.poolSource, formula.stars, formula.pool], [true, 'formula', 4, 6])
@@ -640,7 +638,7 @@ const { createGatewayServer, resetAnalytics, poolProbe } = await import('../work
 
     const pinnedEnv = { ...formulaEnv, POOL_SIZE: '17', GITHUB_STARS_OVERRIDE: '999' }
     const pinnedServer = createGatewayServer(pinnedEnv)
-    await new Promise(resolve => pinnedServer.listen(0, '127.0.0.1', resolve))
+    await listenLoopback(pinnedServer)
     pinnedServer.unref()
     const pinned = await (await fetch(`http://127.0.0.1:${pinnedServer.address().port}/pool`)).json()
     check('a configured POOL_SIZE pins capacity without consulting stars', [pinned.poolSource, pinned.pool], ['configured', 17])
@@ -676,7 +674,7 @@ const { createGatewayServer, resetAnalytics, poolProbe } = await import('../work
       }, refusing ? 300 : 2300)
     })
   })
-  await new Promise(resolve => preludeRelay.listen(0, '127.0.0.1', resolve))
+  await listenLoopback(preludeRelay)
   preludeRelay.unref()
   const preludeServer = createGatewayServer({
     UPSTREAM_URL: `http://127.0.0.1:${preludeRelay.address().port}/v1`,
@@ -685,7 +683,7 @@ const { createGatewayServer, resetAnalytics, poolProbe } = await import('../work
     RATE_LIMIT_PER_MINUTE: '9999',
     SSE_PRELUDE_SECONDS: '1',
   })
-  await new Promise(resolve => preludeServer.listen(0, '127.0.0.1', resolve))
+  await listenLoopback(preludeServer)
   preludeServer.unref()
   const preludeBase = `http://127.0.0.1:${preludeServer.address().port}/v1`
   const preludeCall = async model => {
@@ -732,7 +730,7 @@ const { createGatewayServer, resetAnalytics, poolProbe } = await import('../work
         }, 350)
       })
     })
-    await new Promise(resolve => slowRelay.listen(0, '127.0.0.1', resolve))
+    await listenLoopback(slowRelay)
     slowRelay.unref()
     const statsFile = path.join(os.tmpdir(), 'ofm-vault-stats-' + Date.now() + '.json')
     const concEnv = {
@@ -746,7 +744,7 @@ const { createGatewayServer, resetAnalytics, poolProbe } = await import('../work
       CONCURRENCY_PER_IP: '2',
     }
     const concServer = createGatewayServer(concEnv)
-    await new Promise(resolve => concServer.listen(0, '127.0.0.1', resolve))
+    await listenLoopback(concServer)
     concServer.unref()
     const concBase = `http://127.0.0.1:${concServer.address().port}/v1`
 

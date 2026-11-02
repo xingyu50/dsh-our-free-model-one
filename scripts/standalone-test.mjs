@@ -5,6 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 const root = fileURLToPath(new URL('..', import.meta.url))
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ofm-standalone-'))
@@ -76,7 +77,7 @@ const upstream = http.createServer((req, res) => {
     res.end(frames(body.model === kiloModel ? 'kilo-ok' : 'core-ok'))
   })
 })
-await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve))
+await listenLoopback(upstream)
 const base = `http://127.0.0.1:${upstream.address().port}`
 process.env.OUR_FREE_MODEL_BASE = base
 process.env.OUR_FREE_MODEL_KILO_BASE = base

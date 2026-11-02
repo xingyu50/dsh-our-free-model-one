@@ -31,6 +31,7 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { callRoute, fakeContext, freePort, until } from './lib/fake-kernel.mjs'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 let failures = 0
 const check = (name, actual, expected) => {
@@ -41,7 +42,7 @@ const check = (name, actual, expected) => {
 
 /** A port that answers nothing, forever: the honest stand-in for "no network". */
 const dead = http.createServer()
-await new Promise(resolve => dead.listen(0, '127.0.0.1', resolve))
+await listenLoopback(dead)
 const deadBase = `http://127.0.0.1:${dead.address().port}`
 await new Promise(resolve => dead.close(resolve))
 

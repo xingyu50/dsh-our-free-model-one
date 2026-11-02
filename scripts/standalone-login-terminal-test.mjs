@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import http from 'node:http'
-import { once } from 'node:events'
 import { execFile } from 'node:child_process'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import vm from 'node:vm'
 import { openLoginTerminal } from '../packages/standalone/login-terminal.mjs'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 const runFile = promisify(execFile)
 const shellQuote = value => `'${value.replaceAll("'", "'\\''")}'`
@@ -114,8 +114,7 @@ export async function verifyLoginTerminal() {
     },
   })
   const server = http.createServer((req, res) => { void management.handleRequest(req, res) })
-  server.listen(0, '127.0.0.1')
-  await once(server, 'listening')
+  await listenLoopback(server)
   const port = server.address().port
   baseUrl = `http://127.0.0.1:${port}`
   management.setPort(port)

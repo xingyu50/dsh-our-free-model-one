@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { pathToFileURL } from 'node:url'
 import { stageDesktopService, repositoryRoot } from './prepare-desktop.mjs'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ofm desktop 测试 '))
 const serviceRoot = path.join(scratch, 'service')
@@ -80,7 +81,7 @@ try {
     assert.ok(!fs.existsSync(path.join(serviceRoot, 'node_modules')))
     assert.ok(!fs.existsSync(path.join(serviceRoot, 'settings.json')))
   })
-  occupied.listen(0, '127.0.0.1'); await once(occupied, 'listening')
+  await listenLoopback(occupied)
   let first, ready
   await check('复制的内置 Node 在空 PATH 和含中文空格的安装路径启动，返回自身 PID 与真实端口', async () => {
     first = launch({ port: occupied.address().port }); ready = await first.ready()

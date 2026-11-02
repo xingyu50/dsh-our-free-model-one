@@ -9,6 +9,7 @@ import os from 'node:os'
 import path from 'node:path'
 import http from 'node:http'
 import { skipWithoutEngineBinary } from './lib/engine-binary.mjs'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 if (skipWithoutEngineBinary('magpie-plugin')) process.exit(0)
 
@@ -44,7 +45,7 @@ const check = async (name, run) => {
   console.log(`ok ${checks} - ${name}`)
 }
 const listen = async server => {
-  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
+  await listenLoopback(server)
   resources.push(async () => {
     server.closeAllConnections()
     await new Promise(resolve => server.close(resolve))

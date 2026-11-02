@@ -23,6 +23,7 @@ import os from 'node:os'
 import path from 'node:path'
 import net from 'node:net'
 import { callRoute, fakeContext, freePort, stubUpstream, until } from './lib/fake-kernel.mjs'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 let failures = 0
 const check = (name, actual, expected) => {
@@ -101,7 +102,7 @@ const conflictHome = path.join(scratch, 'port-conflict')
 const conflictFile = path.join(conflictHome, 'our-free-model', 'settings.json')
 fs.mkdirSync(path.dirname(conflictFile), { recursive: true })
 const occupied = net.createServer(socket => socket.end())
-await new Promise(resolve => occupied.listen(0, '127.0.0.1', resolve))
+await listenLoopback(occupied)
 const requestedPort = occupied.address().port
 fs.writeFileSync(conflictFile, JSON.stringify({
   forward: { enabled: true, host: '127.0.0.1', port: requestedPort },

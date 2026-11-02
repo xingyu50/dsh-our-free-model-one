@@ -15,6 +15,7 @@ import path from 'node:path'
 import assert from 'node:assert/strict'
 
 import { startChanRelay, chanGatewayCredential, chanGatewayHome, chanGatewayPort, chanGatewayEnabled } from '../src/chan-relay.js'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 const checks = []
 const check = (name, got, want) => {
@@ -29,7 +30,7 @@ const check = (name, got, want) => {
   }
 }
 
-const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server.address().port)))
+const listen = server => listenLoopback(server)
 
 // ── the stub "gateway": answers only with its own credential attached ────────
 let seenAuthorization = ''

@@ -6,6 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import vm from 'node:vm'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ofm-standalone-lan-'))
 const dataDir = path.join(scratch, 'data')
@@ -34,7 +35,7 @@ const upstream = http.createServer((req, res) => {
     else finish()
   })
 })
-await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve))
+await listenLoopback(upstream)
 const upstreamUrl = `http://127.0.0.1:${upstream.address().port}`
 process.env.OUR_FREE_MODEL_BASE = upstreamUrl
 process.env.OUR_FREE_MODEL_KILO_BASE = upstreamUrl
@@ -94,7 +95,7 @@ async function assertPortReleased(port, host = '127.0.0.1') {
 }
 async function occupyPort() {
   const server = net.createServer(socket => socket.destroy())
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  await listenLoopback(server)
   blockers.add(server)
   return server
 }

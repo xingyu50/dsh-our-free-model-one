@@ -6,6 +6,7 @@ import path from 'node:path'
 import http from 'node:http'
 import { EventEmitter } from 'node:events'
 import { callRoute, fakeContext, freePort, stubUpstream, until } from './lib/fake-kernel.mjs'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 const free = await stubUpstream({
   listing: ['mimo-v2.6-flash-free'],
@@ -256,7 +257,7 @@ try {
     })
     let gateway
     try {
-      await new Promise(resolve => local.listen(0, '127.0.0.1', resolve))
+      await listenLoopback(local)
       const subscriptions = {
         list: () => wireRows.map(row => ({ ...row, enabled: true, models: ['fixture-model'] })),
         async resolve(id) {
@@ -532,7 +533,7 @@ try {
         + 'data: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":6,"completion_tokens":4}}\n\n'
         + 'data: [DONE]\n\n')
     })
-    await new Promise(resolve => upstream.listen(0, '127.0.0.1', resolve))
+    await listenLoopback(upstream)
     const upstreamBase = `http://127.0.0.1:${upstream.address().port}`
     const home = path.join(scratch, 'plugin-home')
     process.env.DSH_HOME = home

@@ -21,6 +21,7 @@ import { createMagpieEngine, MAGPIE_UI_PREFIX as prefix } from '../src/magpie-en
 import { createMagpieModels } from '../src/magpie-models.js'
 import { assertEngineMutation, deniedModel, filterEngineJSON, isDeniedChannel } from '../src/magpie-policy.js'
 import { pinnedEngineEntry } from './lib/engine-binary.mjs'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ofm-magpie-policy-'))
 const saved = new Map()
@@ -50,10 +51,7 @@ const server = http.createServer((req, res) => {
   const subpath = req.url.startsWith(prefix) ? req.url.slice(prefix.length) : req.url
   engine.proxy(req, res, subpath).catch(() => { try { res.destroy() } catch {} })
 })
-const listen = () => new Promise((resolve, reject) => {
-  server.once('error', reject)
-  server.listen(0, '127.0.0.1', () => resolve(`http://127.0.0.1:${server.address().port}`))
-})
+const listen = async () => `http://127.0.0.1:${await listenLoopback(server)}`
 /**
  * A route that a policy refusal would have answered with 403. The channel being
  * offered means the engine answers for itself now, whatever that answer is; what

@@ -17,6 +17,7 @@ import crypto from 'node:crypto'
 import assert from 'node:assert/strict'
 import { parseVersion, compareVersions, parseManifest, fileUrlOf, downloadManifest, parseUploadPackRefs, PluginUpdater, stageRelease, verifyStaged, backupPackage, restoreBackup, installStaged, verifyInstalled, signManifest, verifyManifestSignature, stableStringify, DEFAULT_MANIFEST_SOURCES, PINNED_MANIFEST_PUBLIC_KEY } from '../src/updater.js'
 import { selfReload } from '../src/reload.js'
+import { listenLoopback } from './lib/loopback-port.mjs'
 const CONTROLLED_DEFAULTS = ['http://127.0.0.1:1/never.json']
 
 let failures = 0
@@ -546,7 +547,7 @@ await checkAsync('a gcore-sourced manifest gets the same oversized-file fallback
 const server = serveFrom({ 'repo/feed/manifest.json': JSON.stringify(newManifest), 'repo/index.js': newFiles['index.js'], 'repo/package.json': newFiles['package.json'], 'repo/client.js': newFiles['client.js'], 'repo/src/new-deep.js': newFiles['src/new-deep.js'] })
 const corruptServer = serveFrom({ 'repo/feed/manifest.json': JSON.stringify(corruptManifest), 'repo/index.js': 'tampered\n', 'repo/package.json': newFiles['package.json'], 'repo/client.js': newFiles['client.js'], 'repo/src/new-deep.js': newFiles['src/new-deep.js'] })
 const badManifestServer = serveFrom({ 'repo/feed/manifest.json': '{"version": "oops"}' })
-await Promise.all([server, corruptServer, badManifestServer].map(s => new Promise(resolve => s.listen(0, '127.0.0.1', resolve))))
+await Promise.all([server, corruptServer, badManifestServer].map(s => listenLoopback(s)))
 const [base, corruptBase, badBase] = [server, corruptServer, badManifestServer].map(s => `http://127.0.0.1:${s.address().port}`)
 
 function makePackage(version) {
@@ -712,7 +713,7 @@ await checkAsync('a manifest without a signature is refused', async () => {
   const unsigned = JSON.parse(JSON.stringify(newManifest))
   delete unsigned.signature
   const unsignedServer = serveFrom({ 'repo/feed/manifest.json': JSON.stringify(unsigned) })
-  await new Promise(resolve => unsignedServer.listen(0, '127.0.0.1', resolve))
+  await listenLoopback(unsignedServer)
   const updater = new PluginUpdater({ pkgDir: pkg, dataDir: data, settings: () => ({}), fetchImpl: fetch, defaultSources: [`http://127.0.0.1:${unsignedServer.address().port}/repo/feed/manifest.json`] })
   await assert.rejects(() => updater.check(), /signature/)
   unsignedServer.close()
@@ -725,7 +726,7 @@ await checkAsync('a manifest tampered after signing is refused', async () => {
   const tampered = JSON.parse(JSON.stringify(newManifest))
   tampered.version = '9.9.9'
   const tamperedServer = serveFrom({ 'repo/feed/manifest.json': JSON.stringify(tampered) })
-  await new Promise(resolve => tamperedServer.listen(0, '127.0.0.1', resolve))
+  await listenLoopback(tamperedServer)
   const updater = new PluginUpdater({ pkgDir: pkg, dataDir: data, settings: () => ({}), fetchImpl: fetch, defaultSources: [`http://127.0.0.1:${tamperedServer.address().port}/repo/feed/manifest.json`] })
   await assert.rejects(() => updater.check(), /signature/)
   tamperedServer.close()
@@ -738,7 +739,7 @@ await checkAsync('a manifest signed by another key is refused', async () => {
   const stranger = crypto.generateKeyPairSync('ed25519').privateKey
   const foreign = { ...JSON.parse(JSON.stringify(newManifest)), signature: signManifest(parseManifest(newManifest), stranger) }
   const foreignServer = serveFrom({ 'repo/feed/manifest.json': JSON.stringify(foreign) })
-  await new Promise(resolve => foreignServer.listen(0, '127.0.0.1', resolve))
+  await listenLoopback(foreignServer)
   const updater = new PluginUpdater({ pkgDir: pkg, dataDir: data, settings: () => ({}), fetchImpl: fetch, defaultSources: [`http://127.0.0.1:${foreignServer.address().port}/repo/feed/manifest.json`] })
   await assert.rejects(() => updater.check(), /signature/)
   foreignServer.close()
@@ -751,7 +752,7 @@ await checkAsync('the feedUrl setting no longer redirects update checks', async 
   // announcements only; this server answers, but the updater must not call it.
   let hits = 0
   const watched = http.createServer(() => { hits += 1 })
-  await new Promise(resolve => watched.listen(0, '127.0.0.1', resolve))
+  await listenLoopback(watched)
   const pkg = makePackage(OLD)
   const data = makeDataDir()
   const updater = new PluginUpdater({

@@ -6,6 +6,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { registerHooks } from 'node:module'
 import { pathToFileURL } from 'node:url'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 const kernel = new URL('./lib/channel-pack-kernel.mjs', import.meta.url).href
 const hooks = registerHooks({ resolve(specifier, context, next) {
@@ -14,7 +15,7 @@ const hooks = registerHooks({ resolve(specifier, context, next) {
 const packAt = process.argv.indexOf('--pack')
 const pack = await import(packAt >= 0 ? pathToFileURL(path.resolve(process.argv[packAt + 1])).href : '../vendor/channel-pack/pack.js')
 const savedFetch = globalThis.fetch
-const listen = server => new Promise(resolve => server.listen(0, '127.0.0.1', () => resolve(server.address().port)))
+const listen = server => listenLoopback(server)
 const windows = server => `ProxyEnable    REG_DWORD    0x1\nProxyServer    REG_SZ    ${server}\nProxyOverride    REG_SZ    *.internal;<local>;127.*`
 let checks = 0
 async function check(name, run) { await run(); checks++; console.log(`ok  ${name}`) }

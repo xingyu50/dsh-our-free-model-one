@@ -8,6 +8,7 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import { callRoute, chatFrames, fakeContext, until } from './lib/fake-kernel.mjs'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 let activeCase
 let forwardScenario
@@ -64,7 +65,7 @@ const server = http.createServer((req, res) => {
     } else send()
   })
 })
-await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+await listenLoopback(server)
 server.unref()
 process.env.OUR_FREE_MODEL_BASE = `http://127.0.0.1:${server.address().port}`
 

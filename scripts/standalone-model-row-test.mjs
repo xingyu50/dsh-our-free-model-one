@@ -5,12 +5,12 @@ import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import { once } from 'node:events'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { createRuntimeStores, createModelRuntime } from '../src/core/runtime.js'
 import { createManagement } from '../packages/standalone/management.mjs'
 import { standaloneSharedUi } from './lib/standalone-shared-ui.mjs'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 const require = createRequire(import.meta.url)
 const standaloneRequire = createRequire(new URL('../packages/standalone/package.json', import.meta.url))
@@ -92,7 +92,7 @@ test('standalone 真实模型行保留持久化实测结果、原因和原有筛
       if (req.url === '/api/management/summary') summaryReads++
       void management.handleRequest(req, res).then(handled => { if (!handled) { res.writeHead(404); res.end() } })
     })
-    server.listen(0, '127.0.0.1'); await once(server, 'listening')
+    await listenLoopback(server)
     management.setPort(server.address().port)
     const origin = 'http://127.0.0.1:' + server.address().port
     browser = await chromium.launch({ headless: true, ...(process.env.OFM_BROWSER_PATH ? { executablePath: process.env.OFM_BROWSER_PATH } : {}) })

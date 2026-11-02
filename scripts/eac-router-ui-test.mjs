@@ -3,10 +3,10 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import http from 'node:http'
-import { once } from 'node:events'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { PROVIDERS } from '../src/providers/index.js'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 const root = fileURLToPath(new URL('../', import.meta.url))
 const require = createRequire(import.meta.url)
@@ -109,8 +109,7 @@ const server = http.createServer(async (req, res) => {
   }
   return send({ error: `unexpected fixture request ${req.url}` }, 'application/json', 404)
 })
-server.listen(0, '127.0.0.1')
-await once(server, 'listening')
+await listenLoopback(server)
 const origin = `http://127.0.0.1:${server.address().port}`
 const edge = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
 let browser

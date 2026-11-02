@@ -14,6 +14,7 @@ import { promisify } from 'node:util'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 const repository = fileURLToPath(new URL('../', import.meta.url))
 const require = createRequire(import.meta.url)
@@ -78,8 +79,7 @@ function write(file, value) {
 }
 async function freePort() {
   const server = net.createServer()
-  await new Promise((resolve, reject) => server.once('error', reject).listen(0, '127.0.0.1', resolve))
-  const port = server.address().port
+  const port = await listenLoopback(server)
   await new Promise(resolve => server.close(resolve))
   return port
 }
@@ -687,7 +687,7 @@ try {
         response.end(json({ object: 'list', data: [{ id: 'ofm-native-fixture', object: 'model', owned_by: 'fixture' }] }))
       })
     })
-    await new Promise(resolve => fixture.listen(0, '127.0.0.1', resolve))
+    await listenLoopback(fixture)
     fixtureBase = `http://127.0.0.1:${fixture.address().port}`
     deadlineTimer = setTimeout(() => {
       report.errors.push('Acceptance exceeded its 12 minute budget')

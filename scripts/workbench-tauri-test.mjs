@@ -7,6 +7,7 @@ import { once } from 'node:events'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { setTimeout as delay } from 'node:timers/promises'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 if (process.platform !== 'win32') throw new Error('This native Tauri validation requires Windows')
 const require = createRequire(import.meta.url)
@@ -17,8 +18,7 @@ const root = path.resolve('.verify/workbench-tauri')
 fs.mkdirSync(root, { recursive: true })
 const dataDir = fs.mkdtempSync(path.join(root, 'run-'))
 const listener = net.createServer()
-listener.listen(0, '127.0.0.1')
-await once(listener, 'listening')
+await listenLoopback(listener)
 const debugPort = listener.address().port
 await new Promise(resolve => listener.close(resolve))
 const upstream = http.createServer((req, res) => {
@@ -31,8 +31,7 @@ const upstream = http.createServer((req, res) => {
 let app, browser
 let captured = ''
 try {
-  upstream.listen(0, '127.0.0.1')
-  await once(upstream, 'listening')
+  await listenLoopback(upstream)
   const base = `http://127.0.0.1:${upstream.address().port}`
   app = spawn(executable, [], {
     env: { ...process.env, OFM_HOME: dataDir, OFM_TEST_UPSTREAM: base, OUR_FREE_MODEL_BASE: base, OUR_FREE_MODEL_KILO_BASE: base,

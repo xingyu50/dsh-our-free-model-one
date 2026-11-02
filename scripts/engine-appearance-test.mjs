@@ -6,6 +6,7 @@ import path from 'node:path'
 import http from 'node:http'
 import { createRequire } from 'node:module'
 import { createMagpieEngine, MAGPIE_UI_PREFIX as prefix } from '../src/magpie-engine.js'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 const require = createRequire(import.meta.url)
 const { chromium } = require(process.env.OFM_PLAYWRIGHT_MODULE ?? 'D:/Cache/npm-global/node_modules/playwright')
@@ -44,7 +45,7 @@ try {
       void engine.proxy(req, res, req.url.slice(prefix.length)).catch(() => res.destroy())
     } else { res.writeHead(404); res.end() }
   })
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  await listenLoopback(server)
   const origin = `http://127.0.0.1:${server.address().port}`
   const edge = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
   browser = await chromium.launch({ headless: true, ...(fs.existsSync(edge) ? { executablePath: edge } : {}) })

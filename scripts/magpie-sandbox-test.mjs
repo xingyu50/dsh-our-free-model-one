@@ -8,6 +8,7 @@ import { createRequire } from 'node:module'
 import { createMagpieEngine } from '../src/magpie-engine.js'
 import { createApiRoutes } from '../index.js'
 import { structuralRejection } from '../src/trust.js'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 const require = createRequire(import.meta.url)
 const { chromium } = require(process.env.OFM_PLAYWRIGHT_MODULE ?? 'D:/Cache/npm-global/node_modules/playwright')
@@ -45,7 +46,7 @@ try {
       res.end(`<!doctype html><iframe id="plugin" sandbox="allow-scripts" src="${asset}"></iframe>`)
     } else void handler(req, res).catch(() => { res.writeHead(500); res.end() })
   })
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
+  await listenLoopback(server)
   const origin = `http://127.0.0.1:${server.address().port}`
   const edge = 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
   browser = await chromium.launch({ headless: true, ...(fs.existsSync(edge) ? { executablePath: edge } : {}) })

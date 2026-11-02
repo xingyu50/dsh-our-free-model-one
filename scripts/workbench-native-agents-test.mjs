@@ -7,6 +7,7 @@ import { once } from 'node:events'
 import { spawn } from 'node:child_process'
 import { startStandalone } from '../packages/standalone/service.mjs'
 import { prepareClientLaunch } from '../packages/standalone/workbench.mjs'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ofm-native-agents-'))
 const fixtureRoot = path.resolve('.verify/native-clients/node_modules')
@@ -32,8 +33,7 @@ const upstream = http.createServer(async (req, res) => {
   res.end('data: {"choices":[{"index":0,"delta":{"content":"EAC_AGENT_OK"}}]}\n\ndata: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":9,"completion_tokens":4}}\n\ndata: [DONE]\n\n')
 })
 try {
-  upstream.listen(0, '127.0.0.1')
-  await once(upstream, 'listening')
+  await listenLoopback(upstream)
   const dataDir = path.join(scratch, 'data')
   fs.mkdirSync(dataDir)
   fs.writeFileSync(path.join(dataDir, 'settings.json'), JSON.stringify({
@@ -72,8 +72,7 @@ try {
       for await (const chunk of response.body) res.write(chunk)
       res.end()
     })
-    gatewayServer.listen(0, '127.0.0.1')
-    await once(gatewayServer, 'listening')
+    await listenLoopback(gatewayServer)
     if (client.id === 'gemini') plan.env.GOOGLE_GEMINI_BASE_URL = `http://127.0.0.1:${gatewayServer.address().port}`
     child = spawn(client.executable, [...(client.id === 'gemini' ? client.args.slice(0, 1) : []), ...plan.args,
       ...(client.id === 'gemini' ? client.args.slice(1) : client.args)], {

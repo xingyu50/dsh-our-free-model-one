@@ -14,6 +14,7 @@ import os from 'node:os'
 import path from 'node:path'
 import http from 'node:http'
 import { startEgressRelay, egressFetch, egressActive, renderMihomoConfig, findMihomoBinary, outletLabel, readOutletSelection } from '../src/egress.js'
+import { listenLoopback } from './lib/loopback-port.mjs'
 
 let checks = 0
 let failures = 0
@@ -181,7 +182,7 @@ function startTarget() {
 }
 
 function listen(server, host) {
-  return new Promise(resolve => server.listen(0, host, () => resolve(server.address().port)))
+  return listenLoopback(server, host)
 }
 
 /** Stand-in for mihomo's external-controller: serves the routes the node
