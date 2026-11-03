@@ -15,31 +15,9 @@
  */
 
 import assert from 'node:assert/strict'
-import fs from 'node:fs'
-import { registerHooks, stripTypeScriptTypes } from 'node:module'
-import { fileURLToPath } from 'node:url'
+import { importChannelSource, installChannelSource } from './lib/channel-source.mjs'
 
-const sourceRoot = new URL('../vendor/channel-pack/src/', import.meta.url).href
-const kernel = new URL('./lib/channel-pack-kernel.mjs', import.meta.url).href
-const undiciStub = new URL('./lib/undici-stub.mjs', import.meta.url).href
-const hooks = registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (specifier.startsWith('@deepseek-ai/')) return { url: kernel, shortCircuit: true }
-    if (specifier === 'undici') return { url: undiciStub, shortCircuit: true }
-    if (context.parentURL?.startsWith(sourceRoot) && specifier.startsWith('.') && specifier.endsWith('.js')) {
-      const target = new URL(specifier.slice(0, -3) + '.ts', context.parentURL)
-      if (fs.existsSync(target)) return { url: target.href, shortCircuit: true }
-    }
-    return nextResolve(specifier, context)
-  },
-  load(url, context, nextLoad) {
-    if (url.startsWith(sourceRoot) && url.endsWith('.ts')) return {
-      format: 'module', shortCircuit: true,
-      source: stripTypeScriptTypes(fs.readFileSync(fileURLToPath(url), 'utf8'), { mode: 'transform', sourceUrl: url }),
-    }
-    return nextLoad(url, context)
-  },
-})
+const hooks = installChannelSource({ aliases: { undici: new URL('./lib/undici-stub.mjs', import.meta.url).href } })
 
 let failures = 0
 const check = (name, actual, expected) => {

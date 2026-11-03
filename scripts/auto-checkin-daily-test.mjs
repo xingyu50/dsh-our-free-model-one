@@ -13,40 +13,14 @@
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { registerHooks } from 'node:module'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { fileURLToPath } from 'node:url'
+import { importChannelSource, installChannelSource } from './lib/channel-source.mjs'
 
-// 源码里有 TypeScript 参数属性（`constructor(private readonly x)`），strip-only 模式
-// 解析不了，必须带 `--experimental-transform-types`。`scripts/test-all.mjs` 只会
-// `node <script>`，没有传启动参数的通道，故这里自己补一次。
-if (!process.execArgv.includes('--experimental-transform-types')) {
-  const { spawnSync } = await import('node:child_process')
-  const rerun = spawnSync(
-    process.execPath,
-    ['--experimental-transform-types', fileURLToPath(import.meta.url), ...process.argv.slice(2)],
-    { stdio: 'inherit' },
-  )
-  process.exit(rerun.status ?? 1)
-}
+// 源码的转译口径由 channel-source.mjs 统一（transform 模式，参数属性也能过），
+// 这里不再需要 `--experimental-transform-types` 或第二次自我重启。
+installChannelSource()
 
-const root = path.join(fileURLToPath(new URL('..', import.meta.url)))
-const sourceRoot = pathToFileURL(path.join(root, 'vendor/channel-pack/src/')).href
-const kernel = pathToFileURL(path.join(root, 'scripts/lib/channel-pack-kernel.mjs')).href
-
-// 源码用 `.js` 后缀写相对导入（构建期由 esbuild 解析），这里映射回 `.ts`。
-// `@deepseek-ai/*` 由宿提供，用离线桩顶上（与 channel-pack-test.mjs 同款）。
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (specifier.startsWith('@deepseek-ai/')) return { url: kernel, shortCircuit: true }
-    if (context.parentURL?.startsWith(sourceRoot) && specifier.endsWith('.js')) {
-      const url = new URL(specifier.replace(/\.js$/, '.ts'), context.parentURL).href
-      if (fs.existsSync(fileURLToPath(url))) return { url, shortCircuit: true }
-    }
-    return nextResolve(specifier, context)
-  },
-})
-
-const { createAutoCheckin } = await import(new URL('auto-checkin.ts', sourceRoot).href)
+const { createAutoCheckin } = await importChannelSource('auto-checkin.ts')
 
 /** 线上那份文档：10/15 09:47 跑过一轮，之后进程一直没重启。 */
 let doc = {

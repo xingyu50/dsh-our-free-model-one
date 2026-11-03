@@ -1,30 +1,10 @@
 /** Exercise the actual TypeScript gateway converters without host services or network. */
 import assert from 'node:assert/strict'
-import fs from 'node:fs'
-import { registerHooks, stripTypeScriptTypes } from 'node:module'
-import { fileURLToPath } from 'node:url'
-const sourceRoot = new URL('../vendor/channel-pack/src/', import.meta.url).href
-const kernel = new URL('./lib/channel-pack-kernel.mjs', import.meta.url).href
-const hooks = registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (specifier.startsWith('@deepseek-ai/')) return { url: kernel, shortCircuit: true }
-    if (context.parentURL?.startsWith(sourceRoot) && specifier.startsWith('.') && specifier.endsWith('.js')) {
-      const target = new URL(specifier.slice(0, -3) + '.ts', context.parentURL)
-      if (fs.existsSync(target)) return { url: target.href, shortCircuit: true }
-    }
-    return nextResolve(specifier, context)
-  },
-  load(url, context, nextLoad) {
-    if (url.startsWith(sourceRoot) && url.endsWith('.ts')) return {
-      format: 'module', shortCircuit: true,
-      source: stripTypeScriptTypes(fs.readFileSync(fileURLToPath(url), 'utf8'), { mode: 'transform', sourceUrl: url }),
-    }
-    return nextLoad(url, context)
-  },
-})
+import { importChannelSource, installChannelSource } from './lib/channel-source.mjs'
+const hooks = installChannelSource()
 try {
-  const { toGenerateOptions } = await import('../vendor/channel-pack/src/openai-gateway/messages.ts')
-  const { toResponsesGenerateOptions } = await import('../vendor/channel-pack/src/openai-gateway/responses.ts')
+  const { toGenerateOptions } = await importChannelSource('openai-gateway/messages.ts')
+  const { toResponsesGenerateOptions } = await importChannelSource('openai-gateway/responses.ts')
   const signal = new AbortController().signal
   const chat = await toGenerateOptions({ model: 'test/model', messages: [
     { role: 'system', content: 'system one' }, { role: 'system', content: 'system two' },

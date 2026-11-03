@@ -12,30 +12,12 @@
  * 全程注入假依赖，不触网。
  */
 import assert from 'node:assert/strict'
-import fs from 'node:fs'
-import { registerHooks, stripTypeScriptTypes } from 'node:module'
-import { fileURLToPath } from 'node:url'
+import { importChannelSource, installChannelSource } from './lib/channel-source.mjs'
 
-const sourceRoot = new URL('../vendor/channel-pack/src/', import.meta.url).href
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (context.parentURL?.startsWith(sourceRoot) && specifier.startsWith('.') && specifier.endsWith('.js')) {
-      const target = new URL(specifier.slice(0, -3) + '.ts', context.parentURL)
-      if (fs.existsSync(target)) return { url: target.href, shortCircuit: true }
-    }
-    return nextResolve(specifier, context)
-  },
-  load(url, context, nextLoad) {
-    if (url.startsWith(sourceRoot) && url.endsWith('.ts')) return {
-      format: 'module', shortCircuit: true,
-      source: stripTypeScriptTypes(fs.readFileSync(fileURLToPath(url), 'utf8'), { mode: 'transform', sourceUrl: url }),
-    }
-    return nextLoad(url, context)
-  },
-})
+installChannelSource()
 
-const selection = await import('../vendor/channel-pack/src/trae-selection.ts')
-const { exponentialCooldownMs, DEFAULT_COOLDOWN_POLICY } = await import('../vendor/channel-pack/src/cooldown-backoff.ts')
+const selection = await importChannelSource('trae-selection.ts')
+const { exponentialCooldownMs, DEFAULT_COOLDOWN_POLICY } = await importChannelSource('cooldown-backoff.ts')
 
 const {
   TRAE_URGENT_WINDOW_MS,

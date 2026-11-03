@@ -4,14 +4,12 @@ import fs from 'node:fs'
 import http from 'node:http'
 import os from 'node:os'
 import path from 'node:path'
-import { registerHooks } from 'node:module'
 import { pathToFileURL } from 'node:url'
+import { installChannelSource } from './lib/channel-source.mjs'
 import { listenLoopback } from './lib/loopback-port.mjs'
 
-const kernel = new URL('./lib/channel-pack-kernel.mjs', import.meta.url).href
-const hooks = registerHooks({ resolve(specifier, context, next) {
-  return specifier.startsWith('@deepseek-ai/') ? { url: kernel, shortCircuit: true } : next(specifier, context)
-} })
+// 本套件装载的是打包产物（或 --pack 指定的文件），只需要宿主契约顶替
+const hooks = installChannelSource()
 const packAt = process.argv.indexOf('--pack')
 const pack = await import(packAt >= 0 ? pathToFileURL(path.resolve(process.argv[packAt + 1])).href : '../vendor/channel-pack/pack.js')
 const savedFetch = globalThis.fetch

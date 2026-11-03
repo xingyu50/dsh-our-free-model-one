@@ -21,37 +21,9 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { registerHooks } from 'node:module'
-import { fileURLToPath } from 'node:url'
+import { importChannelSource, installChannelSource } from './lib/channel-source.mjs'
 
-const sourceRoot = new URL('../vendor/channel-pack/src/', import.meta.url).href
-const kernel = new URL('./lib/channel-pack-kernel.mjs', import.meta.url).href
-const ts = (await import('typescript')).default
-
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (specifier.startsWith('@deepseek-ai/')) return { url: kernel, shortCircuit: true }
-    // 只给渠道包内部做 .js → .ts 解析，与 channel-registry-test.mjs 同款。
-    if (context.parentURL?.startsWith(sourceRoot) && specifier.endsWith('.js')) {
-      const url = new URL(specifier.replace(/\.js$/, '.ts'), context.parentURL).href
-      if (fs.existsSync(fileURLToPath(url))) return { url, shortCircuit: true }
-    }
-    return nextResolve(specifier, context)
-  },
-  load(url, context, nextLoad) {
-    if (url.startsWith(sourceRoot) && url.endsWith('.ts')) {
-      return {
-        format: 'module',
-        source: ts.transpileModule(fs.readFileSync(fileURLToPath(url), 'utf8'), {
-          compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-          fileName: fileURLToPath(url),
-        }).outputText,
-        shortCircuit: true,
-      }
-    }
-    return nextLoad(url, context)
-  },
-})
+installChannelSource()
 
 let checks = 0
 const check = (name, run) => {
@@ -83,7 +55,7 @@ function clientProviderIds() {
   return ids
 }
 
-const store = await import('../vendor/channel-pack/src/channel-pack-store.ts')
+const store = await importChannelSource('channel-pack-store.ts')
 
 /**
  * 一次真实的恢复：写一份只含 refs: 的 .credentials.yaml，让 FileStore 从中

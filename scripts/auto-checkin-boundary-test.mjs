@@ -13,45 +13,14 @@
  * 换日，然后走完一整天，断言当天到底有没有真的领到。
  */
 import assert from 'node:assert/strict'
-import fs from 'node:fs'
-import path from 'node:path'
-import { registerHooks } from 'node:module'
-import { fileURLToPath, pathToFileURL } from 'node:url'
+import { importChannelSource, installChannelSource } from './lib/channel-source.mjs'
 
-if (!process.execArgv.includes('--experimental-transform-types')) {
-  const { spawnSync } = await import('node:child_process')
-  const rerun = spawnSync(
-    process.execPath,
-    ['--experimental-transform-types', fileURLToPath(import.meta.url), ...process.argv.slice(2)],
-    { stdio: 'inherit' },
-  )
-  process.exit(rerun.status ?? 1)
-}
+// 转译口径与宿主替身（含 `Context`，`channel-pack-rpc.ts` 会连带引入 `account-pool.ts`）
+// 都由 channel-source.mjs 统一提供；不再需要 `--experimental-transform-types` 自我重启。
+installChannelSource()
 
-const root = path.join(fileURLToPath(new URL('..', import.meta.url)))
-const sourceRoot = pathToFileURL(path.join(root, 'vendor/channel-pack/src/')).href
-const kernel = pathToFileURL(path.join(root, 'scripts/lib/channel-pack-kernel.mjs')).href
-// `channel-pack-rpc.ts` 会连带引入 `account-pool.ts`，后者要 `Context` 这个具名导出。
-// 基础内核只提供运行时契约，这里按 channel-pack-test.mjs 的同款做法补一个。
-const cordisKernel = `data:text/javascript,${encodeURIComponent(`
-export * from ${JSON.stringify(kernel)}
-export { default } from ${JSON.stringify(kernel)}
-export class Context { constructor() { this.store = new Map() } provide() {} get() {} }
-`)}`;
-
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (specifier.startsWith('@deepseek-ai/')) return { url: cordisKernel, shortCircuit: true }
-    if (context.parentURL?.startsWith(sourceRoot) && specifier.endsWith('.js')) {
-      const url = new URL(specifier.replace(/\.js$/, '.ts'), context.parentURL).href
-      if (fs.existsSync(fileURLToPath(url))) return { url, shortCircuit: true }
-    }
-    return nextResolve(specifier, context)
-  },
-})
-
-const { createAutoCheckin } = await import(new URL('auto-checkin.ts', sourceRoot).href)
-const { computeClaimSummary } = await import(new URL('channel-pack-rpc.ts', sourceRoot).href)
+const { createAutoCheckin } = await importChannelSource('auto-checkin.ts')
+const { computeClaimSummary } = await importChannelSource('channel-pack-rpc.ts')
 
 const TODAY = '2026-10-28'
 

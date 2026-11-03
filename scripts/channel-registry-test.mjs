@@ -9,38 +9,9 @@
  * Run: node scripts/channel-registry-test.mjs
  */
 import assert from 'node:assert/strict'
-import fs from 'node:fs'
-import { registerHooks } from 'node:module'
-import { fileURLToPath } from 'node:url'
+import { importChannelSource, installChannelSource } from './lib/channel-source.mjs'
 
-const sourceRoot = new URL('../vendor/channel-pack/src/', import.meta.url).href
-const kernel = new URL('./lib/channel-pack-kernel.mjs', import.meta.url).href
-const ts = (await import('typescript')).default
-
-const hooks = registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (specifier.startsWith('@deepseek-ai/')) return { url: kernel, shortCircuit: true }
-    // 只给渠道包内部做 .js → .ts 解析，与 channel-pack-test.mjs 的 --source 同款。
-    if (context.parentURL?.startsWith(sourceRoot) && specifier.endsWith('.js')) {
-      const url = new URL(specifier.replace(/\.js$/, '.ts'), context.parentURL).href
-      if (fs.existsSync(fileURLToPath(url))) return { url, shortCircuit: true }
-    }
-    return nextResolve(specifier, context)
-  },
-  load(url, context, nextLoad) {
-    if (url.startsWith(sourceRoot) && url.endsWith('.ts')) {
-      return {
-        format: 'module',
-        source: ts.transpileModule(fs.readFileSync(fileURLToPath(url), 'utf8'), {
-          compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-          fileName: fileURLToPath(url),
-        }).outputText,
-        shortCircuit: true,
-      }
-    }
-    return nextLoad(url, context)
-  },
-})
+const hooks = installChannelSource()
 
 let checks = 0
 const check = (name, run) => {
@@ -54,7 +25,7 @@ const check = (name, run) => {
   }
 }
 
-const registry = await import('../vendor/channel-pack/src/channel-registry.ts')
+const registry = await importChannelSource('channel-registry.ts')
 
 /**
  * `mountChannels` 与 `stopChannels` 是 index.ts 唯一的装配入口 —— 它们存在，
@@ -135,7 +106,7 @@ check('stopChannels skips an auth that has no stop()', () => {
  * `createRaccoonChannel` 需要账号池，所以只验证它产出的 spec 合规 —— 不挂载
  * （挂载需要完整的宿主 ctx，由 channel-pack-test.mjs 覆盖）。
  */
-const { createRaccoonChannel } = await import('../vendor/channel-pack/src/channels/raccoon.ts')
+const { createRaccoonChannel } = await importChannelSource('channels/raccoon.ts')
 check('the migrated channel declares a usable id and namespace', () => {
   const spec = createRaccoonChannel({ pool: {} })
   assert.equal(spec.id, 'raccoon', 'id is the channel id')

@@ -6,8 +6,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { registerHooks } from 'node:module'
-import { fileURLToPath } from 'node:url'
+import { importChannelSource, installChannelSource } from './lib/channel-source.mjs'
 import { verifyChannelModelActions } from './channel-model-actions-test.mjs'
 import { verifyChannelCreditsUi } from './channel-credits-ui-test.mjs'
 import { verifyChannelCreditsRpc } from './channel-credits-rpc-test.mjs'
@@ -16,42 +15,22 @@ import { verifyChannelImagePricing } from './channel-image-pricing-test.mjs'
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'ofm-channel-pack-'))
 const kernel = new URL('./lib/channel-pack-kernel.mjs', import.meta.url).href
 const sourceMode = process.argv.includes('--source')
-const ts = sourceMode ? (await import('typescript')).default : undefined
+// 只在源码模式要真宿主的 BlockAssembler / invariant；这两个在装钩子**之前**解析，
+// 走的是真包。渠道源码随后 import 的 `@deepseek-ai/dsh-llm` 才落到下面的替身。
 const RealContext = sourceMode ? (await import('@deepseek-ai/cordis')).Context : undefined
 const RealBlockAssembler = sourceMode ? (await import('@deepseek-ai/dsh-llm')).BlockAssembler : undefined
 const realLlmInvariant = sourceMode ? await import('@deepseek-ai/dsh-llm/invariant') : undefined
-const sourceRoot = new URL('../vendor/channel-pack/src/', import.meta.url).href
 const llmKernel = `data:text/javascript,${encodeURIComponent(`
 export * from ${JSON.stringify(kernel)}
-export class LlmError extends Error {
-  constructor(message, code, options) { super(message, options); this.code = code; this.status = options?.status }
-}
 let nextMessage = 0
 export function createUserMessage(value) { return { id: 'fixture-message-' + ++nextMessage, ...value } }
 `)}`
-const hooks = registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (specifier === '@deepseek-ai/dsh-llm') return { url: llmKernel, shortCircuit: true }
-    if (specifier.startsWith('@deepseek-ai/')) return { url: kernel, shortCircuit: true }
-    if (sourceMode && context.parentURL?.startsWith(sourceRoot) && specifier.endsWith('.js')) {
-      const url = new URL(specifier.replace(/\.js$/, '.ts'), context.parentURL).href
-      if (fs.existsSync(fileURLToPath(url))) return { url, shortCircuit: true }
-    }
-    return nextResolve(specifier, context)
-  },
-  load(url, context, nextLoad) {
-    if (sourceMode && url.startsWith(sourceRoot) && url.endsWith('.ts')) {
-      let source = fs.readFileSync(fileURLToPath(url), 'utf8')
-      const name = url.slice(sourceRoot.length)
-      if (['lobsterai-adapter.ts'].includes(name)) source += '\nexport { serializeMessages }\n'
-      if (name === 'trae-adapter.ts') source += '\nexport { serializeTraeMessages as serializeMessages }\n'
-      return { format: 'module', source: ts.transpileModule(source, {
-        compilerOptions: { module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022 },
-        fileName: fileURLToPath(url),
-      }).outputText, shortCircuit: true }
-    }
-    return nextLoad(url, context)
-  },
+const hooks = installChannelSource({
+  aliases: { '@deepseek-ai/dsh-llm': llmKernel },
+  appendExports: sourceMode ? {
+    'lobsterai-adapter.ts': 'export { serializeMessages }',
+    'trae-adapter.ts': 'export { serializeTraeMessages as serializeMessages }',
+  } : {},
 })
 process.env.DSH_CHANNEL_PACK_STATE_DIR = scratch
 process.env.DSH_HOME = scratch
@@ -191,12 +170,8 @@ try {
    * 在 23:52 变绿、在 00:45 变红 —— 判据依赖运行时刻，与代码无关。真正的判据是「签到
    * 确实发生过」（下面那条 automaticClaims），ranToday 只在窗口外才成立。
    */
-  const msIntoUtc8Day = () => {
-    // 与 office-hour 无关：口径必须与 auto-checkin.ts 的 utc8MsIntoDay 一致（算术平移 +8h，
-    // 偏移量同 model-queue.ts 的 QODER_BILLING_UTC_OFFSET_MS），不用本机时区。
-    const shifted = Date.now() + 8 * 3_600_000
-    return ((shifted % 86_400_000) + 86_400_000) % 86_400_000
-  }
+  // 直接取生产算式：口径不再靠注释互相提醒，改 auto-checkin.ts 时这里自动跟随。
+  const { utc8MsIntoDay: msIntoUtc8Day } = await importChannelSource('auto-checkin.ts')
   if (msIntoUtc8Day() >= 30 * 60_000) {
     assert.equal(automatic.ranToday, true, 'automatic check-in recorded today')
   } else {
