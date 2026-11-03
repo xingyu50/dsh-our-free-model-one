@@ -187,7 +187,7 @@ if (dryRun) {
   process.exit(0)
 }
 
-process.stdout.write('\n▶ 启动独立本地服务（Ctrl+C 退出）\n')
+process.stdout.write('\n▶ 启动独立本地服务\n')
 const child = spawn(process.execPath, [CLI, ...forwarded], { stdio: 'inherit', cwd: ROOT })
 child.on('exit', (code, signal) => {
   process.exit(signal ? 1 : (code ?? 0))

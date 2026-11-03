@@ -44,7 +44,7 @@ async function main() {
   }
   process.once('SIGINT', shutdown)
   process.once('SIGTERM', shutdown)
-  process.stdout.write(`${service.product} ${service.version}\n管理页面（10 分钟内一次性登录）：${service.managementUrl}\nAPI：${service.url}/v1\nAPI Key 保存在：${service.keyFile}\n`)
+  process.stdout.write(`管理页面：${service.managementUrl}\n`)
   if (service.lan.running) {
     process.stdout.write(`LAN API：${service.lan.baseUrls.join(', ') || `端口 ${service.lan.port}`}\nLAN Key：请在本机管理接口中查看（独立于本机 API Key）\n`)
   } else if (service.lan.error) process.stderr.write(`${service.lan.error}\n`)

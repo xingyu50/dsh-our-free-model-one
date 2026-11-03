@@ -165,10 +165,12 @@ async function start() {
   service = { child, exit, errors: () => errors }
   for (let attempt = 0; attempt < 150; attempt++) {
     if (child.exitCode !== null) throw new Error(`Packaged service exited (${child.exitCode}); ${errors.slice(-1500)}`)
-    const match = output.match(/API：http:\/\/127\.0\.0\.1:(\d+)\/v1/)
+    // Readiness is the printed management URL: it carries both the port and the
+    // one-time login token, so one match yields the API base and the console link.
+    const match = output.match(/http:\/\/127\.0\.0\.1:(\d+)\/#login=[A-Za-z0-9_-]+/)
     if (match) {
       service.url = `http://127.0.0.1:${match[1]}`
-      service.managementUrl = output.match(/http:\/\/127\.0\.0\.1:\d+\/#login=[A-Za-z0-9_-]+/)?.[0]
+      service.managementUrl = match[0]
       return service
     }
     await new Promise(resolve => setTimeout(resolve, 100))
