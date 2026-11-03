@@ -15,6 +15,7 @@ const dataDir = path.join(scratch, 'app')
 const dshHome = path.join(scratch, 'dsh')
 const otherDir = path.join(scratch, 'other')
 const warnings = []
+const notices = []
 const requests = []
 let service, other
 let checks = 0, failures = 0
@@ -167,7 +168,7 @@ const rpc = async (method, payload = {}) => {
   return value.value
 }
 try {
-  service = await startStandalone({ dataDir, port: 0, refresh: false, logger: { warn: message => warnings.push(message), info() {} } })
+  service = await startStandalone({ dataDir, port: 0, refresh: false, logger: { warn: message => warnings.push(message), info: message => notices.push(message) } })
   await service.ready
   key = JSON.parse(fs.readFileSync(service.keyFile)).forwardKey
   await check('十三个真实渠道注册，独立目录、统一模型目录和机读能力可用', async () => {
@@ -282,6 +283,22 @@ try {
     assert.equal(remote.response.status, 400)
     assert.equal(requests.length, before, '远程图片不得触发抓取或推理请求')
     await assert.rejects(attachments.saveImage({ data: Buffer.from('not-an-image'), mediaType: 'image/png' }))
+  })
+  await check('思考档位无法表达时同一情况只记一次日志，换档位照记', async () => {
+    const before = notices.length
+    for (let index = 0; index < 3; index++) {
+      const reply = await api('/v1/chat/completions', { model: 'loomy/fixture-free', reasoning_effort: 'none', messages: [{ role: 'user', content: `effort fixture ${index}` }] })
+      assert.equal(reply.response.status, 200, JSON.stringify(reply.value))
+    }
+    // 替身上游只声明 low/high，故 none 属「本模型没有关闭档」→ 不下发、记一次。
+    assert.deepEqual(notices.slice(before), ['loomy/fixture-free：思考档位 none 使用模型默认（同类提示只记一次）'])
+    // 去重的是重复，不是事实：换了档位（medium → 就近 high）仍要看得见。
+    const mapped = await api('/v1/chat/completions', { model: 'loomy/fixture-free', reasoning_effort: 'medium', messages: [{ role: 'user', content: 'effort mapped' }] })
+    assert.equal(mapped.response.status, 200, JSON.stringify(mapped.value))
+    assert.deepEqual(notices.slice(before), [
+      'loomy/fixture-free：思考档位 none 使用模型默认（同类提示只记一次）',
+      'loomy/fixture-free：思考档位 medium 映射为 high（同类提示只记一次）',
+    ])
   })
   await check('模型开关、供应商开关与永久积分锁定保留业务且立即阻止调用', async () => {
     await rpc('credits.permanentLock', { provider: 'loomy', locked: true })

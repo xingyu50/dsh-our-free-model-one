@@ -1,6 +1,7 @@
 import { parentPort, workerData } from 'node:worker_threads'
 import { createCredentials } from './credentials.mjs'
 import { attachments } from './images.mjs'
+import { createEffortNoticeLog } from './notices.mjs'
 import { toChatMessages, toToolDefs } from '../../../src/messages.js'
 import {
   apply, toGenerateOptions, toResponsesGenerateOptions, normalizeReasoningEffort,
@@ -15,6 +16,7 @@ const controllers = new Map()
 let closed = false
 const send = message => parentPort.postMessage(message)
 const logger = Object.fromEntries(['info', 'warn', 'error'].map(level => [level, message => send({ type: 'log', level, message: String(message) })]))
+const logEffortNotice = createEffortNoticeLog(message => logger.info(message))
 const credentials = createCredentials(workerData.dataDir)
 const ctx = {
   platform: { channelHome: workerData.dataDir }, credentials, logger, attachments,
@@ -114,7 +116,7 @@ async function complete(request, id, signal) {
   const body = { ...(request.responsesBody ?? request.openAi ?? harnessBody(request)), model: request.model }
   const resolved = await ctx.llm.resolveModel(provider, model, signal)
   const effort = normalizeReasoningEffort(request.responses ? responsesReasoningEffort(body) : body.reasoning_effort, resolved, provider, model,
-    notice => logger.info(`${request.model}：思考档位 ${notice.requested} ${notice.applied ? `映射为 ${notice.applied}` : '使用模型默认'}`))
+    notice => logEffortNotice(request.model, notice))
   const requested = request.responses ? responsesMaxOutputTokens(body) : body.max_completion_tokens ?? body.max_tokens
   const maxTokens = typeof requested === 'number' ? normalizeMaxTokens(requested, provider, model) : undefined
   const convert = request.responses ? toResponsesGenerateOptions : toGenerateOptions

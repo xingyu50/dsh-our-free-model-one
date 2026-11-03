@@ -30,7 +30,7 @@ const sourceFiles = [
   'packages/standalone/providers.mjs',
   'packages/standalone/library.mjs',
   'packages/standalone/routing.mjs',
-  ...['business', 'contracts', 'credentials', 'images', 'runtime', 'worker']
+  ...['business', 'contracts', 'credentials', 'images', 'notices', 'runtime', 'worker']
     .map(name => `packages/standalone/channels/${name}.mjs`),
   'packages/standalone/web/index.html',
   'packages/standalone/web/assets.json',
