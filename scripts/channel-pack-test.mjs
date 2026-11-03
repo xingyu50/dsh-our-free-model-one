@@ -183,13 +183,13 @@ try {
   }
   assert.equal(automatic.running, false, 'the automatic run finished')
   /**
-   * ⚠️ 日界后第一个小时（UTC+8 00:00–01:00）**不能**断言 ranToday（2026-11-03 修）。
+   * ⚠️ 日界后 30 分钟（UTC+8 00:00–00:30）**不能**断言 ranToday（2026-11-03 修）。
    *
-   * `performRun` 在这段时间刻意不写 `lastDate`（见 vendor/channel-pack/src/auto-checkin.ts:595-613）：
-   * 那一刻各渠道回答的还是昨天的记录，记成今天会让下一轮直接睡到次日日界、整天漏签。
-   * 本用例此前无条件断言 `ranToday === true`，于是同一个 commit 在 23:52 变绿、在 00:45
-   * 变红 —— 判据依赖运行时刻，与代码无关。真正的判据是「签到确实发生过」（下面那条
-   * automaticClaims），ranToday 只在窗口外才成立。
+   * `performRun` 在这段时间刻意不写 `lastDate`（见 vendor/channel-pack/src/auto-checkin.ts
+   * 的 `DAY_START_SKEW_MS`）：那一刻各渠道回答的还是昨天的记录，记成今天会让下一轮直接
+   * 睡到次日日界、整天漏签。本用例此前无条件断言 `ranToday === true`，于是同一个 commit
+   * 在 23:52 变绿、在 00:45 变红 —— 判据依赖运行时刻，与代码无关。真正的判据是「签到
+   * 确实发生过」（下面那条 automaticClaims），ranToday 只在窗口外才成立。
    */
   const msIntoUtc8Day = () => {
     // 与 office-hour 无关：口径必须与 auto-checkin.ts 的 utc8MsIntoDay 一致（算术平移 +8h，
@@ -197,7 +197,7 @@ try {
     const shifted = Date.now() + 8 * 3_600_000
     return ((shifted % 86_400_000) + 86_400_000) % 86_400_000
   }
-  if (msIntoUtc8Day() >= 3_600_000) {
+  if (msIntoUtc8Day() >= 30 * 60_000) {
     assert.equal(automatic.ranToday, true, 'automatic check-in recorded today')
   } else {
     assert.equal(automatic.ranToday, false, 'inside the day-boundary window the run deliberately does not record today')

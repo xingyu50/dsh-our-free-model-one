@@ -145,12 +145,31 @@ auto.start()
 await drain()
 assert.equal(doc.lastDate, '2026-10-27', '启动轮不会改写昨天')
 
-// ── 跨过日界：armNext 会正好排在 00:00:00.000 ──
+// ── 跨过日界：armNext 排在「日界 + 30 分钟」，既不踩在 00:00:00.000 上，也不在那一刻动手 ──
+const beforeBoundary = { lastDate: doc.lastDate, lastResult: doc.lastResult, lastAt: doc.lastAt }
 now = Date.parse('2026-10-28T00:00:00.900+08:00')
 await drain()
 
-// 此刻引擎做了什么？
+const scheduled = timers.filter(timer => !timer.cancelled && !timer.fired)
+assert.equal(scheduled.length, 1, '跨天之后只留一轮待执行')
+assert.equal(
+  scheduled[0].at, Date.parse('2026-10-28T00:30:00+08:00'),
+  '跨天那一轮排在日界 + 30 分钟，而不是 00:00:00.000',
+)
+assert.deepEqual(
+  { lastDate: doc.lastDate, lastResult: doc.lastResult, lastAt: doc.lastAt }, beforeBoundary,
+  '日界那一刻不动手：上游此时按昨天结算，跑了也只会把昨天记成今天',
+)
+assert.equal(upstreamClaimCalls, 0, '00:00:00.900 不发任何上游请求')
+
+// 日界那一刻引擎做了什么？（留给最终输出的对照）
 const boundaryRound = { lastDate: doc.lastDate, lastResult: doc.lastResult, lastAt: doc.lastAt }
+
+// ── 到点：日界 + 30 分钟那一轮。上游此时已换日，应当真的领到 ──
+now = Date.parse('2026-10-28T00:30:00+08:00')
+await drain()
+assert.equal(upstreamClaimCalls, 4, '日界 + 30 分钟那一轮才是真正领取的地方')
+assert.equal(doc.lastDate, TODAY, '这一轮可以记账：上游已经按今天结算')
 
 // ── 走完当天剩下的时间（每小时推一次，让重试链有机会跑） ──
 for (let hour = 1; hour <= 23; hour += 1) {
@@ -175,3 +194,71 @@ assert.deepEqual(
 assert.equal(doc.lastDate, TODAY, '当天最终必须记入')
 assert.ok(!doc.lastResult.includes('已领'), `当天结果不能只是「已领」：${doc.lastResult}`)
 console.log('ok  日界那一轮不会把昨天当成今天，当天额度照常自动签到')
+
+// ══ 场景二：用户在 00:10 才打开开关（不是靠排定链触发） ══
+//
+// setEnabled(true) 会立刻跑一轮 —— 这条路径完全绕开 armNext。若只改排定的
+// 时刻、不改闸，这一轮仍会把昨天记成今天，用户照样整天漏签。所以「窗口内不跑」
+// 必须是一道独立的闸，且被拦下之后下一次要试**窗口刚过**的那一刻（不是 01:10）。
+{
+  const timers2 = []
+  let doc2 = {
+    enabled: false,
+    lastDate: '2026-10-27',
+    lastResult: '',
+    lastAt: 0,
+    channels: [],
+    dismissedRunAt: 0,
+  }
+  const store2 = {
+    kind: 'memory',
+    load: () => ({ ...doc2 }),
+    save: async next => { doc2 = { ...next } },
+  }
+  // 把上游状态倒回「今天还没领」：场景一已经把四个账号领掉，共用一份上游状态，
+  // 不复位的话场景二在 00:30 只会拿到 already-claimed。
+  for (const id of claimedDays.keys()) claimedDays.set(id, '2026-10-27')
+  const before = upstreamClaimCalls
+  const auto2 = createAutoCheckin({
+    store: store2,
+    listProviderIds: async () => ['buddy', 'trae'],
+    claim: provider => claimAll(provider),
+    now: () => now,
+    delayMs: 0,
+    schedule: (fn, ms) => {
+      const timer = { fn, ms, at: now + ms, fired: false, cancelled: false, cancel() { this.cancelled = true } }
+      timers2.push(timer)
+      return timer
+    },
+    warn: () => {},
+  })
+  const drain2 = async () => {
+    for (let guard = 0; guard < 16; guard += 1) {
+      const due = timers2.filter(timer => !timer.cancelled && !timer.fired && timer.at <= now)
+      if (due.length === 0) return
+      for (const timer of due) { timer.fired = true; timer.fn() }
+      await new Promise(resolve => setImmediate(resolve))
+    }
+    throw new Error('场景二：排定链没有收敛')
+  }
+
+  now = Date.parse('2026-10-28T00:10:00+08:00')
+  auto2.start()
+  await auto2.setEnabled(true)
+  await drain2()
+  assert.equal(upstreamClaimCalls - before, 0, '00:10 打开开关不发上游请求')
+  assert.equal(doc2.lastDate, '2026-10-27', '00:10 那一轮不记账')
+  const pending2 = timers2.filter(timer => !timer.cancelled && !timer.fired)
+  assert.equal(pending2.length, 1, '场景二：只留一轮待执行')
+  assert.equal(
+    pending2[0].at, Date.parse('2026-10-28T00:30:00+08:00'),
+    '被窗口拦下后，下一次试窗口刚过的 00:30，而不是 01:10',
+  )
+
+  now = Date.parse('2026-10-28T00:30:00+08:00')
+  await drain2()
+  assert.equal(upstreamClaimCalls - before, 4, '窗口过去后补上领取')
+  assert.equal(doc2.lastDate, TODAY, '窗口过去后才记账')
+  console.log('ok  00:10 打开开关：窗口内不跑不记账，00:30 补上')
+}
+

@@ -106,7 +106,7 @@ try {
       )
       if (!dryRun) process.exit(1)
     } else {
-      process.stdout.write('· 检测到陈旧锁（pid ' + owner.pid + ' 已退出），启动时自动回收。\n')
+      process.stdout.write('· 回收旧锁：PID ' + owner.pid + '\n')
     }
   }
 } catch (readerError) {

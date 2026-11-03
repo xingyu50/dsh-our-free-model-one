@@ -23,7 +23,8 @@
  *    若抢在续期之前签到，过期凭据会让整轮变成失败。
  * 即便如此仍可能抢在续期完成前（多账号时续期本身就要几秒到几十秒），故**再加
  * 一道保险**：整轮跑完**没有任何一条能证明「今天已被处理」**时**不记日期**，
- * 一小时后自动重试（见 `shouldMarkToday` 与 `RETRY_MS`）。延迟可用
+ * 一小时后自动重试（见 `shouldMarkToday` 与 `RETRY_MS`）。另有 `DAY_START_SKEW_MS`：
+ * 日界后 30 分钟内上游仍按昨天结算，那一轮既不跑也不记账（见那里的说明）。延迟可用
  * `DSH_CHANNEL_PACK_AUTO_CHECKIN_DELAY_MS` 覆盖，`0` 合法（表示立刻跑，单测用它）。
  *
  * ## 排定链
@@ -31,6 +32,7 @@
  * `start()` 只排**首轮**；每轮结束由 `cycle()` 调 `armNext()` 重排下一轮，
  * 所以 dsh 进程跨天不重启也能在次日自动跑（真实缺陷，2026-10-26：原实现
  * `start()` 排完一轮就不再重排，进程活 11 天期间从第二天起再没自动签到过）。
+ * 跨天那一轮排在**日界 + `DAY_START_SKEW_MS`**，不踩在 00:00:00.000 上。
  *
  * ## 什么算「今天已被处理」
  *
@@ -192,6 +194,16 @@ export function utc8MsIntoDay(nowMs: number = Date.now()): number {
  * 那天的额度会被整天漏领。改成「一小时后自己重试」，直到记入或跨过日界。
  */
 const RETRY_MS = 3_600_000
+
+/**
+ * 日界之后多久才开始认「今天」（毫秒）。
+ *
+ * ⚠️ 各渠道的每日额度由**服务端**换日，不跟着本机闹钟走：踩在 00:00:00.000 上
+ * 跑的那一轮，上游回答的还是昨天的记录（2026-10-28 线上取证）。所以真正的那一轮
+ * 排在「日界 + 这一段」而不是踩在日界上；同一判据也用在 `performRun` 的闸上，
+ * 免得别的路径（手动打开开关、按小时重试、启动轮）抢在窗口里把昨天记成今天。
+ */
+const DAY_START_SKEW_MS = 30 * 60_000
 
 /** 环境变量：启动后延迟多久再尝试自动签到（毫秒）。 */
 export const DSH_CHANNEL_PACK_AUTO_CHECKIN_DELAY_MS = 'DSH_CHANNEL_PACK_AUTO_CHECKIN_DELAY_MS'
@@ -602,12 +614,13 @@ export function createAutoCheckin(deps: AutoCheckinDeps): AutoCheckin {
     // 记成「今天已跑」之后 `armNext` 直接睡到次日日界 ⇒ 当天额度整天漏领，
     // 用户看到的就是「自动签到开关开着，但没有自动签到」。
     //
-    // 判据取「距日界不足 RETRY_MS」，而不是给每个渠道配一张刷新时刻表
-    //（那必然漂移，且渠道自己也没公布）：重试链本来就是每小时一轮，拒绝记账
-    // 的代价只是推迟到 01:00 那轮重试，而误记的代价是整天空转。
-    if (utc8MsIntoDay(now()) < RETRY_MS) {
+    // 判据取「距日界不足 DAY_START_SKEW_MS」，而不是给每个渠道配一张刷新时刻表
+    //（那必然漂移，且渠道自己也没公布）。正常排定已把跨天那一轮放在日界 + 30 分钟，
+    // 这道闸拦的是**别的路径**：用户在窗口里手动打开开关、按小时的重试链、启动轮——
+    // 它们都可能在 00:0x 触发，记成今天就等于把当天额度整天让给对方。
+    if (utc8MsIntoDay(now()) < DAY_START_SKEW_MS) {
       deps.warn?.(
-        `[channel-pack] 自动签到未记入今日（刚过日界，${RETRY_MS / 60_000} 分钟后重试）：${describeRun(totals)}`,
+        `[channel-pack] 自动签到未记入今日（日界后 ${DAY_START_SKEW_MS / 60_000} 分钟内上游仍按昨天结算）：${describeRun(totals)}`,
       )
       return
     }
@@ -659,6 +672,14 @@ export function createAutoCheckin(deps: AutoCheckinDeps): AutoCheckin {
       deps.warn?.(`[channel-pack] 自动签到 SKIP：今天（${doc.lastDate}）已记入，等待下一个日界`)
       return Promise.resolve()
     }
+    // 日界后 30 分钟内上游还没换日：此刻跑只会拿昨天的记录回来，白发一轮请求
+    // （反风控口径下这是「渠道数 × 账号数」次串行请求）。直接跳过，见
+    // `DAY_START_SKEW_MS`；`performRun` 里还留着同一判据作为第二道。
+    const intoDay = utc8MsIntoDay(now())
+    if (intoDay < DAY_START_SKEW_MS) {
+      deps.warn?.(`[channel-pack] 自动签到 SKIP：日界后 ${DAY_START_SKEW_MS / 60_000} 分钟内上游仍按昨天结算，${Math.ceil((DAY_START_SKEW_MS - intoDay) / 60_000)} 分钟后再试`)
+      return Promise.resolve()
+    }
     running = true
     const task = performRun().catch((error: unknown) => {
       deps.warn?.(`[channel-pack] 自动签到异常: ${String(error)}`)
@@ -671,14 +692,22 @@ export function createAutoCheckin(deps: AutoCheckinDeps): AutoCheckin {
   }
 
   /**
-   * 排定下一轮：今天已经记过 ⇒ 睡到下一个 UTC+8 日界；还没记过 ⇒ 一小时后重试
-   * （理由见 `RETRY_MS`）。开关关着时只保留日界那一次唤醒，不按小时空转。
+   * 排定下一轮：今天已经记过 ⇒ 睡到「下一个 UTC+8 日界 + `DAY_START_SKEW_MS`」；
+   * 还没记过 ⇒ 一小时后重试，但不超过那个时刻（理由见 `RETRY_MS`、`DAY_START_SKEW_MS`）。
+   * 开关关着时只保留日界那一次唤醒，不按小时空转。
    */
   function armNext(): void {
+    const current = now()
     // 复用 `nextUtc8DayStartMs`：日界归服务端，口径必须与 `today()` 一致。
-    const toBoundary = Math.max(1, nextUtc8DayStartMs(now()) - now())
+    // ⚠️ 不踩在日界上：那一刻上游还按「昨天」回答，跑一轮只会白发请求（见
+    // `DAY_START_SKEW_MS`）。`Math.max(1, …)` 防的是「偏移已经过去」时的忙循环。
+    const toDayStart = Math.max(1, nextUtc8DayStartMs(current) + DAY_START_SKEW_MS - current)
+    // 还在窗口里（例如 00:10 启动的那一轮被闸拦下）⇒ 下一次就试窗口刚过的那一刻，
+    // 而不是从自己的时刻起再等一小时 —— 否则当天第一次真正领取会被推迟到 01:10。
+    const intoDay = utc8MsIntoDay(current)
+    const toWindowEnd = intoDay < DAY_START_SKEW_MS ? DAY_START_SKEW_MS - intoDay : RETRY_MS
     const marked = doc.lastDate !== '' && doc.lastDate === today()
-    const ms = doc.enabled && !marked ? Math.min(RETRY_MS, toBoundary) : toBoundary
+    const ms = doc.enabled && !marked ? Math.min(toWindowEnd, toDayStart) : toDayStart
     pending = (deps.schedule ?? defaultSchedule)(() => { void cycle() }, ms)
   }
 

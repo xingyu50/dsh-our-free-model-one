@@ -57624,6 +57624,7 @@ function utc8MsIntoDay(nowMs = Date.now()) {
   return (shifted % 864e5 + 864e5) % 864e5;
 }
 var RETRY_MS = 36e5;
+var DAY_START_SKEW_MS = 30 * 6e4;
 var DSH_CHANNEL_PACK_AUTO_CHECKIN_DELAY_MS = "DSH_CHANNEL_PACK_AUTO_CHECKIN_DELAY_MS";
 var AUTO_CHECKIN_DELAY_MS = 3e4;
 function autoCheckinDelayMs(env = process.env) {
@@ -57798,9 +57799,9 @@ function createAutoCheckin(deps) {
       totals.coversToday += summary.coversToday ?? summary.claimed + summary.alreadyClaimed;
       channels.push({ provider, text: describeChannel(summary) });
     }
-    if (utc8MsIntoDay(now()) < RETRY_MS) {
+    if (utc8MsIntoDay(now()) < DAY_START_SKEW_MS) {
       deps.warn?.(
-        `[channel-pack] \u81EA\u52A8\u7B7E\u5230\u672A\u8BB0\u5165\u4ECA\u65E5\uFF08\u521A\u8FC7\u65E5\u754C\uFF0C${RETRY_MS / 6e4} \u5206\u949F\u540E\u91CD\u8BD5\uFF09\uFF1A${describeRun(totals)}`
+        `[channel-pack] \u81EA\u52A8\u7B7E\u5230\u672A\u8BB0\u5165\u4ECA\u65E5\uFF08\u65E5\u754C\u540E ${DAY_START_SKEW_MS / 6e4} \u5206\u949F\u5185\u4E0A\u6E38\u4ECD\u6309\u6628\u5929\u7ED3\u7B97\uFF09\uFF1A${describeRun(totals)}`
       );
       return;
     }
@@ -57837,6 +57838,11 @@ function createAutoCheckin(deps) {
       deps.warn?.(`[channel-pack] \u81EA\u52A8\u7B7E\u5230 SKIP\uFF1A\u4ECA\u5929\uFF08${doc.lastDate}\uFF09\u5DF2\u8BB0\u5165\uFF0C\u7B49\u5F85\u4E0B\u4E00\u4E2A\u65E5\u754C`);
       return Promise.resolve();
     }
+    const intoDay = utc8MsIntoDay(now());
+    if (intoDay < DAY_START_SKEW_MS) {
+      deps.warn?.(`[channel-pack] \u81EA\u52A8\u7B7E\u5230 SKIP\uFF1A\u65E5\u754C\u540E ${DAY_START_SKEW_MS / 6e4} \u5206\u949F\u5185\u4E0A\u6E38\u4ECD\u6309\u6628\u5929\u7ED3\u7B97\uFF0C${Math.ceil((DAY_START_SKEW_MS - intoDay) / 6e4)} \u5206\u949F\u540E\u518D\u8BD5`);
+      return Promise.resolve();
+    }
     running2 = true;
     const task = performRun().catch((error) => {
       deps.warn?.(`[channel-pack] \u81EA\u52A8\u7B7E\u5230\u5F02\u5E38: ${String(error)}`);
@@ -57848,9 +57854,12 @@ function createAutoCheckin(deps) {
     return task;
   }
   function armNext() {
-    const toBoundary = Math.max(1, nextUtc8DayStartMs(now()) - now());
+    const current = now();
+    const toDayStart = Math.max(1, nextUtc8DayStartMs(current) + DAY_START_SKEW_MS - current);
+    const intoDay = utc8MsIntoDay(current);
+    const toWindowEnd = intoDay < DAY_START_SKEW_MS ? DAY_START_SKEW_MS - intoDay : RETRY_MS;
     const marked = doc.lastDate !== "" && doc.lastDate === today();
-    const ms = doc.enabled && !marked ? Math.min(RETRY_MS, toBoundary) : toBoundary;
+    const ms = doc.enabled && !marked ? Math.min(toWindowEnd, toDayStart) : toDayStart;
     pending = (deps.schedule ?? defaultSchedule)(() => {
       void cycle();
     }, ms);
