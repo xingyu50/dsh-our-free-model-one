@@ -107,12 +107,135 @@ check('stopChannels skips an auth that has no stop()', () => {
  * （挂载需要完整的宿主 ctx，由 channel-pack-test.mjs 覆盖）。
  */
 const { createRaccoonChannel } = await importChannelSource('channels/raccoon.ts')
+const { createCodeArtsChannel } = await importChannelSource('channels/codearts.ts')
+const { createBuddyChannel, createWorkBuddyChannel } = await importChannelSource('channels/buddy.ts')
+const { createLobsteraiChannel } = await importChannelSource('channels/lobsterai.ts')
+const { createQoderChannel, createQoderCnChannel } = await importChannelSource('channels/qoder.ts')
+const { createTraeChannel } = await importChannelSource('channels/trae.ts')
+const { createClineChannel } = await importChannelSource('channels/cline.ts')
+const { createLoomyChannel } = await importChannelSource('channels/loomy.ts')
+const { createMinimaxChannel } = await importChannelSource('channels/minimax.ts')
+const { createGeminiChannel } = await importChannelSource('channels/gemini.ts')
+const { createZcodeChannel } = await importChannelSource('channels/zcode.ts')
+const { createOpencodeChannel } = await importChannelSource('channels/opencode.ts')
+
+/** 工厂只读 deps，不碰池；空对象足够造出 spec 形状。 */
+const emptyPool = {}
+/** 造 spec 时不会被调用，只为满足必填的 fetcher 形参。 */
+const noFetch = () => Promise.reject(new Error('channel-registry-test: fetch must not be called'))
 check('the migrated channel declares a usable id and namespace', () => {
   const spec = createRaccoonChannel({ pool: {} })
   assert.equal(spec.id, 'raccoon', 'id is the channel id')
   assert.equal(spec.namespace, 'llm-raccoon', 'namespace keeps the llm- prefix')
   assert.equal(typeof spec.createAuth, 'function', 'creates its own auth')
   assert.equal(typeof spec.registerLlm, 'function', 'registers its own adapter')
+})
+
+
+/**
+ * 十三家渠道的 spec 全表：id 与 namespace 逐项钉死。
+ *
+ * 这张表是 index.ts 的装配清单本身 —— 少一家、namespace 拼错，设置页就少
+ * 一个渠道且不会有任何运行期报错（只在设置页静默消失）。所以这里按名字
+ * 断言，而不是断言「数量是 13」。
+ */
+const factories = {
+  codearts: () => createCodeArtsChannel({ pool: emptyPool }),
+  buddy: () => createBuddyChannel({ pool: emptyPool }),
+  workbuddy: () => createWorkBuddyChannel({ pool: emptyPool }),
+  lobsterai: () => createLobsteraiChannel({ pool: emptyPool }),
+  qoder: () => createQoderChannel({ pool: emptyPool }),
+  qodercn: () => createQoderCnChannel({ pool: emptyPool }),
+  trae: () => createTraeChannel({ pool: emptyPool, fetcher: noFetch }),
+  cline: () => createClineChannel({ pool: emptyPool, fetcher: noFetch }),
+  loomy: () => createLoomyChannel({ pool: emptyPool }),
+  raccoon: () => createRaccoonChannel({ pool: emptyPool }),
+  minimax: () => createMinimaxChannel({ pool: emptyPool }),
+  gemini: () => createGeminiChannel({ pool: emptyPool, fetcher: noFetch }),
+  zcode: () => createZcodeChannel({ pool: emptyPool }),
+}
+check('the migrated channels all declare an id and a namespace', () => {
+  for (const [id, make] of Object.entries(factories)) {
+    const spec = make()
+    assert.equal(spec.id, id, `${id}: id is the channel id`)
+    assert.equal(spec.namespace, `llm-${id}`, `${id}: namespace keeps the llm- prefix`)
+  }
+})
+
+check('only opencode has no namespace', () => {
+  const spec = createOpencodeChannel({ pool: emptyPool })
+  assert.equal(spec.id, 'opencode', 'opencode id')
+  assert.equal(spec.namespace, undefined, 'opencode never registers a legacy settings namespace')
+})
+
+/**
+ * RPC 的 auths 键：十三个键里只有 qodercn 与渠道 id 不同名。
+ *
+ * `ChannelPackAuths` 的形参写的是驼峰 `qoderCn`（历史命名），而渠道 id 是全
+ * 小写 `qodercn`。这张表是 `index.ts` 建 auths 对象的唯一依据，写错一个键
+ * 就是该渠道 13 个 RPC 方法全部报 unsupported。
+ */
+check('rpcAuthKey differs from the channel id only for qodercn', () => {
+  const keys = Object.entries(factories).map(([id, make]) => [id, make().rpcAuthKey ?? id])
+  assert.deepEqual(
+    keys, [
+      ['codearts', 'codearts'], ['buddy', 'buddy'], ['workbuddy', 'workbuddy'],
+      ['lobsterai', 'lobsterai'], ['qoder', 'qoder'], ['qodercn', 'qoderCn'],
+      ['trae', 'trae'], ['cline', 'cline'], ['loomy', 'loomy'], ['raccoon', 'raccoon'],
+      ['minimax', 'minimax'], ['gemini', 'gemini'], ['zcode', 'zcode'],
+    ],
+    'qodercn is the only camel-cased rpc key',
+  )
+})
+
+/**
+ * afterMount 抛错必须被吞掉并留日志。
+ *
+ * 四段昵称修补原本散在 index.ts 末尾的 fire-and-forget 里，其中一个失败时
+ * 只会 console 一行；搬进注册表后如果异常冒出来，就会让**后面所有渠道**都
+ * 装不上（raccoon/trae 在 gemini 之后）。
+ */
+check('mountChannels swallows an afterMount failure and warns', () => {
+  const warnings = []
+  const spec = {
+    id: 'boom',
+    namespace: 'llm-boom',
+    createAuth: () => ({}),
+    registerLlm: () => ({ listAllModels: () => [] }),
+    afterMount: () => { throw new Error('nickname repair failed') },
+  }
+  const runtimes = registry.mountChannels({ logger: { warn: m => warnings.push(m) } }, host, [spec])
+  assert.equal(runtimes.length, 1, 'the failing channel is still mounted')
+  assert.equal(warnings.length, 1, 'exactly one warning')
+  assert.match(warnings[0], /boom/, 'the warning names the channel')
+  assert.match(warnings[0], /nickname repair failed/, 'the warning carries the reason')
+})
+
+/**
+ * dispose 与 auth.stop() 一样只跑一次：两个 ctx.effect 都可能执行卸载。
+ */
+check('dispose runs once even when unmount happens twice', () => {
+  let disposed = 0
+  const spec = {
+    id: 'disposable',
+    createAuth: () => ({}),
+    registerLlm: () => ({ listAllModels: () => [] }),
+    dispose: () => { disposed += 1 },
+  }
+  const runtimes = registry.mountChannels({}, host, [spec])
+  registry.stopChannels(runtimes)
+  registry.stopChannels(runtimes)
+  assert.equal(disposed, 1, 'dispose is idempotent with auth.stop()')
+})
+
+check('a failing dispose does not upset the remaining channels', () => {
+  let laterDisposed = 0
+  const runtimes = [
+    { spec: { id: 'bad', dispose: () => { throw new Error('browser already closed') } }, auth: {}, adapter: { listAllModels: () => [] } },
+    { spec: { id: 'good', dispose: () => { laterDisposed += 1 } }, auth: {}, adapter: { listAllModels: () => [] } },
+  ]
+  assert.doesNotThrow(() => registry.stopChannels(runtimes))
+  assert.equal(laterDisposed, 1, 'the next channel still gets cleaned up')
 })
 
 console.log(`channel-registry: ${checks} checks passed`)

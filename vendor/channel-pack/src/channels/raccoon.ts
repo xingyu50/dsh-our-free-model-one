@@ -19,6 +19,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis'
 import { RaccoonAuth } from '../raccoon-auth.js'
+import { buildRaccoonNickname } from '../channel-pack-rpc.js'
 import { registerRaccoonLlm } from '../raccoon-adapter.js'
 import { RACCOON } from '../raccoon-product.js'
 import type { RaccoonCredential } from '../raccoon.js'
@@ -39,7 +40,10 @@ export interface RaccoonChannelAuth extends ChannelAuthInstance {
   refresh(): Promise<void>
   fetchModels(pool?: AccountPool): Promise<RaccoonRemoteModel[]>
   refreshAll(pool: AccountPool): Promise<void>
-  repairAccountNicknames(pool: AccountPool, build: (row: unknown) => string): Promise<unknown>
+  repairAccountNicknames(
+    pool: AccountPool,
+    build: (credential: Pick<RaccoonCredential, 'nickname' | 'phone' | 'user_id'>, fallbackId: string) => string,
+  ): Promise<string[]>
 }
 
 /** 装配期需要、但不属于 `ChannelHost` 的依赖（账号池由 index.ts 持有）。 */
@@ -50,12 +54,19 @@ export interface RaccoonChannelDeps {
 /** 构造 raccoon 的注册表条目。 */
 export function createRaccoonChannel(deps: RaccoonChannelDeps): ChannelSpec {
   const { pool } = deps
+  // auth 实例在 createAuth 里产生，registerLlm / afterMount / refreshAll 三处复用。
+  let raccoonAuth: RaccoonChannelAuth | undefined
   return {
     id: RACCOON.id,
     namespace: 'llm-raccoon',
-    createAuth: ctx => new RaccoonAuth(ctx) as unknown as ChannelAuthInstance,
+    createAuth: (ctx) => {
+      const created = new RaccoonAuth(ctx) as unknown as RaccoonChannelAuth
+      raccoonAuth = created
+      return created as unknown as ChannelAuthInstance
+    },
     registerLlm: (ctx: Context, host: ChannelHost, auth) => {
       const raccoon = auth as unknown as RaccoonChannelAuth
+      raccoonAuth = raccoon
       // ⚠️ raccoon 尤其需要请求版本：该网关按**请求体字节**设限
       // （实测 `HTTP_413: request body exceeds 10MB`，两张大截图就占掉大半配额）。
       return registerRaccoonLlm(ctx, {
@@ -110,6 +121,29 @@ export function createRaccoonChannel(deps: RaccoonChannelDeps): ChannelSpec {
         accountPool: pool,
         product: RACCOON,
       })
+    },
+    afterMount: (ctx) => {
+      //
+      // 早期实现把服务端的 `name` 直接当昵称用，而实测它是**自动生成的默认名**
+      //（本机账号是 `RaccoonAva`），注册第二个账号时会重名、无法区分；
+      // 且凭据里没存 `phone`（后来才发现 `user_info.phone` 可用于消歧）。
+      // 光改代码只影响新登录的账号，故这里主动补一次：
+      // 拉 `user_info` 补 `phone`，并用 `buildRaccoonNickname` 重算昵称。
+      //
+      // ⚠️ 幂等 + 失败不阻塞启动（`repairAccountNicknames` 内部逐账号 catch）。
+      void (raccoonAuth as RaccoonChannelAuth).repairAccountNicknames(pool, buildRaccoonNickname).then((repaired) => {
+        if (repaired.length > 0) {
+          ctx.logger.info(
+            '[channel-pack] 已修正 ' + repaired.length + ' 个 Raccoon 账号的显示名（追加手机号尾号以便区分）：' + repaired.join(', '),
+          )
+        }
+      }).catch((error: unknown) => {
+        ctx.logger.warn('[channel-pack] 修正 Raccoon 账号显示名失败：' + String(error))
+      })
+    },
+    // 定时续期：raccoon **可续期**，只按 refreshable 过滤，且只续进入 lead 窗口的账号。
+    refreshAll: async (target) => {
+      await (raccoonAuth as RaccoonChannelAuth | undefined)?.refreshAll(target)
     },
   }
 }

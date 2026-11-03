@@ -36,6 +36,7 @@
  * @module channel-registry
  */
 import type { Context } from '@deepseek-ai/cordis'
+import type { AccountPool } from './account-pool.js'
 import type { ImageRequestTarget } from './image-budget.js'
 
 /** 适配器实例暴露给装配层的最小接口（供 `modelAdapters` 表使用）。 */
@@ -87,8 +88,21 @@ export interface ChannelHost {
 export interface ChannelSpec {
   /** 渠道 id：账号池 provider、RPC 分派键、日志前缀都用它。 */
   readonly id: string
-  /** 老契约的 settings namespace（`llm-<id>`）。 */
-  readonly namespace: string
+  /**
+   * RPC `auths` 表里的键。缺省等于 {@link ChannelSpec.id}。
+   *
+   * ⚠️ 只有 qodercn 例外：它的渠道 id 是全小写 `qodercn`，而 RPC 的形参名沿用
+   * 驼峰 `qoderCn`（历史命名，改它要同步改 `channel-pack-rpc.ts` 的解构）。
+   */
+  readonly rpcAuthKey?: string
+  /**
+   * 老契约的 settings namespace（`llm-<id>`）。
+   *
+   * ⚠️ 只有 opencode 没有：它从上线起就只走 Channel Pack 设置页，
+   * `registerProviderSettings` 的清单里从来没有 `llm-opencode`。
+   * 缺省即「这个渠道不注册老契约 namespace」。
+   */
+  readonly namespace?: string
   /** 创建 Auth 服务。 */
   readonly createAuth: (ctx: Context) => ChannelAuthInstance
   /**
@@ -103,6 +117,28 @@ export interface ChannelSpec {
     host: ChannelHost,
     auth: ChannelAuthInstance,
   ) => ChannelAdapterInstance
+  /**
+   * 装配之后、生命周期之前的一次性动作：修账号昵称、建长期缓存、武装定时器。
+   *
+   * 这些动作都只是**回报日志**的尽力而为操作，失败不得中断装配 —— 调用方
+   * （`mountChannels`）负责把异常吞掉并记一条 warn。
+   */
+  readonly afterMount?: (ctx: Context) => void
+  /**
+   * 批量续期（30 分钟一轮，逐账号读自己的 ref、写回自己的 ref）。
+   *
+   * 由注册表收集成清单交给定时器：清单在注册表里，就不会再出现「新增渠道
+   * 忘了加进 refreshTargets」这种只能靠人肉同步的漏项。
+   */
+  readonly refreshAll?: (pool: AccountPool) => Promise<void>
+  /**
+   * 卸载时的额外清理：`auth.stop()` 覆盖不到的部分（适配器自己的浏览器、
+   * 缓存落盘）。
+   *
+   * ⚠️ 与 `stop()` 分开放：`auth.stop` 是 Auth 服务实例的既有契约，而这里是
+   * 「这个渠道在宿主卸载时要额外做的事」，可能没有 auth 也照样存在。
+   */
+  readonly dispose?: () => void
 }
 
 /** 装配一个渠道的结果，供 index.ts 后续使用。 */
@@ -128,7 +164,18 @@ export function mountChannels(
   return specs.map(spec => {
     const auth = spec.createAuth(ctx)
     const adapter = spec.registerLlm(ctx, host, auth)
-    return { spec, auth, adapter }
+    const runtime: ChannelRuntime = { spec, auth, adapter }
+    // 装配后动作：逐个渠道隔离，一个渠道的昵称修补失败不该让下一个渠道装不上。
+    // ⚠️ 吞掉异常但**必须留日志** —— 静默吞掉等于把可观测性换成「启动不报错」。
+    try {
+      spec.afterMount?.(ctx)
+    } catch (error) {
+      ctx.logger?.warn?.(
+        `[channel-pack] 渠道 ${spec.id} 的装配后动作失败：`
+        + `${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+    return runtime
   })
 }
 
@@ -145,10 +192,20 @@ export function mountChannels(
  * 抛错并打断后面的清理。去重成本是一个 WeakSet，比重试便宜。
  */
 export function stopChannels(runtimes: readonly ChannelRuntime[]): void {
-  for (const { auth } of runtimes) {
+  for (const runtime of runtimes) {
+    const { auth } = runtime
     if (stopped.has(auth)) continue
     stopped.add(auth)
     auth.stop?.()
+    // 渠道自己的额外清理排在 auth.stop() 之后：先停服务，再收它用过的资源。
+    // ⚠️ dispose 的上下文由 spec 工厂的闭包捕获（见 ChannelSpec.dispose），
+    // 这里刻意不接收 ctx —— 保持这个函数的既有签名，避免破坏既有调用点。
+    try {
+      runtime.spec.dispose?.()
+    } catch {
+      // 卸载阶段**不记日志**：宿主 fiber 可能已经在收尾，warn 本身也可能抛错。
+      // 清理动作全部是尽力而为，一个渠道收不掉不该阻止其余渠道收尾。
+    }
   }
 }
 
