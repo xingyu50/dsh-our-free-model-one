@@ -44,6 +44,7 @@ import {
   registerAdapterIdempotent,
 } from './llm-register-compat.js'
 import { reportLedgerAccount } from './token-ledger.js'
+import { pickNextAccount } from './account-rotation.js'
 
 /** 本适配器注册的 provider 路由名（历史常量，等价于 `LOBSTERAI.id`）。 */
 export const PROVIDER = 'lobsterai'
@@ -1121,18 +1122,20 @@ export class LobsteraiAdapter extends LlmAdapter {
       // （它们不是限流，不该留徽章），刚失败的账号仍是池里排序第一，
       // 不排除就会拿回同一个账号、命中下面的 `tried.has` 而**立即 break**
       // —— 换号形同虚设。对齐 Go 的 `PickExcluding(tried)`（`pool.go:131`）。
-      const next = await this.options.accountPool.getAvailableAccount(
-        this.product.id, options.model, tried,
-      )
-      if (!next || tried.has(next.entry.id)) {
+      const next = await pickNextAccount({
+        pool: this.options.accountPool,
+        provider: this.product.id,
+        modelId: options.model,
+        tried,
+      })
+      if (next === undefined) {
         throw buildLobsteraiFailure({
           kind: lastKind, status: lastStatus, text: lastText,
           model: options.model, fromStream: lastFromStream, exhausted: true,
         })
       }
-      tried.add(next.entry.id)
       credential = next.credential as LobsteraiCredential
-      currentAccountId = next.entry.id
+      currentAccountId = next.accountId
       response = await this.send(credential, body, options)
     }
   }

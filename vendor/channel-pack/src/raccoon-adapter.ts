@@ -519,6 +519,9 @@ export class RaccoonAdapter extends LlmAdapter {
         // A new SSE consumer starts block indices at zero; never replay after output.
         if (emitted || attempt === 2 || this.options.nextAccount === undefined) throw error
         const next = await this.options.nextAccount(options.model, tried)
+        // `tried` 的复查留在适配器里：注入的 `nextAccount` 可能来自别处
+        // （生产 `channels/raccoon.ts` 走池、测试里可以伪造），不保证它排除过；
+        // 这里把 `undefined` 与「拿回同一账号」都当作「没有下一个」。
         if (next === undefined || tried.has(next.accountId)) throw error
         accountId = next.accountId
         credential = next.credential

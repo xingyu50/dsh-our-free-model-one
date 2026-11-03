@@ -89,6 +89,7 @@ import {
 } from './zcode-captcha.js'
 import { GateAbortedError, ModelGate } from './model-gate.js'
 import { nextUtc8DayStartMs } from './model-queue.js'
+import { pickNextAccount } from './account-rotation.js'
 import {
   registerAdapterIdempotent,
 } from './llm-register-compat.js'
@@ -1452,14 +1453,15 @@ export class ZcodeAdapter extends LlmAdapter {
       tried.add(activeAccountId)
     }
 
-    const next = await pool.getAvailableAccount(this.product.id, options.model, tried)
-    if (next === null || next === undefined || tried.has(next.entry.id)) return undefined
-    tried.add(next.entry.id)
+    const next = await pickNextAccount({
+      pool, provider: this.product.id, modelId: options.model, tried,
+    })
+    if (next === undefined) return undefined
     return {
       // 池的凭据类型是历史遗留的联合类型；运行时安全性由 provider 过滤保证
       // （查询用 `this.product.id`，取到的必是 zcode 凭据）。
       credential: next.credential as unknown as ZcodeCredential,
-      accountId: next.entry.id,
+      accountId: next.accountId,
     }
   }
 

@@ -33,6 +33,7 @@ import { QoderEncryptedInfer, type QoderInferMessage, type QoderInferRequest, ty
 import { unwrapQoderEnvelopeStream } from './qoder-envelope.js'
 import { QODER, type QoderFallbackModel, type QoderModelPromotion, type QoderProduct } from './qoder-product.js'
 import { reasoningRankOf } from './reasoning-ladder.js'
+import { pickNextAccount } from './account-rotation.js'
 import { utc8MinutesOfDay } from './utc8.js'
 import { projectRequestImage, type ImageRequestTarget } from './image-budget.js'
 import {
@@ -964,13 +965,14 @@ export class QoderAdapter extends LlmAdapter {
     // ⚠️ 必须传 `tried`：池按「限流重置时间最早到期」排序，**刚失败的账号可能
     // 仍排第一**，不排除就会拿回同一个、命中下面的检查而立即放弃切换。
 
-    const next = await pool.getAvailableAccount(this.product.id, options.model, tried)
-    if (next === null || tried.has(next.entry.id)) return undefined
-    tried.add(next.entry.id)
+    const next = await pickNextAccount({
+      pool, provider: this.product.id, modelId: options.model, tried,
+    })
+    if (next === undefined) return undefined
 
     const credential = next.credential as QoderCredential
     // 切号后必须重新过一遍 uid 补齐（每个账号的 uid 不同，缺了会签名无效）。
-    return { credential: await this.ensureUid(credential), accountId: next.entry.id }
+    return { credential: await this.ensureUid(credential), accountId: next.accountId }
   }
 
   /**

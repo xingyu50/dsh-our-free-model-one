@@ -91,9 +91,12 @@ export function createRaccoonChannel(deps: RaccoonChannelDeps): ChannelSpec {
           if (!resolved) throw new Error('raccoon: credential no longer exists')
           return JSON.parse(resolved.value) as RaccoonCredential
         },
+        // 注入回调拿到的是 `ReadonlySet`（见 `RaccoonAdapterOptions.nextAccount`），
+        // 而 `pickNextAccount` 会就地记入 `tried` —— 所以这一处保留直接问池；
+        // 记入 `tried` 由适配器自己每轮做（`raccoon-adapter.ts` 的 `tried.add`）。
         nextAccount: async (modelId, tried) => {
           const next = await pool.getAvailableAccount(RACCOON.id, modelId, tried)
-          if (!next) return undefined
+          if (!next || tried.has(next.entry.id)) return undefined
           reportLedgerAccount(RACCOON.id, next.entry.id)
           return { accountId: next.entry.id, credential: next.credential as unknown as RaccoonCredential }
         },

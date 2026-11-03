@@ -19,6 +19,7 @@ import {
   registerAdapterIdempotent,
 } from './llm-register-compat.js'
 import { reportLedgerAccount } from './token-ledger.js'
+import { pickNextAccount } from './account-rotation.js'
 
 export const CHAT_API_BASE = 'https://snap-access.cn-north-4.myhuaweicloud.com/api/v2'
 export const PROVIDER = 'codearts'
@@ -1206,13 +1207,17 @@ export class CodeArtsAdapter extends LlmAdapter {
             // 第一**（当失败类别不写标记时尤甚），不排除就会拿回同一个、命中
             // `tried.has` 而立即放弃切换（换号形同虚设）。
             if (this.options.accountPool) {
-              const next = await this.options.accountPool.getAvailableAccount(
-                'codearts', options.model, rateLimitTried,
-              )
-              if (next && !rateLimitTried.has(next.entry.id)) {
-                rateLimitTried.add(next.entry.id)
+              // 与「本函数其余换号点」同一个取号骨架：tried 必须传给池
+              // （见 `account-rotation.ts` 的两条不变量）。
+              const next = await pickNextAccount({
+                pool: this.options.accountPool,
+                provider: 'codearts',
+                modelId: options.model,
+                tried: rateLimitTried,
+              })
+              if (next !== undefined) {
                 credential = next.credential as unknown as CodeArtsCredential
-                currentAccountId = next.entry.id
+                currentAccountId = next.accountId
                 authRefreshed = false // 新凭据：重置「已刷新过」标记
                 continue // 用下一个账号重试
               }
@@ -1268,13 +1273,15 @@ export class CodeArtsAdapter extends LlmAdapter {
               )
               rateLimitTried.add(currentAccountId)
             }
-            const next = await this.options.accountPool.getAvailableAccount(
-              'codearts', options.model, rateLimitTried,
-            )
-            if (next && !rateLimitTried.has(next.entry.id)) {
-              rateLimitTried.add(next.entry.id)
+            const next = await pickNextAccount({
+              pool: this.options.accountPool,
+              provider: 'codearts',
+              modelId: options.model,
+              tried: rateLimitTried,
+            })
+            if (next !== undefined) {
               credential = next.credential as unknown as CodeArtsCredential
-              currentAccountId = next.entry.id
+              currentAccountId = next.accountId
               authRefreshed = false
               continue
             }
@@ -1303,11 +1310,20 @@ export class CodeArtsAdapter extends LlmAdapter {
                 currentAccountId, parsed.modelId, parsed.resetTimeMs,
               )
             }
-            const next = await this.options.accountPool.getAvailableAccount('codearts', options.model)
-            if (next && !rateLimitTried.has(next.entry.id)) {
-              rateLimitTried.add(next.entry.id)
+            // 与上面两处同一个取号骨架。这条原先是**唯一**没把 `rateLimitTried`
+            // 交给池的调用点：池按手动顺序返回候选，刚失败的那个仍排第一，于是
+            // 拿回同一个号、判 `tried.has` 成立，直接跳到「所有账号均受限」——
+            // 池里还有可用账号也一个都试不到（`account-rotation.ts` 的头注释记的
+            // 就是这条不变量）。
+            const next = await pickNextAccount({
+              pool: this.options.accountPool,
+              provider: 'codearts',
+              modelId: options.model,
+              tried: rateLimitTried,
+            })
+            if (next !== undefined) {
               credential = next.credential as unknown as CodeArtsCredential
-              currentAccountId = next.entry.id
+              currentAccountId = next.accountId
               authRefreshed = false // Reset auth refresh flag for new credential
               continue // Retry request with new credential
             }

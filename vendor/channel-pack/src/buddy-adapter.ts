@@ -44,6 +44,7 @@ import {
   registerAdapterIdempotent,
 } from './llm-register-compat.js'
 import { reportLedgerAccount } from './token-ledger.js'
+import { createMarkRegistry, pickNextAccount } from './account-rotation.js'
 
 /**
  * CodeBuddy（中国版）的 chat completions 基址。
@@ -1485,14 +1486,16 @@ export class BuddyAdapter extends LlmAdapter {
       if ((response.status === 401 || response.status === 403) && this.options.accountPool !== undefined) {
         for (;;) {
           // modelId 参与过滤：正在限流期的账号不会被选中（与限流换号同语义）。
-          const next = await this.options.accountPool.getAvailableAccount(
-            this.product.id, options.model, triedAuth,
-          )
-          if (!next || triedAuth.has(next.entry.id)) break
-          triedAuth.add(next.entry.id)
+          const next = await pickNextAccount({
+            pool: this.options.accountPool,
+            provider: this.product.id,
+            modelId: options.model,
+            tried: triedAuth,
+          })
+          if (next === undefined) break
           rotated = true
           credential = next.credential as BuddyCredential
-          currentAccountId = next.entry.id
+          currentAccountId = next.accountId
           response = await this.send(credential, body, options)
           if (response.ok) {
             yield* this.consumeSse(response, options, currentAccountId)
@@ -1653,7 +1656,7 @@ export class BuddyAdapter extends LlmAdapter {
          * 已经写过限流标记的账号：避免同一个账号被重复记账（换号途中可能取回它）。
          * 标记是「账号 × 模型」的快照，写两次没有意义，日志也会重复。
          */
-        const rateLimitMarked = new Set<string>()
+        const rateLimitMarks = createMarkRegistry()
 
         for (;;) {
           // 先给**当前**账号记限流标记（UI 据「限额重置」徽章展示；它也是
@@ -1668,9 +1671,7 @@ export class BuddyAdapter extends LlmAdapter {
           // ⚠️ `parseRateLimitError` 仍然优先：它能把**服务端声明的**真实重置
           // 时刻抠出来（有就绝不用兜底的 1 小时）。换号后 `errorText` 可能是
           // 11140 等非限流体 —— 那种情况下面①的分支会先 continue，走不到这里。
-          if (currentAccountId !== '' && isRateLimited(errorText, response.status)
-            && !rateLimitMarked.has(currentAccountId)) {
-            rateLimitMarked.add(currentAccountId)
+          if (isRateLimited(errorText, response.status) && rateLimitMarks.claim(currentAccountId)) {
             const parsed = parseRateLimitError(errorText, options.model, response.status)
             await this.options.accountPool.updateModelRateLimit(
               currentAccountId,
@@ -1684,13 +1685,15 @@ export class BuddyAdapter extends LlmAdapter {
           // 必须把 `tried` 传给池：见 `AccountPool.getAvailableAccount` 的说明 ——
           // 池按「重置时间最早到期」排序，刚失败的账号可能仍排第一，
           // 不排除就会拿回同一个、命中下面的 `tried.has` 而立即 break。
-          const next = await this.options.accountPool.getAvailableAccount(
-            this.product.id, options.model, tried,
-          )
-          if (!next || tried.has(next.entry.id)) break
-          tried.add(next.entry.id)
+          const next = await pickNextAccount({
+            pool: this.options.accountPool,
+            provider: this.product.id,
+            modelId: options.model,
+            tried,
+          })
+          if (next === undefined) break
           credential = next.credential as BuddyCredential
-          currentAccountId = next.entry.id
+          currentAccountId = next.accountId
           response = await this.send(credential, body, options)
           if (response.ok) {
             yield* this.consumeSse(response, options, currentAccountId)

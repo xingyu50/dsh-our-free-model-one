@@ -59,6 +59,7 @@ import { recordClineRequest } from './cline-request-log.js'
 import {
   registerAdapterIdempotent,
 } from './llm-register-compat.js'
+import { createMarkRegistry, pickNextAccount } from './account-rotation.js'
 import {
   collectImages,
   consumeOpenAiSse,
@@ -645,12 +646,12 @@ export class ClineAdapter extends LlmAdapter {
          * 账号永远不会被标记 —— 它下一次又会被 `getAvailableAccount` 选中、
          * 立刻再撞一次同样的墙（本机 cline 只有一个账号，故这条尤其致命）。
          */
-        let markedAccountId = ''
+        const limitedMarks = createMarkRegistry()
         const markLimited = async (): Promise<void> => {
-          if (currentAccountId.length === 0) return
-          if (currentAccountId === markedAccountId) return
+          // 顺序刻意保持：先判「这次失败算不算限流」（不算就不留徽章），
+          // 再过登记簿（空 id 与重复 id 都不记账）。
           if (!recordsClineRateLimit(response.status, errorText)) return
-          markedAccountId = currentAccountId
+          if (!limitedMarks.claim(currentAccountId)) return
           await this.options.accountPool?.updateModelRateLimit(
             currentAccountId,
             options.model,
@@ -659,13 +660,15 @@ export class ClineAdapter extends LlmAdapter {
         }
         for (let round = 0; round < maxRotate; round++) {
           await markLimited()
-          const next = await this.options.accountPool.getAvailableAccount(
-            this.product.id, options.model, tried,
-          )
-          if (next === null || next === undefined || tried.has(next.entry.id)) break
-          tried.add(next.entry.id)
+          const next = await pickNextAccount({
+            pool: this.options.accountPool,
+            provider: this.product.id,
+            modelId: options.model,
+            tried,
+          })
+          if (next === undefined) break
           credential = next.credential as ClineCredential
-          currentAccountId = next.entry.id
+          currentAccountId = next.accountId
           response = await this.send(credential, body, options)
           if (response.ok) {
             yield* this.consumeWithLog(response, options, {

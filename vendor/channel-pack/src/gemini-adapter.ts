@@ -40,6 +40,7 @@ import { collectImages, httpErrorCode } from './openai-compat.js'
 import { projectRequestImage } from './image-budget.js'
 import { registerAdapterIdempotent } from './llm-register-compat.js'
 import { reportLedgerAccount } from './token-ledger.js'
+import { pickNextAccount } from './account-rotation.js'
 import {
   GEMINI,
   GEMINI_ENDPOINTS,
@@ -718,11 +719,12 @@ export class GeminiAdapter extends LlmAdapter {
               .catch(() => {})
           }
           if (rotations < GEMINI_MAX_ROTATE - 1) {
-            const next = await pool.getAvailableAccount(this.product.id, options.model, tried)
-            if (next !== null && next !== undefined && !tried.has(next.entry.id)) {
+            const next = await pickNextAccount({
+              pool, provider: this.product.id, modelId: options.model, tried,
+            })
+            if (next !== undefined) {
               rotations++
-              tried.add(next.entry.id)
-              currentAccountId = next.entry.id
+              currentAccountId = next.accountId
               credential = next.credential as unknown as GeminiCredential
               // 换号后重置端点与去签状态：新账号值得从默认端点、带签名再试一次。
               endpointIdx = 0
