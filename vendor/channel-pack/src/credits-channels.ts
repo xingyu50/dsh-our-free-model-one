@@ -35,6 +35,9 @@ import { credentialRef, type CredentialRef } from '@deepseek-ai/dsh-credentials'
 import { claimDailyCheckin, claimUnitOf, fetchCheckinStatus, fetchCreditBalance, type CheckinStatus, type ClaimOutcome, type CreditBalance } from './credits.js'
 import type { BuddyCredential } from './buddy.js'
 import { CODEBUDDY, WORKBUDDY, type BuddyProduct } from './product.js'
+// CodeArts 没有产品常量（它不出现在 ALL_PRODUCTS 里），渠道 id 的唯一出处是
+// 适配器导出的 PROVIDER —— 本文件是装配层，必须按名字引用而不是内联字面量。
+import { PROVIDER as CODEARTS_PROVIDER } from './llm-adapter.js'
 import { buddyExpiringWindowDays } from './buddy-balance-rank.js'
 import { creditExpiringWindowDays } from './credit-expiry-window.js'
 import { LOOMY } from './loomy-product.js'
@@ -558,7 +561,7 @@ export function channelCredits(deps: CreditsChannelDeps): Readonly<Record<string
         windowDays: buddyExpiringWindowDays(),
       }),
     },
-    codearts: {
+    [CODEARTS_PROVIDER]: {
       // CodeArts 的可领状态要经 `statistics/plugin` + `/v1/ops/delivery` 两步才能得到，
       // 且与 CodeBuddy 的 CheckinStatus 不同构，故如实回 null。
       status: async (accounts) => ok(nullStatus(accounts)),

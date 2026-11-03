@@ -173,7 +173,8 @@ export function sanitizeAutoCheckin(raw: unknown): AutoCheckinDoc {
  * 调用方只取一次 `now()`，避免两次取时在日界附近读出矛盾值。
  *
  * ⚠️ re-export 而非本地实现：这两个函数最早长在这里，后来被抄到四处。收敛到
- * `utc8.ts` 后保留出口只为不动既有 import 点。新增调用请直接用 `./utc8.js`。
+ * `utc8.ts` 后保留出口只为不动既有 import 点（本模块自己也改走 `./utc8.js`）。
+ * 新增调用请直接用 `./utc8.js`。
  */
 export { utc8DateString, utc8MsIntoDay } from './utc8.js'
 

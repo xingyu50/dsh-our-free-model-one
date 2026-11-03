@@ -271,19 +271,25 @@ export function apply(ctx: Context, config: { disableOpencode?: boolean; outlet?
     createLoomyChannel({ pool }),
     createRaccoonChannel({ pool }),
     createMinimaxChannel({ pool }),
+    // ⚠️ 顺序沿用重构前的**装配**顺序（gemini 在 zcode 之前，见重构前 index.ts
+    // :1288 与 :1405）：llm provider 的注册顺序会体现在目录/选择器的排列上，
+    // 故这里以装配顺序为准。续期目标表由同一张表派生，因此 zcode 与 gemini 的
+    // 续期先后与重构前相反 —— 两者互不依赖且各自 try/catch，仅影响日志行序。
     createGeminiChannel({ pool, fetcher: network.fetch }),
     createZcodeChannel({ pool }),
     // opencode 的条件装配在这里判：注册表只按给定的表装，不认识这条开关。
     ...(config.disableOpencode === true ? [] : [createOpencodeChannel({ pool })]),
   ]
-  const channelRuntimes = mountChannels(ctx, host, specs)
-
-  // 老契约的 settings namespace：从注册表收集，缺 namespace 的渠道（opencode）
-  // 本来就不在其中。
-  const namespaces = channelRuntimes
-    .map(runtime => runtime.spec.namespace)
+  // 老契约的 settings namespace：从**表**收集（缺 namespace 的渠道 opencode
+  // 本来就不在其中），并且**在装配之前**注册 —— 与重构前逐行一致：早先这
+  // 一行排在所有 `new XxxAuth(ctx)` 之前，Auth 构造函数里读 settings 的渠道
+  // 不该看到「自己还没注册」的中间状态。
+  const namespaces = specs
+    .map(spec => spec.namespace)
     .filter((namespace): namespace is string => namespace !== undefined)
   registerProviderSettings(ctx, ...namespaces)
+
+  const channelRuntimes = mountChannels(ctx, host, specs)
 
   // ===== 多账号静默续期调度 =====
   // 替代原有的单账号 scheduleRefresh()，使用 refreshAll() 遍历所有账号续期
@@ -398,12 +404,35 @@ export function apply(ctx: Context, config: { disableOpencode?: boolean; outlet?
 
   // 按 id 传入而不是按位置 —— 位置传参曾因少传/插队错位复发 6 次
   //（见 channel-pack-rpc.ts 的 ChannelPackAuths 注释）。
-  // ⚠️ auths 同样由装配结果派生：`ChannelPackAuths` 是 13 个 readonly 字段的
-  // 固定形状（RPC 内部按名字解构），故这里建一个同键对象再断言；漏一门渠道
-  // 会在运行期被 `handleMethod` 的 provider 分派暴露，而不再靠人肉对齐。
-  const auths = Object.fromEntries(
-    channelRuntimes.map(runtime => [runtime.spec.rpcAuthKey ?? runtime.spec.id, runtime.auth]),
-  ) as unknown as ChannelPackAuths
+  //
+  // ⚠️ 用**完整对象字面量**而不是 `Object.fromEntries(…) as unknown as ChannelPackAuths`：
+  // 后者会把「漏一门渠道」从编译期错误降级成运行期才暴露的分派失败，恰好把
+  // `ChannelPackAuths` 注释里「漏传一个就是缺键」那条规则废掉。这里逐个写键，
+  // 少写一个 TS 直接报缺属性；值仍按装配结果取，取不到就是装配表里没有那条 spec。
+  const authOf = <K extends keyof ChannelPackAuths>(key: K): ChannelPackAuths[K] => {
+    const found = channelRuntimes.find(runtime => (runtime.spec.rpcAuthKey ?? runtime.spec.id) === key)
+    if (found === undefined) {
+      throw new Error(`[channel-pack] 装配表里没有 rpcAuthKey 为 \`${key}\` 的渠道（auths 表与 specs 表脱节）`)
+    }
+    // 装配表只知道 `ChannelAuthInstance`（最小接口），具体 Auth 类型由各 spec 造；
+    // 这里是把「已按 id 对号入座」的结果交回给 RPC 的固定形状。
+    return found.auth as unknown as ChannelPackAuths[K]
+  }
+  const auths: ChannelPackAuths = {
+    codearts: authOf('codearts'),
+    buddy: authOf('buddy'),
+    workbuddy: authOf('workbuddy'),
+    lobsterai: authOf('lobsterai'),
+    qoder: authOf('qoder'),
+    qoderCn: authOf('qoderCn'),
+    trae: authOf('trae'),
+    cline: authOf('cline'),
+    loomy: authOf('loomy'),
+    raccoon: authOf('raccoon'),
+    minimax: authOf('minimax'),
+    zcode: authOf('zcode'),
+    gemini: authOf('gemini'),
+  }
   registerChannelPackRpc(ctx, pool, auths, modelAdapters, {
     ...config,
   })

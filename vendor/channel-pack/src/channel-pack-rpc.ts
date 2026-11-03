@@ -1781,7 +1781,7 @@ if (provider === LOBSTERAI.id) {
       case 'login.sendSms': {
         const req = payload as RpcSendSmsRequest
         if (req.provider !== LOOMY.id) {
-          return { ok: false, error: { code: 'bad-request', message: `unsupported provider: ${req.provider}` } }
+          return unsupportedProvider(req.provider)
         }
         const phone = typeof req.phone === 'string' ? req.phone.trim() : ''
         if (!/^1[3-9]\d{9}$/.test(phone)) {
@@ -1801,7 +1801,7 @@ if (provider === LOBSTERAI.id) {
       case 'login.submitSms': {
         const req = payload as RpcSubmitSmsRequest
         if (req.provider !== LOOMY.id) {
-          return { ok: false, error: { code: 'bad-request', message: `unsupported provider: ${req.provider}` } }
+          return unsupportedProvider(req.provider)
         }
         const pending = pendingSmsMsgid.get(req.accountId)
         if (pending === undefined || pending.msgid.length === 0) {
@@ -1855,7 +1855,7 @@ if (provider === LOBSTERAI.id) {
       case 'onboarding.status': {
         const req = payload as RpcOnboardingStatusRequest
         if (req.provider !== LOOMY.id && req.provider !== RACCOON.id) {
-          return { ok: false, error: { code: 'bad-request', message: `unsupported provider: ${req.provider}` } }
+          return unsupportedProvider(req.provider)
         }
         const account = pool.findAccount(req.accountId)
         if (account === undefined) {
@@ -1961,7 +1961,7 @@ if (provider === LOBSTERAI.id) {
         const req = payload as RpcOnboardingClaimRequest
         // ⚠️ 两个 provider 共用本端点（Loomy 的新手任务 / raccoon 的登录奖励）。
         if (req.provider !== LOOMY.id && req.provider !== RACCOON.id) {
-          return { ok: false, error: { code: 'bad-request', message: `unsupported provider: ${req.provider}` } }
+          return unsupportedProvider(req.provider)
         }
         const account = pool.findAccount(req.accountId)
         if (account === undefined) {
@@ -2109,10 +2109,6 @@ if (provider === LOBSTERAI.id) {
       }
 
       // ── 每日签到（积分领取）──
-      // 查询某 provider 下全部启用账号的签到状态。
-      //
-      // 各渠道显式分派协议，未知或退役渠道不调用任何默认端点。
-      // ── 每日签到（积分领取）──
       // 三个动词的实现按渠道 id 收在 `credits-channels.ts`；这里只负责取账号列表
       // 与兜底文案。
       //
@@ -2162,7 +2158,7 @@ if (provider === LOBSTERAI.id) {
       case 'cline.quota': {
         const req = payload as RpcClineQuotaRequest
         if (typeof req.provider !== 'string' || req.provider !== CLINE.id) {
-          return { ok: false, error: { code: 'bad-request', message: `unsupported provider: ${String(req.provider)}` } }
+          return unsupportedProvider(String(req.provider))
         }
         const accounts = await pool.listAccounts(req.provider)
         const values: RpcClineQuotaResponse['accounts'] = []
@@ -2202,7 +2198,7 @@ if (provider === LOBSTERAI.id) {
       case 'cline.requestLog': {
         const req = payload as RpcClineRequestLogRequest
         if (typeof req.provider !== 'string' || req.provider !== CLINE.id) {
-          return { ok: false, error: { code: 'bad-request', message: `unsupported provider: ${String(req.provider)}` } }
+          return unsupportedProvider(String(req.provider))
         }
         if (typeof req.accountId !== 'string' || req.accountId.trim().length === 0) {
           return { ok: false, error: { code: 'bad-request', message: 'accountId 不能为空' } }

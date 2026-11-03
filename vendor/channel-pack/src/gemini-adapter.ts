@@ -40,7 +40,7 @@ import { collectImages, httpErrorCode } from './openai-compat.js'
 import { projectRequestImage } from './image-budget.js'
 import { registerAdapterIdempotent } from './llm-register-compat.js'
 import { reportLedgerAccount } from './token-ledger.js'
-import { pickNextAccount } from './account-rotation.js'
+import { createMarkRegistry, pickNextAccount } from './account-rotation.js'
 import {
   GEMINI,
   GEMINI_ENDPOINTS,
@@ -511,6 +511,8 @@ export class GeminiAdapter extends LlmAdapter {
     let droppedSignatures = false
     let refreshedOnce = false
     let rotations = 0
+    // 「同一账号只标记一次」的登记簿（`account-rotation.ts` 的四条不变量之一）。
+    const marked = createMarkRegistry()
     let lastFailure: { status: number; text: string } | undefined
     // 会话升代：按 **base sessionId**（不含代数）计数，只在本请求内有效。
     // 见 `deriveGeminiSessionId` 的 `generation` 段与 `isGeminiSessionOverflow`。
@@ -710,7 +712,9 @@ export class GeminiAdapter extends LlmAdapter {
         const rotatable = quotaLike || status === 401 || endpointFirst
         if (rotatable && pool !== undefined) {
           // 记限流/失效冷却：`getAvailableAccount` 会据此跳过该账号。
-          if (currentAccountId !== '') {
+          // ⚠️ 走登记簿而不是 `if (currentAccountId !== '')`：同一账号在换号途中
+          // 可能再被选中一次（池的排除是过滤器不是承诺），不记账就会重复写标记。
+          if (marked.claim(currentAccountId)) {
             const cooldown = status === 401
               ? GEMINI_AUTH_COOLDOWN_MS
               : GEMINI_RATE_LIMIT_COOLDOWN_MS

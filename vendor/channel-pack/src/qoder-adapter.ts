@@ -33,7 +33,7 @@ import { QoderEncryptedInfer, type QoderInferMessage, type QoderInferRequest, ty
 import { unwrapQoderEnvelopeStream } from './qoder-envelope.js'
 import { QODER, type QoderFallbackModel, type QoderModelPromotion, type QoderProduct } from './qoder-product.js'
 import { reasoningRankOf } from './reasoning-ladder.js'
-import { pickNextAccount } from './account-rotation.js'
+import { createMarkRegistry, pickNextAccount, type MarkRegistry } from './account-rotation.js'
 import { utc8MinutesOfDay } from './utc8.js'
 import { projectRequestImage, type ImageRequestTarget } from './image-budget.js'
 import {
@@ -793,6 +793,8 @@ export class QoderAdapter extends LlmAdapter {
      * 会让切换在两个账号之间**无限来回**。
      */
     const triedAccounts = new Set<string>()
+    // 一个登记簿对应一次请求（跨换号保留）：见 `account-rotation.ts` 的四条不变量。
+    const marked = createMarkRegistry()
     /**
      * **当前生效账号的 id**（会随额度受限切号而更新）。
      *
@@ -833,7 +835,7 @@ export class QoderAdapter extends LlmAdapter {
         // （HTTP 200），但若哪天服务端改成用 HTTP 状态码下发，只处理一条就会漏。
         // 两处调用**同一个** `switchAccountOnQuota`，不会漂移。
         if (isBillingBusinessCode(response.status) || looksLikeBillingError(errorText)) {
-          const switched = await this.switchAccountOnQuota(options, triedAccounts, activeAccountId)
+          const switched = await this.switchAccountOnQuota(options, triedAccounts, activeAccountId, marked)
           if (switched !== undefined) {
             credential = switched.credential
             activeAccountId = switched.accountId
@@ -904,7 +906,7 @@ export class QoderAdapter extends LlmAdapter {
           // 实测以 **HTTP 200 + SSE 内嵌帧** 下发（与排队同通道），
           // 只在 HTTP 层处理会漏掉真实链路。
           if (isQuotaExceededError(error)) {
-            const switched = await this.switchAccountOnQuota(options, triedAccounts, activeAccountId)
+            const switched = await this.switchAccountOnQuota(options, triedAccounts, activeAccountId, marked)
             if (switched !== undefined) {
               credential = switched.credential
               activeAccountId = switched.accountId
@@ -941,6 +943,8 @@ export class QoderAdapter extends LlmAdapter {
     options: GenerateOptions,
     tried: Set<string>,
     activeAccountId: string | undefined,
+    // 「同一账号只标记一次」的登记簿：**一次请求一个**，跨换号保留。
+    marked: MarkRegistry,
   ): Promise<{ credential: QoderCredential; accountId: string } | undefined> {
     const pool = this.options.accountPool
     if (pool === undefined) return undefined
@@ -955,9 +959,11 @@ export class QoderAdapter extends LlmAdapter {
     // 跟着变** —— 若用它标记，切到 B 后失败时会**再标记一次 A**，而 B 从未被标记，
     // 下次取号又把 B 选中，导致在 A/B 之间**反复空转**（写单测时实测到了：
     // 标记记录是 `['acct-A','acct-A']` 而非 `['acct-A','acct-B']`）。
-    if (activeAccountId !== undefined && activeAccountId.length > 0) {
-      await pool.updateModelRateLimit(activeAccountId, options.model, nextUtc8DayStartMs())
-      tried.add(activeAccountId)
+    // 走登记簿而不是 `if (activeAccountId !== undefined && activeAccountId.length > 0)`：
+    // 「空 id 不标记」与「同一账号只标记一次」都由它一条判据表达。
+    if (marked.claim(activeAccountId ?? '')) {
+      await pool.updateModelRateLimit(activeAccountId as string, options.model, nextUtc8DayStartMs())
+      tried.add(activeAccountId as string)
     }
 
     // ② 取下一个可用账号。

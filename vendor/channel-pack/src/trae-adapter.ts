@@ -45,6 +45,7 @@ import {
   registerAdapterIdempotent,
 } from './llm-register-compat.js'
 import { reportLedgerAccount } from './token-ledger.js'
+import { pickNextAccount as pickNextAccountFromPool, poolRotationBudget } from './account-rotation.js'
 
 /** 本适配器注册的 provider 路由名。 */
 export const PROVIDER = 'trae'
@@ -155,15 +156,6 @@ function resolveChunkTimeoutMs(): number {
 
 /** 限流重置时间的本地兜底（毫秒，1 小时）。 */
 const TRAE_RATE_LIMIT_FALLBACK_MS = 3_600_000
-
-/**
- * 单次请求换号预算的**下限**（含首次）。
- *
- * 实际预算是「池内启用账号数」，最少本值。早期实现是写死 3：10 个账号也
- * 只试 3 个，用户加号毫无收益 —— 而「多号分流」正是加号的全部目的。
- * 仍保留一个下限，是为「池里只有 1~2 个号」时不至于一次都不换。
- */
-const TRAE_MIN_ROTATE_BUDGET = 3
 
 /**
  * **流内**（SSE `event:error`）可换号错误的哨兵码。
@@ -1248,19 +1240,17 @@ export class TraeAdapter extends LlmAdapter {
   /**
    * 本次请求最多尝试几个账号（含首次）。
    *
-   * = 池内**启用**账号数，最少 {@link TRAE_MIN_ROTATE_BUDGET}。
+   * = 池内**启用**账号数，最少 {@link ROTATION_MIN_BUDGET}（见 `account-rotation.ts`）。
    *
    * 早期实现写死 `TRAE_MAX_ROTATE = 3`：10 个账号也只试 3 个 —— 而「多加几个号
    * 分摊额度」正是用户加号的全部目的。改成按池大小自适应后，加号立刻生效。
+   * 「按池大小」与「保留下限」这条规则已与其余换号渠道共用，见 `poolRotationBudget`。
    * 留一个下限，是为了池里只有 1~2 个号时不至于一次都不换。
    *
    * ⚠️ 没有账号池（单凭据模式）时返回 1：无号可换，不做无谓的重试。
    */
   private rotationBudget(): number {
-    const pool = this.options.accountPool
-    if (pool === undefined) return 1
-    const enabled = pool.listAccountsByProvider(this.product.id).filter(entry => entry.enabled).length
-    return Math.max(TRAE_MIN_ROTATE_BUDGET, enabled)
+    return poolRotationBudget(this.options.accountPool, this.product.id)
   }
 
   /**
@@ -1277,16 +1267,21 @@ export class TraeAdapter extends LlmAdapter {
    */
   private async pickNextAccount(
     modelId: string,
-    tried: ReadonlySet<string>,
+    tried: Set<string>,
   ): Promise<{ accountId: string; credential: TraeCredential } | undefined> {
     if (this.options.nextAccount !== undefined) {
       return await this.options.nextAccount(modelId, tried)
     }
-    const pool = this.options.accountPool
-    if (pool === undefined) return undefined
-    const next = await pool.getAvailableAccount(this.product.id, modelId, tried)
-    if (next === null || next === undefined || tried.has(next.entry.id)) return undefined
-    return { accountId: next.entry.id, credential: next.credential as TraeCredential }
+    // 回退分支与其余渠道走同一条骨架（四条不变量见 `account-rotation.ts`）。
+    // 生产路径通常走上面那次注入，故这里写回 `tried` 是幂等的。
+    const next = await pickNextAccountFromPool({
+      pool: this.options.accountPool,
+      provider: this.product.id,
+      modelId,
+      tried,
+    })
+    if (next === undefined) return undefined
+    return { accountId: next.accountId, credential: next.credential as TraeCredential }
   }
 
   /**

@@ -41,7 +41,6 @@ export function createQoderChannel(deps: QoderChannelDeps): ChannelSpec {
     displayName: 'Qoder',
     rpcAuthKey: 'qoder',
     credentialRefName: QODER.defaultCredentialRef,
-    registerComment: '',
   })
 }
 
@@ -55,7 +54,6 @@ export function createQoderCnChannel(deps: QoderChannelDeps): ChannelSpec {
     // `ChannelPackAuths` 形参沿用驼峰 `qoderCn`（历史命名）。
     rpcAuthKey: 'qoderCn',
     credentialRefName: QODER_CN.defaultCredentialRef,
-    registerComment: '',
   })
 }
 
@@ -66,7 +64,6 @@ interface QoderChannelOptions {
   readonly rpcAuthKey?: string
   readonly displayName: string
   readonly credentialRefName: string
-  readonly registerComment: string
 }
 
 function makeQoderChannel(deps: QoderChannelDeps, options: QoderChannelOptions): ChannelSpec {

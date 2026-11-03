@@ -89,7 +89,7 @@ import {
 } from './zcode-captcha.js'
 import { GateAbortedError, ModelGate } from './model-gate.js'
 import { nextUtc8DayStartMs } from './model-queue.js'
-import { pickNextAccount } from './account-rotation.js'
+import { createMarkRegistry, pickNextAccount, type MarkRegistry } from './account-rotation.js'
 import {
   registerAdapterIdempotent,
 } from './llm-register-compat.js'
@@ -738,6 +738,8 @@ export class ZcodeAdapter extends LlmAdapter {
      * 见 {@link ZcodeAdapter.switchAccountOnQuota}。
      */
     const tried = new Set<string>()
+    // 一个登记簿对应一次请求（跨换号保留）：见 `account-rotation.ts` 的四条不变量。
+    const marked = createMarkRegistry()
     let activeAccountId = this.options.currentAccountId?.()
     if (activeAccountId !== undefined && activeAccountId.length > 0) tried.add(activeAccountId)
     let credential = await this.resolveCredentialOrThrow(options)
@@ -1049,7 +1051,7 @@ export class ZcodeAdapter extends LlmAdapter {
         // ① 额度用尽 / 无权益 → **换账号**（不是重试）
         if (isZcodeQuotaExhausted(response.status, text)) {
           if (quotaRound < this.product.quotaSwitchMax) {
-            const switched = await this.switchAccountOnQuota(options, tried, activeAccountId)
+            const switched = await this.switchAccountOnQuota(options, tried, activeAccountId, marked)
             if (switched !== undefined) {
               credential = switched.credential
               activeAccountId = switched.accountId
@@ -1240,7 +1242,7 @@ export class ZcodeAdapter extends LlmAdapter {
          * 故无需耗时判断。
          */
         if (quotaRound < this.product.quotaSwitchMax) {
-          const switched = await this.switchAccountOnQuota(options, tried, activeAccountId)
+          const switched = await this.switchAccountOnQuota(options, tried, activeAccountId, marked)
           if (switched !== undefined) {
             credential = switched.credential
             activeAccountId = switched.accountId
@@ -1295,7 +1297,7 @@ export class ZcodeAdapter extends LlmAdapter {
         if (!emitted && isFastEntitlementMiss(error, Date.now() - consumeStartedAt)) {
           // 还有账号可换 → 换号重发（`tried` 保证不会拿回刚失败的账号）。
           if (quotaRound < this.product.quotaSwitchMax) {
-            const switched = await this.switchAccountOnQuota(options, tried, activeAccountId)
+            const switched = await this.switchAccountOnQuota(options, tried, activeAccountId, marked)
             if (switched !== undefined) {
               credential = switched.credential
               activeAccountId = switched.accountId
@@ -1444,13 +1446,17 @@ export class ZcodeAdapter extends LlmAdapter {
     options: GenerateOptions,
     tried: Set<string>,
     activeAccountId: string | undefined,
+    // 「同一账号只标记一次」的登记簿：**一次请求一个**，跨换号保留。
+    marked: MarkRegistry,
   ): Promise<{ credential: ZcodeCredential; accountId: string } | undefined> {
     const pool = this.options.accountPool
     if (pool === undefined) return undefined
 
-    if (activeAccountId !== undefined && activeAccountId.length > 0) {
-      await pool.updateModelRateLimit(activeAccountId, options.model, nextUtc8DayStartMs())
-      tried.add(activeAccountId)
+    // 走登记簿而不是 `if (activeAccountId !== undefined && activeAccountId.length > 0)`：
+    // 「空 id 不标记」与「同一账号只标记一次」都由它一条判据表达。
+    if (marked.claim(activeAccountId ?? '')) {
+      await pool.updateModelRateLimit(activeAccountId as string, options.model, nextUtc8DayStartMs())
+      tried.add(activeAccountId as string)
     }
 
     const next = await pickNextAccount({

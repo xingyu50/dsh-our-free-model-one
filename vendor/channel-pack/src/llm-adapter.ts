@@ -19,7 +19,7 @@ import {
   registerAdapterIdempotent,
 } from './llm-register-compat.js'
 import { reportLedgerAccount } from './token-ledger.js'
-import { pickNextAccount } from './account-rotation.js'
+import { createMarkRegistry, pickNextAccount } from './account-rotation.js'
 
 export const CHAT_API_BASE = 'https://snap-access.cn-north-4.myhuaweicloud.com/api/v2'
 export const PROVIDER = 'codearts'
@@ -1134,6 +1134,9 @@ export class CodeArtsAdapter extends LlmAdapter {
     // 因限流已尝试过的账号 id：保证每个账号只试一次，试完才判定"全部受限"。
     const rateLimitTried = new Set<string>()
     if (currentAccountId) rateLimitTried.add(currentAccountId)
+    // 「同一账号只标记一次」的登记簿（`account-rotation.ts` 的四条不变量之一）。
+    // 三条换号路径共用它：一次请求里同一个账号只会被记一次限流。
+    const marked = createMarkRegistry()
     // benefit（免费额度）模型判定在重试循环外先算好：它要读 benefit 集合缓存
     // （`~/.cache/deveco/codearts_benefit_models.json`），不宜每轮重试都做 IO。
     // 集合来自 gateway/config 的模型清单 ∪ 静态兜底（见 isCodeArtsBenefitModel），
@@ -1195,11 +1198,14 @@ export class CodeArtsAdapter extends LlmAdapter {
             // （`getAvailableAccount` 会跳过未到期的账号）同时生效。
             const message = codeartsQuotaExhaustedMessage(options.model, nextUtc8DayStartMs())
             // ① 先给**当前**账号记上限流标记（UI 徽章与池的选号都依赖它）。
-            if (this.options.accountPool && currentAccountId) {
-              await this.options.accountPool.updateModelRateLimit(
-                currentAccountId, options.model, nextUtc8DayStartMs(),
-              )
-              rateLimitTried.add(currentAccountId)
+            if (this.options.accountPool) {
+              // 走登记簿：空 id 不标记 + 同一账号只标记一次，一条判据说完。
+              if (marked.claim(currentAccountId ?? '')) {
+                await this.options.accountPool.updateModelRateLimit(
+                  currentAccountId as string, options.model, nextUtc8DayStartMs(),
+                )
+                rateLimitTried.add(currentAccountId as string)
+              }
             }
             // ② 取下一个可用账号。
             //
@@ -1267,11 +1273,11 @@ export class CodeArtsAdapter extends LlmAdapter {
         if (isSseQuotaExhaustedErrorCode(errorDetail(errorText), errorText)) {
           const message = codeartsQuotaExhaustedMessage(options.model, nextUtc8DayStartMs())
           if (this.options.accountPool) {
-            if (currentAccountId) {
+            if (marked.claim(currentAccountId ?? '')) {
               await this.options.accountPool.updateModelRateLimit(
-                currentAccountId, options.model, nextUtc8DayStartMs(),
+                currentAccountId as string, options.model, nextUtc8DayStartMs(),
               )
-              rateLimitTried.add(currentAccountId)
+              rateLimitTried.add(currentAccountId as string)
             }
             const next = await pickNextAccount({
               pool: this.options.accountPool,
@@ -1305,9 +1311,9 @@ export class CodeArtsAdapter extends LlmAdapter {
           // 这正是本补丁要修的缺陷，本处是第三条（也是最后一条）调用点。
           const parsed = parseRateLimitError(errorText, options.model, response.status)
           if (parsed) {
-            if (currentAccountId) {
+            if (marked.claim(currentAccountId ?? '')) {
               await this.options.accountPool.updateModelRateLimit(
-                currentAccountId, parsed.modelId, parsed.resetTimeMs,
+                currentAccountId as string, parsed.modelId, parsed.resetTimeMs,
               )
             }
             // 与上面两处同一个取号骨架。这条原先是**唯一**没把 `rateLimitTried`

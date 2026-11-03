@@ -88,9 +88,10 @@ export function isBillingBusinessCode(code: unknown): boolean {
  * 取本机时区会在用户出差/改系统时区时算出**错的解禁时刻**：
  * 时区偏东会让标记过早失效（马上再撞一次额度墙），偏西则白等几小时。
  *
- * ⚠️ 算术本身只在 `utc8.ts` 里留一份；这里 re-export 是为了不动 13 个既有
- * import 点（`qoder-adapter` / `llm-adapter` / `raccoon-adapter` 等都在这里取）。
- * 新增调用请直接用 `./utc8.js`。
+ * ⚠️ 算术本身只在 `utc8.ts` 里留一份。这里的 re-export 只是**兼容出口**，
+ * 六个调用方仍从这里取（`auto-checkin` / `llm-adapter` / `loomy-adapter` /
+ * `qoder-adapter` / `raccoon-adapter` / `zcode-adapter`）；新增调用请直接用
+ * `./utc8.js`，别再往这条出口上加名字。
  */
 export {
   QODER_BILLING_UTC_OFFSET_MS,
