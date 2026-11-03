@@ -36291,6 +36291,12 @@ function registerAdapterIdempotent(llm, providers, adapter, warn) {
 }
 
 // vendor/channel-pack/src/account-rotation.ts
+var ROTATION_MIN_BUDGET = 3;
+function poolRotationBudget(pool, provider, minimum = ROTATION_MIN_BUDGET) {
+  if (pool === void 0) return 1;
+  const enabled = pool.listAccountsByProvider(provider).filter((entry) => entry.enabled).length;
+  return Math.max(minimum, enabled);
+}
 async function pickNextAccount(options) {
   const { pool, provider, modelId, tried } = options;
   if (pool === void 0) return void 0;
@@ -38608,6 +38614,7 @@ var QoderAdapter = class extends LlmAdapter2 {
     let duplicateRetried = false;
     let response;
     const triedAccounts = /* @__PURE__ */ new Set();
+    const marked = createMarkRegistry();
     let activeAccountId = this.options.currentAccountId?.();
     if (activeAccountId !== void 0 && activeAccountId.length > 0) {
       triedAccounts.add(activeAccountId);
@@ -38622,7 +38629,7 @@ var QoderAdapter = class extends LlmAdapter2 {
           continue;
         }
         if (isBillingBusinessCode(response.status) || looksLikeBillingError(errorText)) {
-          const switched = await this.switchAccountOnQuota(options, triedAccounts, activeAccountId);
+          const switched = await this.switchAccountOnQuota(options, triedAccounts, activeAccountId, marked);
           if (switched !== void 0) {
             credential = switched.credential;
             activeAccountId = switched.accountId;
@@ -38679,7 +38686,7 @@ var QoderAdapter = class extends LlmAdapter2 {
             break;
           }
           if (isQuotaExceededError(error)) {
-            const switched = await this.switchAccountOnQuota(options, triedAccounts, activeAccountId);
+            const switched = await this.switchAccountOnQuota(options, triedAccounts, activeAccountId, marked);
             if (switched !== void 0) {
               credential = switched.credential;
               activeAccountId = switched.accountId;
@@ -38711,10 +38718,10 @@ var QoderAdapter = class extends LlmAdapter2 {
    * @param activeAccountId - **当前正在使用的**账号 id（见下）。
    * @returns 新凭据；无可用账号时 `undefined`（调用方如实抛出原错误）。
    */
-  async switchAccountOnQuota(options, tried, activeAccountId) {
+  async switchAccountOnQuota(options, tried, activeAccountId, marked) {
     const pool = this.options.accountPool;
     if (pool === void 0) return void 0;
-    if (activeAccountId !== void 0 && activeAccountId.length > 0) {
+    if (marked.claim(activeAccountId ?? "")) {
       await pool.updateModelRateLimit(activeAccountId, options.model, nextUtc8DayStartMs());
       tried.add(activeAccountId);
     }
@@ -41332,6 +41339,7 @@ var ZcodeAdapter = class extends LlmAdapter4 {
       }
     }
     const tried = /* @__PURE__ */ new Set();
+    const marked = createMarkRegistry();
     let activeAccountId = this.options.currentAccountId?.();
     if (activeAccountId !== void 0 && activeAccountId.length > 0) tried.add(activeAccountId);
     let credential = await this.resolveCredentialOrThrow(options);
@@ -41438,7 +41446,7 @@ var ZcodeAdapter = class extends LlmAdapter4 {
         noteZcodeRequestFailed(activeAccountId);
         if (isZcodeQuotaExhausted(response.status, text)) {
           if (quotaRound < this.product.quotaSwitchMax) {
-            const switched = await this.switchAccountOnQuota(options, tried, activeAccountId);
+            const switched = await this.switchAccountOnQuota(options, tried, activeAccountId, marked);
             if (switched !== void 0) {
               credential = switched.credential;
               activeAccountId = switched.accountId;
@@ -41516,7 +41524,7 @@ var ZcodeAdapter = class extends LlmAdapter4 {
       }
       if (response.body === null) {
         if (quotaRound < this.product.quotaSwitchMax) {
-          const switched = await this.switchAccountOnQuota(options, tried, activeAccountId);
+          const switched = await this.switchAccountOnQuota(options, tried, activeAccountId, marked);
           if (switched !== void 0) {
             credential = switched.credential;
             activeAccountId = switched.accountId;
@@ -41544,7 +41552,7 @@ var ZcodeAdapter = class extends LlmAdapter4 {
         if (timedOut()) throw timeoutError(error);
         if (!emitted && isFastEntitlementMiss(error, Date.now() - consumeStartedAt)) {
           if (quotaRound < this.product.quotaSwitchMax) {
-            const switched = await this.switchAccountOnQuota(options, tried, activeAccountId);
+            const switched = await this.switchAccountOnQuota(options, tried, activeAccountId, marked);
             if (switched !== void 0) {
               credential = switched.credential;
               activeAccountId = switched.accountId;
@@ -41654,10 +41662,10 @@ var ZcodeAdapter = class extends LlmAdapter4 {
    * ⚠ 只标记**该账号 + 该模型**（`updateModelRateLimit` 的既有语义）：
    * 额度是「账号 + 模型」维度的，同一账号在别的模型上仍可能可用。
    */
-  async switchAccountOnQuota(options, tried, activeAccountId) {
+  async switchAccountOnQuota(options, tried, activeAccountId, marked) {
     const pool = this.options.accountPool;
     if (pool === void 0) return void 0;
-    if (activeAccountId !== void 0 && activeAccountId.length > 0) {
+    if (marked.claim(activeAccountId ?? "")) {
       await pool.updateModelRateLimit(activeAccountId, options.model, nextUtc8DayStartMs());
       tried.add(activeAccountId);
     }
@@ -41886,7 +41894,6 @@ function resolveFirstTokenTimeoutMs4() {
 function resolveChunkTimeoutMs4() {
   return Number.parseInt(process.env.DSH_TRAE_SSE_CHUNK_TIMEOUT_MS ?? "", 10) || 12e4;
 }
-var TRAE_MIN_ROTATE_BUDGET = 3;
 var TRAE_ROTATABLE_STREAM_ERROR = "TRAE_ROTATABLE_STREAM_ERROR";
 function isRotatableStreamError(code) {
   return code === 1005 || code === 4008 || code === 4011;
@@ -42513,19 +42520,17 @@ var TraeAdapter = class extends LlmAdapter5 {
   /**
    * 本次请求最多尝试几个账号（含首次）。
    *
-   * = 池内**启用**账号数，最少 {@link TRAE_MIN_ROTATE_BUDGET}。
+   * = 池内**启用**账号数，最少 {@link ROTATION_MIN_BUDGET}（见 `account-rotation.ts`）。
    *
    * 早期实现写死 `TRAE_MAX_ROTATE = 3`：10 个账号也只试 3 个 —— 而「多加几个号
    * 分摊额度」正是用户加号的全部目的。改成按池大小自适应后，加号立刻生效。
+   * 「按池大小」与「保留下限」这条规则已与其余换号渠道共用，见 `poolRotationBudget`。
    * 留一个下限，是为了池里只有 1~2 个号时不至于一次都不换。
    *
    * ⚠️ 没有账号池（单凭据模式）时返回 1：无号可换，不做无谓的重试。
    */
   rotationBudget() {
-    const pool = this.options.accountPool;
-    if (pool === void 0) return 1;
-    const enabled = pool.listAccountsByProvider(this.product.id).filter((entry) => entry.enabled).length;
-    return Math.max(TRAE_MIN_ROTATE_BUDGET, enabled);
+    return poolRotationBudget(this.options.accountPool, this.product.id);
   }
   /**
    * 取下一个要尝试的账号。
@@ -42543,11 +42548,14 @@ var TraeAdapter = class extends LlmAdapter5 {
     if (this.options.nextAccount !== void 0) {
       return await this.options.nextAccount(modelId, tried);
     }
-    const pool = this.options.accountPool;
-    if (pool === void 0) return void 0;
-    const next = await pool.getAvailableAccount(this.product.id, modelId, tried);
-    if (next === null || next === void 0 || tried.has(next.entry.id)) return void 0;
-    return { accountId: next.entry.id, credential: next.credential };
+    const next = await pickNextAccount({
+      pool: this.options.accountPool,
+      provider: this.product.id,
+      modelId,
+      tried
+    });
+    if (next === void 0) return void 0;
+    return { accountId: next.accountId, credential: next.credential };
   }
   /**
    * 记一次失败（交给失败账本决定「要不要写限流标记」）。
@@ -43593,6 +43601,7 @@ var GeminiAdapter = class extends LlmAdapter6 {
     let droppedSignatures = false;
     let refreshedOnce = false;
     let rotations = 0;
+    const marked = createMarkRegistry();
     let lastFailure;
     const sessionBumps = /* @__PURE__ */ new Map();
     let lastBaseSessionId = "";
@@ -43727,7 +43736,7 @@ var GeminiAdapter = class extends LlmAdapter6 {
         }
         const rotatable = quotaLike || status === 401 || endpointFirst;
         if (rotatable && pool !== void 0) {
-          if (currentAccountId !== "") {
+          if (marked.claim(currentAccountId)) {
             const cooldown = status === 401 ? GEMINI_AUTH_COOLDOWN_MS : GEMINI_RATE_LIMIT_COOLDOWN_MS;
             await pool.updateModelRateLimit(currentAccountId, options.model, Date.now() + cooldown).catch(() => {
             });
@@ -44214,6 +44223,1379 @@ async function fetchCreditBalance(credential, product, fetcher = fetch) {
   return { total, packages, expiredTotal };
 }
 
+// vendor/channel-pack/src/llm-adapter.ts
+import {
+  attributionHeaders,
+  CONTEXT_WINDOW_EXCEEDED_CODE as CONTEXT_WINDOW_EXCEEDED_CODE2,
+  isContextWindowExceededError as isContextWindowExceededError2,
+  isQuotaExceededError as isQuotaExceededError2,
+  LlmAdapter as LlmAdapter7,
+  LlmError as LlmError13,
+  QUOTA_EXCEEDED_CODE
+} from "@deepseek-ai/dsh-llm";
+import { ReasoningEffortId as ReasoningEffortId8, ToolCallId as ToolCallId6 } from "@deepseek-ai/dsh-llm";
+
+// vendor/channel-pack/src/models.ts
+import { existsSync as existsSync5, mkdirSync as mkdirSync4, readFileSync as readFileSync5, renameSync as renameSync4, writeFileSync as writeFileSync5 } from "node:fs";
+
+// vendor/channel-pack/src/sign.ts
+async function sha256Hex(data) {
+  const hash = await crypto.subtle.digest("SHA-256", data.slice().buffer);
+  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function hmacSha256Hex(key, data) {
+  const cryptoKey = await crypto.subtle.importKey("raw", key.slice().buffer, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sig2 = await crypto.subtle.sign("HMAC", cryptoKey, data.slice().buffer);
+  return Array.from(new Uint8Array(sig2)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+function buildCanonicalRequest(method, uri, query, headers, payloadHash) {
+  const signedHeaders = [];
+  headers.forEach((_, k) => signedHeaders.push(k));
+  signedHeaders.sort();
+  const headerLines = signedHeaders.map((k) => `${k}:${headers.get(k) ?? ""}`);
+  return [method, uri, query, headerLines.join("\n"), "", signedHeaders.join(";"), payloadHash].join("\n");
+}
+async function signRequestHuawei(ak, sk, securityToken, method, urlStr, body, extraHeaders) {
+  const url = new URL(urlStr);
+  let uri = url.pathname;
+  if (!uri.endsWith("/")) uri += "/";
+  const query = url.search.slice(1);
+  const dateStamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
+  const payloadHash = await sha256Hex(body);
+  const headers = /* @__PURE__ */ new Map();
+  headers.set("host", url.host);
+  headers.set("x-sdk-date", dateStamp);
+  headers.set("x-sdk-content-sha256", payloadHash);
+  headers.set("x-security-token", securityToken);
+  if (extraHeaders !== void 0) {
+    for (const [key, value] of Object.entries(extraHeaders)) headers.set(key, value);
+  }
+  if (method.toUpperCase() !== "GET") headers.set("content-type", "application/json");
+  const signedHeaders = [];
+  headers.forEach((_, k) => signedHeaders.push(k));
+  signedHeaders.sort();
+  const canonicalRequest = buildCanonicalRequest(method, uri, query, headers, payloadHash);
+  const canonicalHash = await sha256Hex(new TextEncoder().encode(canonicalRequest));
+  const stringToSign = `SDK-HMAC-SHA256
+${dateStamp}
+${canonicalHash}`;
+  const signature = await hmacSha256Hex(new TextEncoder().encode(sk), new TextEncoder().encode(stringToSign));
+  headers.set("Authorization", `SDK-HMAC-SHA256 Access=${ak},SignedHeaders=${signedHeaders.join(";")},Signature=${signature}`);
+  return headers;
+}
+
+// vendor/channel-pack/src/models.ts
+var OPENGW_GATEWAY_CONFIG_URL = "https://opengw.developer.huaweicloud.com/api/v1/gateway/config";
+var SNAP_MODEL_BUILTIN_URL = "https://snap-access.cn-north-4.myhuaweicloud.com/v1/model/builtin";
+var CODEARTS_MODELS_CACHE_FILENAME = "codearts_models.json";
+var CODEARTS_BENEFIT_CACHE_FILENAME = "codearts_benefit_models.json";
+var CODEARTS_BENEFIT_FALLBACK = ["glm-5.3-flash", "deepseek-v4.1-flash"];
+var FETCH_TIMEOUT_MS = 1e4;
+var MODEL_REFRESH_INTERVAL_MS = 2 * 36e5;
+var memoryCache;
+var benefitMemoryCache;
+function normalizeModelId(id) {
+  if (id.length > 5) {
+    const suffix = id.slice(-5);
+    if (suffix.startsWith("-") && /^\d{4}$/.test(suffix.slice(1))) {
+      return id.slice(0, -5);
+    }
+  }
+  return id;
+}
+function parseModelInfo(m, seen) {
+  const rawId = m["model_id"];
+  if (typeof rawId !== "string" || rawId.length === 0) return void 0;
+  const id = normalizeModelId(rawId);
+  if (id.includes("-VL-") || id.endsWith("-VL")) return void 0;
+  const rawName = m["model_name"];
+  const name2 = typeof rawName === "string" && rawName.length > 0 ? normalizeModelId(rawName) : id;
+  if (seen.has(id)) return void 0;
+  seen.add(id);
+  return { id, name: name2 };
+}
+function extractJsonArray(text, path2) {
+  try {
+    let value = JSON.parse(text);
+    for (const key of path2) {
+      if (typeof value !== "object" || value === null) return void 0;
+      value = value[key];
+    }
+    return Array.isArray(value) ? value : void 0;
+  } catch {
+    return void 0;
+  }
+}
+async function fetchSignedGet(fetcher, url, ak, sk, st, extraUnsignedHeaders) {
+  const signed = await signRequestHuawei(ak, sk, st, "GET", url, new Uint8Array());
+  const headers = new Headers();
+  signed.forEach((v, k) => {
+    if (k !== "host") headers.set(k, v);
+  });
+  if (extraUnsignedHeaders !== void 0) {
+    for (const [k, v] of Object.entries(extraUnsignedHeaders)) headers.set(k, v);
+  }
+  try {
+    const response = await fetcher(url, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
+    });
+    if (!response.ok) return void 0;
+    return await response.text();
+  } catch {
+    return void 0;
+  }
+}
+async function fetchCodeArtsRemoteModels(credential, fetcher = fetch) {
+  const { access_key_id: ak, secret_access_key: sk, security_token: st } = credential;
+  if (!ak || !sk) return [];
+  const models = [];
+  const seen = /* @__PURE__ */ new Set();
+  const benefitIds = [];
+  const gatewayText = await fetchSignedGet(fetcher, OPENGW_GATEWAY_CONFIG_URL, ak, sk, st);
+  if (gatewayText !== void 0) {
+    const arr = extractJsonArray(gatewayText, ["result", "models"]);
+    if (arr !== void 0) {
+      for (const item of arr) {
+        if (typeof item === "object" && item !== null) {
+          const entry = item;
+          const rawId = typeof entry["model_id"] === "string" ? entry["model_id"] : "";
+          const mi = parseModelInfo(entry, seen);
+          if (mi) {
+            if (rawId.length > 0 && normalizeModelId(rawId) === rawId) benefitIds.push(mi.id);
+            models.push(mi);
+          }
+        }
+      }
+    }
+  }
+  const snapText = await fetchSignedGet(fetcher, SNAP_MODEL_BUILTIN_URL, ak, sk, st, {
+    "Content-Type": "application/json",
+    "Agent-Type": "PromptCenter",
+    "X-Language": "zh-cn"
+  });
+  if (snapText !== void 0) {
+    const arr = extractJsonArray(snapText, ["builtinModels"]);
+    if (arr !== void 0) {
+      for (const item of arr) {
+        if (typeof item === "object" && item !== null) {
+          const mi = parseModelInfo(item, seen);
+          if (mi) models.push(mi);
+        }
+      }
+    }
+  }
+  if (benefitIds.length > 0) {
+    setBenefitMemoryCache(benefitIds);
+    saveBenefitCache(benefitIds);
+  }
+  return models;
+}
+function cacheDir() {
+  const override = process.env.DSH_CODEARTS_CACHE_DIR;
+  if (override !== void 0 && override.length > 0) return override;
+  const home = process.env.USERPROFILE ?? process.env.HOME;
+  if (!home) return void 0;
+  return `${home}/.cache/deveco`;
+}
+function modelsCachePath() {
+  const dir = cacheDir();
+  return dir === void 0 ? void 0 : `${dir}/${CODEARTS_MODELS_CACHE_FILENAME}`;
+}
+function benefitCachePath() {
+  const dir = cacheDir();
+  return dir === void 0 ? void 0 : `${dir}/${CODEARTS_BENEFIT_CACHE_FILENAME}`;
+}
+function saveModelsCache(models) {
+  const path2 = modelsCachePath();
+  if (!path2) return;
+  const dir = path2.slice(0, path2.lastIndexOf("/"));
+  try {
+    mkdirSync4(dir, { recursive: true });
+    const tmp = path2 + ".tmp";
+    writeFileSync5(tmp, JSON.stringify(models), "utf-8");
+    renameSync4(tmp, path2);
+  } catch {
+  }
+}
+function setMemoryCache(models) {
+  memoryCache = models;
+}
+function saveBenefitCache(ids) {
+  const path2 = benefitCachePath();
+  if (!path2) return;
+  const dir = path2.slice(0, path2.lastIndexOf("/"));
+  try {
+    mkdirSync4(dir, { recursive: true });
+    const tmp = path2 + ".tmp";
+    writeFileSync5(tmp, JSON.stringify(ids), "utf-8");
+    renameSync4(tmp, path2);
+  } catch {
+  }
+}
+function loadBenefitCache() {
+  const path2 = benefitCachePath();
+  if (!path2) return void 0;
+  try {
+    if (!existsSync5(path2)) return void 0;
+    const text = readFileSync5(path2, "utf-8");
+    const ids = JSON.parse(text);
+    if (!Array.isArray(ids) || ids.length === 0) return void 0;
+    return ids.filter((id) => typeof id === "string");
+  } catch {
+    return void 0;
+  }
+}
+function setBenefitMemoryCache(ids) {
+  benefitMemoryCache = ids;
+}
+function isCodeArtsBenefitModel(model) {
+  if (benefitMemoryCache === void 0) benefitMemoryCache = loadBenefitCache();
+  if (benefitMemoryCache !== void 0 && benefitMemoryCache.includes(model)) return true;
+  return CODEARTS_BENEFIT_FALLBACK.includes(model);
+}
+
+// vendor/channel-pack/src/llm-adapter.ts
+var CHAT_API_BASE = "https://snap-access.cn-north-4.myhuaweicloud.com/api/v2";
+var PROVIDER = "codearts";
+var BENEFIT_NOT_FOUND_CODE = "BENEFIT_NOT_FOUND";
+var CODEARTS_BENEFIT_NOT_FOUND_ERROR_CODE = "InferHub.4004.200";
+var DEFAULT_MODELS = [
+  "GLM-5.2",
+  "GLM-5.1",
+  "GLM-5",
+  "glm-5.3-flash",
+  "openpangu-2.0-flash",
+  "openpangu-2.0-pro",
+  "deepseek-v4-flash",
+  "deepseek-v4-pro",
+  "deepseek-v4.1-flash"
+];
+var CONTEXT_WINDOWS = /* @__PURE__ */ new Map([
+  ["GLM-5.2", 202752],
+  ["glm-5.3-flash", 1048576],
+  ["deepseek-v4-flash", 1048576],
+  ["deepseek-v4-pro", 1048576],
+  ["deepseek-v4.1-flash", 1e6]
+]);
+function contentToText5(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.filter((block) => typeof block === "object" && block !== null && block.type === "text").map((block) => String(block.text)).join("");
+}
+function serializeMessages3(messages) {
+  const normalized = normalizeHarnessMessages(messages);
+  const wire = [];
+  const { keepCallIds, keepResultIds } = resolveToolPairing(normalized);
+  for (const message2 of normalized) {
+    if (message2.role === "assistant") {
+      const content2 = stripCourseLeakFromHistoryContent(
+        message2.role,
+        Array.isArray(message2.content) ? message2.content : []
+      );
+      const toolCalls = content2.filter((block) => typeof block === "object" && block !== null && block.type === "tool-call").filter((block) => keepCallIds.has(String(block.id))).map((block) => ({
+        id: String(block.id),
+        type: "function",
+        function: { name: String(block.name), arguments: normalizeToolArguments(String(block.arguments)) }
+      }));
+      const reasoning = content2.filter((block) => typeof block === "object" && block !== null && block.type === "reasoning").map((block) => String(block.text)).join("");
+      wire.push({
+        role: "assistant",
+        content: contentToText5(content2),
+        // 后端（deepseek-v4-flash/pro）校验要求 assistant 消息必须包含
+        // reasoning_content 字段：历史里的推理块在上一轮被持久化，回传时
+        // 若缺失该字段会直接 400（"Missing `reasoning_content` field"）。
+        // 始终携带该字段（无推理时为空串），确保字段存在。
+        reasoning_content: reasoning,
+        ...toolCalls.length > 0 ? { tool_calls: toolCalls } : {}
+      });
+      continue;
+    }
+    if (message2.role === "system") {
+      wire.push({ role: "system", content: contentToText5(message2.content) });
+      continue;
+    }
+    const content = Array.isArray(message2.content) ? message2.content : [];
+    const toolResults = content.filter((block) => typeof block === "object" && block !== null && block.type === "tool-result");
+    const text = contentToText5(message2.content);
+    if (text.length > 0 || toolResults.length === 0) wire.push({ role: "user", content: text });
+    for (const result of toolResults) {
+      if (!keepResultIds.has(String(result.toolCallId))) continue;
+      wire.push({
+        role: "tool",
+        tool_call_id: String(result.toolCallId),
+        content: contentToText5(result.content) || "(no output)"
+      });
+    }
+  }
+  return wire;
+}
+function isDeepseekV4Model(model) {
+  return /^deepseek-v4-(flash|pro)$/.test(model);
+}
+function needsDsmlToolMode(model, _toolNames) {
+  return isDeepseekV4Model(model);
+}
+function buildDsmlSystemPrompt(tools) {
+  const toolJson = JSON.stringify(tools.map((tool) => ({
+    name: tool.function.name,
+    description: tool.function.description,
+    parameters: tool.function.parameters
+  })), null, 2);
+  return [
+    "\u4EE5\u4E0B\u662F\u4F60\u53EF\u7528\u7684\u5DE5\u5177\u53CA\u5176 JSON Schema\u3002\u5F53\u9700\u8981\u8C03\u7528\u5DE5\u5177\u5B8C\u6210\u4EFB\u52A1\u65F6\uFF0C",
+    "\u5FC5\u987B\u4F7F\u7528\u539F\u751F DSML \u5DE5\u5177\u8C03\u7528\u8BED\u6CD5\u8F93\u51FA\uFF0C\u683C\u5F0F\u5982\u4E0B\uFF1A",
+    '<\uFF5CDSML\uFF5Ctool_calls><\uFF5CDSML\uFF5Cinvoke name="\u5DE5\u5177\u540D"><\uFF5CDSML\uFF5Cparameter name="\u53C2\u6570\u540D" string="true">\u53C2\u6570\u503C</\uFF5CDSML\uFF5Cparameter></\uFF5CDSML\uFF5Cinvoke></\uFF5CDSML\uFF5Ctool_calls>',
+    "",
+    "\u89C4\u5219\uFF1A",
+    "- \u5DE5\u5177\u540D\u5FC5\u987B\u662F\u4E0B\u9762\u5217\u8868\u4E2D\u7684 name\u3002",
+    "- \u6BCF\u4E2A\u53C2\u6570\u7528\u4E00\u4E2A <\uFF5CDSML\uFF5Cparameter> \u6807\u7B7E\u5305\u88F9\uFF0C\u53C2\u6570\u503C\u653E\u5728\u6807\u7B7E\u4E4B\u95F4\u3002",
+    '- \u5B57\u7B26\u4E32\u53C2\u6570\u52A0 string="true" \u5C5E\u6027\uFF1B\u5BF9\u8C61/\u6570\u7EC4/\u6570\u5B57/\u5E03\u5C14\u53C2\u6570\u4E0D\u8981\u52A0\u8BE5\u5C5E\u6027\u3002',
+    "- \u4E00\u6B21\u53EF\u4EE5\u8F93\u51FA\u591A\u4E2A <\uFF5CDSML\uFF5Cinvoke> \u8C03\u7528\uFF08\u5DE5\u5177\u53EF\u4EE5\u5E76\u884C\uFF09\u3002",
+    "- \u6587\u4EF6\u5185\u5BB9\u8BF7\u4E00\u6B21\u6027\u5B8C\u6574\u5199\u5165\u5355\u4E2A write \u8C03\u7528\u7684 content \u53C2\u6570\uFF0C\u4E0D\u8981\u62C6\u5206\u6216\u7701\u7565\u3002",
+    "",
+    "\u5DE5\u5177\u5217\u8868\uFF08JSON Schema\uFF09\uFF1A",
+    toolJson
+  ].join("\n");
+}
+var QUEUE_STATUS_BASE = "https://snap-access.cn-north-4.myhuaweicloud.com/api/v1/queue/status";
+var QUEUE_RETRY_DELAY_MS = 1e4;
+var QUEUE_MAX_ATTEMPTS2 = 180;
+function resolveFirstTokenTimeoutMs5() {
+  return Number.parseInt(process.env.DSH_CODEARTS_SSE_FIRST_TOKEN_TIMEOUT_MS ?? "", 10) || 3e5;
+}
+function resolveChunkTimeoutMs5() {
+  return Number.parseInt(process.env.DSH_CODEARTS_SSE_CHUNK_TIMEOUT_MS ?? "", 10) || 6e5;
+}
+function isTransportError4(error) {
+  if (!(error instanceof Error)) return false;
+  const message2 = error.message.toLowerCase();
+  if (message2.includes("terminated")) return true;
+  if (error.name.startsWith("UND_ERR_")) return true;
+  if (message2.includes("fetch failed")) return true;
+  if (message2.includes("econnreset") || message2.includes("epipe") || message2.includes("socket hang up")) return true;
+  return false;
+}
+var SseQueueRetryError = class extends Error {
+  code;
+  constructor(code, message2) {
+    super(message2);
+    this.name = "SseQueueRetryError";
+    this.code = code;
+  }
+};
+var SseQuotaExhaustedError = class extends Error {
+  code;
+  constructor(code, message2) {
+    super(message2);
+    this.name = "SseQuotaExhaustedError";
+    this.code = code;
+  }
+};
+function formatResetIn2(resetAtMs, nowMs = Date.now()) {
+  const diff = resetAtMs - nowMs;
+  if (diff <= 0) return "\u5373\u5C06\u91CD\u7F6E";
+  if (diff < 6e4) return "\u4E0D\u5230 1 \u5206\u949F";
+  if (diff < 36e5) return `${Math.round(diff / 6e4)} \u5206\u949F`;
+  return `${Math.round(diff / 36e4) / 10} \u5C0F\u65F6`;
+}
+function codeartsQuotaExhaustedMessage(model, resetAtMs, nowMs = Date.now()) {
+  const when = formatResetIn2(resetAtMs, nowMs);
+  return `codearts: \u6A21\u578B ${model} \u7684\u514D\u8D39\u989D\u5EA6\uFF08benefit\uFF09\u5DF2\u7528\u5C3D\uFF0C\u9884\u8BA1 ${when}\u540E\u91CD\u7F6E\uFF08\u6309 UTC+8 \u81EA\u7136\u65E5\u7ED3\u7B97\uFF0C\u9884\u8BA1 ${new Date(resetAtMs).toISOString()}\uFF09\u3002\u53EF\u6539\u7528\u5176\u5B83\u6A21\u578B\uFF0C\u6216\u5728 Channel Pack \u7684 CodeArts \u9762\u677F\u5207\u6362/\u6DFB\u52A0\u8D26\u53F7\u3002`;
+}
+function isQueueError(status, body) {
+  return status === 400 && (body.includes("TM.00001041") || /peak\s+usage|try\s+again\s+after|peak\s+hours/i.test(body) || /high\s+demand|too\s+many\s+requests/i.test(body));
+}
+function isAuthError(status, body) {
+  if (status === 401 || status === 403) return true;
+  return body.includes("APIG.0602") || /invalid\s+token|token\s+expired|token\s+is\s+invalid/i.test(body);
+}
+function isSseQueueErrorCode(code) {
+  return code === "TM.00001041" || /81111|TPM|(^|[^0-9])429([^0-9]|$)|rate.?limit|too many requests|排队|限流/i.test(code);
+}
+function isSseQuotaExhaustedErrorCode(code, message2) {
+  return code.includes("4291") || /insufficient[\s_-]+quota/i.test(message2);
+}
+function errorDetail4(body) {
+  try {
+    const data = JSON.parse(body);
+    const error = typeof data.error === "object" && data.error !== null ? data.error : void 0;
+    const parts = [
+      typeof error?.code === "string" ? error.code : void 0,
+      typeof error?.type === "string" ? error.type : void 0,
+      typeof error?.message === "string" ? error.message : void 0,
+      typeof data.error_code === "string" ? data.error_code : void 0,
+      typeof data.error_msg === "string" ? data.error_msg : void 0,
+      typeof data.message === "string" ? data.message : void 0
+    ].filter((value) => value !== void 0);
+    if (parts.length > 0) return parts.join(" ");
+  } catch {
+  }
+  return body;
+}
+function httpErrorCode4(status, body) {
+  if (status === 401 || status === 403) return "AUTH";
+  const detail = errorDetail4(body);
+  if (isQuotaExceededError2(detail)) return QUOTA_EXCEEDED_CODE;
+  if (status === 429) return "RATE_LIMIT";
+  if (status === 400) {
+    if (isContextWindowExceededError2(detail)) return CONTEXT_WINDOW_EXCEEDED_CODE2;
+    return "INVALID_REQUEST";
+  }
+  if (status >= 500) return "SERVER";
+  return `HTTP_${status}`;
+}
+function delay(ms, signal) {
+  return new Promise((resolve2) => {
+    if (signal?.aborted) return resolve2();
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve2();
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", onAbort);
+      resolve2();
+    }, ms);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+function errorMessage4(error) {
+  if (error instanceof Error) return error.message;
+  try {
+    return String(error);
+  } catch {
+    return "unknown error";
+  }
+}
+function readCodeArtsChunk(reader, timeoutMs, signal, phase = "chunk") {
+  return readWithIdleTimeout(reader, timeoutMs, "codearts", signal, phase);
+}
+var DSML_TOOL_CALLS_OPEN = "<\uFF5CDSML\uFF5Ctool_calls>";
+var DSML_TOOL_CALLS_CLOSE = "</\uFF5CDSML\uFF5Ctool_calls>";
+var DSML_INVOKE_OPEN_PREFIX = "<\uFF5CDSML\uFF5Cinvoke";
+var DSML_INVOKE_CLOSE = "</\uFF5CDSML\uFF5Cinvoke>";
+var DSML_PARAM_OPEN_PREFIX = "<\uFF5CDSML\uFF5Cparameter";
+var DSML_PARAM_CLOSE = "</\uFF5CDSML\uFF5Cparameter>";
+var THOUGHT_OPEN = "<thought>";
+var THOUGHT_CLOSE = "</thought>";
+function tryParseScalar(value) {
+  if (value === "") return "";
+  const trimmed = value.trim();
+  if (trimmed === "") return value;
+  if (trimmed === "null") return null;
+  if (trimmed === "true") return true;
+  if (trimmed === "false") return false;
+  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try {
+      const decoded = JSON.parse(trimmed);
+      if (typeof decoded === "string") return tryParseScalar(decoded);
+      return decoded;
+    } catch {
+    }
+  }
+  if (/^-?\d+$/.test(trimmed)) return Number(trimmed);
+  if (/^-?\d+\.\d+$/.test(trimmed)) return Number(trimmed);
+  if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
+    try {
+      return JSON.parse(trimmed);
+    } catch {
+    }
+  }
+  return value;
+}
+function parseDsmlInvoke(block) {
+  const nameMatch = /name\s*=\s*"([^"]*)"/.exec(block);
+  if (nameMatch === null) return void 0;
+  const name2 = nameMatch[1];
+  const params = {};
+  let cursor = 0;
+  for (; ; ) {
+    const openStart = block.indexOf(DSML_PARAM_OPEN_PREFIX, cursor);
+    if (openStart === -1) break;
+    const openEnd = block.indexOf(">", openStart);
+    if (openEnd === -1) break;
+    const openTag = block.slice(openStart, openEnd + 1);
+    const paramNameMatch = /name\s*=\s*"([^"]*)"/.exec(openTag);
+    if (paramNameMatch === null) {
+      cursor = openEnd + 1;
+      continue;
+    }
+    const paramName = paramNameMatch[1];
+    const closeStart = block.indexOf(DSML_PARAM_CLOSE, openEnd + 1);
+    if (closeStart === -1) break;
+    const value = block.slice(openEnd + 1, closeStart);
+    const isString = /string\s*=\s*"true"/.test(openTag);
+    if (isString) {
+      const parsed = tryParseScalar(value);
+      params[paramName] = parsed;
+    } else {
+      try {
+        const parsed = JSON.parse(value);
+        params[paramName] = typeof parsed === "string" ? tryParseScalar(parsed) : parsed;
+      } catch {
+        params[paramName] = value;
+      }
+    }
+    cursor = closeStart + DSML_PARAM_CLOSE.length;
+  }
+  return { name: name2, arguments: JSON.stringify(params) };
+}
+function parseDsmlToolCalls(block) {
+  let inner = block;
+  if (inner.startsWith(DSML_TOOL_CALLS_OPEN)) inner = inner.slice(DSML_TOOL_CALLS_OPEN.length);
+  if (inner.endsWith(DSML_TOOL_CALLS_CLOSE)) inner = inner.slice(0, inner.length - DSML_TOOL_CALLS_CLOSE.length);
+  const calls = [];
+  let cursor = 0;
+  for (; ; ) {
+    const openStart = inner.indexOf(DSML_INVOKE_OPEN_PREFIX, cursor);
+    if (openStart === -1) break;
+    const openEnd = inner.indexOf(">", openStart);
+    if (openEnd === -1) break;
+    const closeStart = inner.indexOf(DSML_INVOKE_CLOSE, openEnd + 1);
+    if (closeStart === -1) break;
+    const invokeBlock = inner.slice(openStart, closeStart + DSML_INVOKE_CLOSE.length);
+    const parsed = parseDsmlInvoke(invokeBlock);
+    if (parsed === void 0) return void 0;
+    calls.push(parsed);
+    cursor = closeStart + DSML_INVOKE_CLOSE.length;
+  }
+  return calls;
+}
+function longestOpenPrefixTail(buffer, prefixes) {
+  let keepLen = 0;
+  const maxCheck = Math.min(buffer.length, Math.max(...prefixes.map((p) => p.length)));
+  for (let i = 1; i <= maxCheck; i++) {
+    const tail = buffer.slice(buffer.length - i);
+    if (prefixes.some((p) => p.startsWith(tail))) keepLen = i;
+  }
+  return keepLen;
+}
+var DsmlContentExtractor = class {
+  buffer = "";
+  state = "normal";
+  feed(chunk) {
+    let text = "";
+    let reasoning = "";
+    const toolCalls = [];
+    this.buffer += chunk;
+    for (; ; ) {
+      if (this.state === "normal") {
+        const thoughtIdx = this.buffer.indexOf(THOUGHT_OPEN);
+        const dsmlIdx = this.buffer.indexOf(DSML_TOOL_CALLS_OPEN);
+        let openIdx = -1;
+        let nextState = "in-thought";
+        if (thoughtIdx !== -1 && (dsmlIdx === -1 || thoughtIdx < dsmlIdx)) {
+          openIdx = thoughtIdx;
+          nextState = "in-thought";
+        } else if (dsmlIdx !== -1) {
+          openIdx = dsmlIdx;
+          nextState = "in-dsml";
+        }
+        if (openIdx === -1) {
+          const keepLen = longestOpenPrefixTail(this.buffer, [THOUGHT_OPEN, DSML_TOOL_CALLS_OPEN]);
+          if (keepLen === 0) {
+            text += this.buffer;
+            this.buffer = "";
+          } else if (this.buffer.length > keepLen) {
+            text += this.buffer.slice(0, this.buffer.length - keepLen);
+            this.buffer = this.buffer.slice(this.buffer.length - keepLen);
+          }
+          break;
+        }
+        if (openIdx > 0) text += this.buffer.slice(0, openIdx);
+        this.buffer = this.buffer.slice(openIdx);
+        const openLen = nextState === "in-thought" ? THOUGHT_OPEN.length : DSML_TOOL_CALLS_OPEN.length;
+        this.buffer = this.buffer.slice(openLen);
+        this.state = nextState;
+        continue;
+      }
+      if (this.state === "in-thought") {
+        const closeIdx2 = this.buffer.indexOf(THOUGHT_CLOSE);
+        if (closeIdx2 === -1) {
+          const keepLen = longestOpenPrefixTail(this.buffer, [THOUGHT_CLOSE]);
+          if (keepLen === 0) {
+            reasoning += this.buffer;
+            this.buffer = "";
+          } else if (this.buffer.length > keepLen) {
+            reasoning += this.buffer.slice(0, this.buffer.length - keepLen);
+            this.buffer = this.buffer.slice(this.buffer.length - keepLen);
+          }
+          break;
+        }
+        if (closeIdx2 > 0) reasoning += this.buffer.slice(0, closeIdx2);
+        this.buffer = this.buffer.slice(closeIdx2 + THOUGHT_CLOSE.length);
+        this.state = "normal";
+        continue;
+      }
+      const closeIdx = this.buffer.indexOf(DSML_TOOL_CALLS_CLOSE);
+      if (closeIdx === -1) {
+        break;
+      }
+      const block = this.buffer.slice(0, closeIdx + DSML_TOOL_CALLS_CLOSE.length);
+      const parsed = parseDsmlToolCalls(block);
+      if (parsed === void 0) {
+        text += block;
+      } else {
+        toolCalls.push(...parsed);
+      }
+      this.buffer = this.buffer.slice(closeIdx + DSML_TOOL_CALLS_CLOSE.length);
+      this.state = "normal";
+      continue;
+    }
+    return { text, reasoning, toolCalls };
+  }
+  flush() {
+    const remaining = this.buffer;
+    this.buffer = "";
+    if (this.state === "in-thought") {
+      this.state = "normal";
+      return { text: "", reasoning: remaining };
+    }
+    if (this.state === "in-dsml") {
+      this.state = "normal";
+      return { text: DSML_TOOL_CALLS_OPEN + remaining, reasoning: "" };
+    }
+    this.state = "normal";
+    return { text: remaining, reasoning: "" };
+  }
+};
+var CodeArtsAdapter = class extends LlmAdapter7 {
+  constructor(options) {
+    super();
+    this.options = options;
+    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.chatId = options.chatId ?? crypto.randomUUID().replace(/-/g, "");
+    this.sessionId = options.sessionId ?? crypto.randomUUID().replace(/-/g, "");
+  }
+  options;
+  fetchImpl;
+  chatId;
+  sessionId;
+  /**
+   * 描述本适配器拥有的 provider 路由。
+   *
+   * 与 BuddyAdapter 同款防御：DSH 校验 `info.id === provider`，且模型设置页
+   * 会用该 id 计算 `deriveKeyRef(provider)`（内部 `provider.toUpperCase()`）。
+   * 入参异常时回退到 PROVIDER 常量，避免客户端抛
+   * `undefined.toUpperCase is not a function`。
+   */
+  providerInfo(provider) {
+    const id = typeof provider === "string" && provider.length > 0 ? provider : PROVIDER;
+    return { id, name: "CodeArts Agent" };
+  }
+  /** 动态模型缓存（首次 listModels 成功后填充）。 */
+  remoteModels;
+  /**
+   * 目录加载闸门：并发去重 + 失败冷却。
+   *
+   * ⚠ **不能省**：DSH 的 `buildModelCatalog` 对每个 provider `await listModels()`
+   * 后再对每个模型 `await resolveModelInfo()`，两处都会走到这里。原实现失败
+   * 直接返回（不落缓存）⇒ 一次网络故障被放大成「每模型重试一次」，每次顶着
+   * 10s 超时（`src/models.ts:55 FETCH_TIMEOUT_MS`），首屏因此长时间空转。
+   */
+  catalogGate = new RemoteCatalogGate();
+  /**
+   * 懒加载远端模型目录。resolveModel 可能先于 listModels 被调用
+   * （如直接进入会话），此时同样触发远端拉取。
+   */
+  async ensureRemoteModels() {
+    const fetchRemote = this.options.fetchRemoteModels;
+    if (this.remoteModels !== void 0 || fetchRemote === void 0) return;
+    await this.catalogGate.run(async () => {
+      const models = await fetchRemote();
+      if (models.length === 0) return false;
+      this.remoteModels = models;
+      return true;
+    });
+  }
+  /**
+   * 完整模型目录（**不应用用户黑名单**）。
+   *
+   * 设置页必须渲染被关闭的模型（否则用户无法重新打开），而 `listModels` 会按
+   * 黑名单过滤掉它们 —— RPC 层只能凭裸 id 补回，展示名随之丢失
+   * （用户报障：「关闭的就没有显示倍率」）。CodeArts 目录虽无倍率，但同样
+   * 需要正确的 `name`（否则关闭项显示 `deepseek-v4-flash` 这类裸 id）。
+   */
+  listAllModels() {
+    const source = this.remoteModels ?? DEFAULT_MODELS.map((id) => ({ id, name: id }));
+    return source.filter((m) => !/-VL-/i.test(m.id) && !/-VL$/i.test(m.id)).map((m) => ({ id: m.id, name: m.name }));
+  }
+  async listModels(_provider) {
+    if (!await providerCatalogVisible(this.options.accountPool, PROVIDER)) return [];
+    await this.ensureRemoteModels();
+    const visible = this.listAllModels();
+    const disabled = this.options.accountPool?.disabledModelsFor(PROVIDER);
+    const listed = disabled === void 0 || disabled.size === 0 ? visible : visible.filter((m) => !disabled.has(m.id));
+    return listed.map((m) => ({ provider: PROVIDER, id: m.id, name: m.name, inputModalities: ["text"] }));
+  }
+  async resolveModel(provider, model, _signal) {
+    await this.ensureRemoteModels();
+    const remoteModel = this.remoteModels?.find((m) => m.id === model);
+    const name2 = remoteModel?.name ?? model;
+    const contextWindow = CONTEXT_WINDOWS.get(model);
+    const resolved = { provider, id: model, name: name2 };
+    if (contextWindow !== void 0) resolved.context = { contextWindow };
+    resolved.reasoning = {
+      efforts: [
+        { id: ReasoningEffortId8("on"), name: "\u5F00\u542F" },
+        { id: ReasoningEffortId8("off"), name: "\u5173\u95ED" }
+      ],
+      defaultEffort: ReasoningEffortId8("on")
+    };
+    return resolved;
+  }
+  async prepareCall(provider, model, signal) {
+    return {
+      model: { ...await this.resolveModel(provider, model, signal), inputModalities: ["text"] },
+      stream: (options) => this.stream(options)
+    };
+  }
+  async *stream(options) {
+    let credential = await this.options.resolveCredential();
+    if (credential === void 0 || Date.parse(credential.expires_at) <= Date.now()) {
+      await this.options.refresh();
+      credential = await this.options.resolveCredential();
+    }
+    if (credential === void 0 || !credential.access_key_id || !credential.secret_access_key || !credential.security_token) {
+      throw new LlmError13("codearts: no usable credential; log in first", "MISSING_CREDENTIAL");
+    }
+    let currentAccountId = "";
+    if (this.options.accountPool && credential?.access_key_id) {
+      try {
+        currentAccountId = await this.options.accountPool.findAccountIdByCredential(
+          "codearts",
+          credential.access_key_id
+        );
+      } catch (error) {
+        console.warn("[codearts] \u8D26\u53F7\u5339\u914D\u5931\u8D25\uFF08\u4E0D\u5F71\u54CD\u672C\u6B21\u8BF7\u6C42\uFF09:", error);
+      }
+      if (currentAccountId) reportLedgerAccount(PROVIDER, currentAccountId);
+    }
+    const messages = serializeMessages3(options.messages);
+    if (options.system !== void 0 && options.system.length > 0) {
+      messages.unshift({ role: "system", content: options.system });
+    }
+    const tools = options.tools?.map((tool) => ({
+      type: "function",
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters
+      }
+    }));
+    let wireTools = tools;
+    if (wireTools !== void 0 && needsDsmlToolMode(options.model, wireTools.map((tool) => tool.function.name))) {
+      messages.splice(messages.findIndex((m) => m.role === "system") + 1, 0, { role: "system", content: buildDsmlSystemPrompt(wireTools) });
+      wireTools = void 0;
+    }
+    const body = JSON.stringify({
+      model: options.model,
+      messages,
+      stream: true,
+      // prompt_cache_key 让服务端启用前缀缓存并在 usage 中返回 cached_tokens，
+      // 缺少该字段时缓存命中恒为 0（实测 2026-08-24）。
+      prompt_cache_key: this.sessionId,
+      // include/reasoning_summary 对齐 Rust 端 CodeArtsExtraFields，
+      // 让服务端返回加密 reasoning 内容与摘要。
+      include: ["reasoning.encrypted_content"],
+      reasoning_summary: "auto",
+      // 思考开关（实测，2026-09-29）：档位「关闭」翻成本网关真正认的字段。
+      // ⚠️ 是**顶层** `thinking`，不是 raccoon 那种 `extra_body.thinking` 方言
+      // （两者是不同网关的方言，混用会静默无效）。
+      // 实测判据：`disabled` → reasoning_tokens 3/3 全为 0、正文仍正确；
+      // `enabled` 与不传等价（服务端默认就开着），故「开启」档**不发**该字段。
+      ...options.reasoningEffort === "off" ? { thinking: { type: "disabled" } } : {},
+      // 对齐 CodeArts Agent IDE 请求体（deveco-code 内核日志实证）：
+      // tool_stream=true 让后端将超大工具调用参数（如大文件 file_write）
+      // 分段流式传输，避免单次 SSE 事件过大导致连接被掐断
+      // （error decoding response body）。deepseek-v4 的 DSML 路径不受此
+      // 影响，保留该字段与 IDE 对齐。
+      tool_stream: true,
+      // 输出上限（对齐 deveco-code-rust 参考实现 codearts.rs 的 max_tokens 配置）：
+      // 大文件 write 工具参数（如 1000-2000+ 行文档）需要数万 token 的生成空间，
+      // 若沿用后端默认输出上限，参数 JSON 会在中途被截断成非法 JSON，harness
+      // 工具校验报 `invalid arguments: "arguments" must be an object`。
+      // 参考实现 e2e 实测：65536 可用，131072 反而触发空流被后端拒绝；
+      // 显式传入的 options.maxTokens 优先，未设置时默认 65536。
+      max_tokens: options.maxTokens ?? 65536,
+      ...wireTools !== void 0 && wireTools.length > 0 ? { tools: wireTools } : {}
+    });
+    const url = `${CHAT_API_BASE}/chat/completions`;
+    let response;
+    let queueAttempts = 0;
+    let authRefreshed = false;
+    let benefitHeaderDropped = false;
+    const rateLimitTried = /* @__PURE__ */ new Set();
+    if (currentAccountId) rateLimitTried.add(currentAccountId);
+    const marked = createMarkRegistry();
+    const isBenefitModel = isCodeArtsBenefitModel(options.model);
+    for (; ; ) {
+      const extraSignedHeaders = isBenefitModel && !benefitHeaderDropped ? { maas_type: "benefit" } : void 0;
+      const signed = await signRequestHuawei(
+        credential.access_key_id,
+        credential.secret_access_key,
+        credential.security_token,
+        "POST",
+        url,
+        new TextEncoder().encode(body),
+        extraSignedHeaders
+      );
+      const headers = new Headers(attributionHeaders());
+      signed.forEach((value, key) => {
+        if (key !== "content-type") headers.set(key, value);
+      });
+      headers.set("Content-Type", "application/json");
+      headers.set("Chat-Id", this.chatId);
+      headers.set("Session-Id", this.sessionId);
+      headers.set("lang", "en");
+      response = await this.fetchImpl(url, {
+        method: "POST",
+        headers,
+        body,
+        signal: options.signal
+      });
+      if (response.ok) {
+        try {
+          yield* this.consumeSse(response, options);
+          break;
+        } catch (error) {
+          if (error instanceof SseQuotaExhaustedError) {
+            const message2 = codeartsQuotaExhaustedMessage(options.model, nextUtc8DayStartMs());
+            if (this.options.accountPool) {
+              if (marked.claim(currentAccountId ?? "")) {
+                await this.options.accountPool.updateModelRateLimit(
+                  currentAccountId,
+                  options.model,
+                  nextUtc8DayStartMs()
+                );
+                rateLimitTried.add(currentAccountId);
+              }
+            }
+            if (this.options.accountPool) {
+              const next = await pickNextAccount({
+                pool: this.options.accountPool,
+                provider: "codearts",
+                modelId: options.model,
+                tried: rateLimitTried
+              });
+              if (next !== void 0) {
+                credential = next.credential;
+                currentAccountId = next.accountId;
+                authRefreshed = false;
+                continue;
+              }
+            }
+            throw new LlmError13(message2, QUOTA_EXCEEDED_CODE, { status: 200 });
+          }
+          if (error instanceof SseQueueRetryError) {
+          } else if (error instanceof LlmError13 && error.code === BENEFIT_NOT_FOUND_CODE && isBenefitModel && !benefitHeaderDropped) {
+            benefitHeaderDropped = true;
+            continue;
+          } else {
+            throw error;
+          }
+        }
+      } else {
+        const errorText = await response.text().catch(() => "");
+        if (isAuthError(response.status, errorText) && !authRefreshed) {
+          authRefreshed = true;
+          await this.options.refresh();
+          credential = await this.options.resolveCredential();
+          if (credential === void 0 || !credential.access_key_id || !credential.secret_access_key || !credential.security_token) {
+            throw new LlmError13("codearts: credential missing after refresh; log in again", "MISSING_CREDENTIAL");
+          }
+          continue;
+        }
+        if (isSseQuotaExhaustedErrorCode(errorDetail4(errorText), errorText)) {
+          const message2 = codeartsQuotaExhaustedMessage(options.model, nextUtc8DayStartMs());
+          if (this.options.accountPool) {
+            if (marked.claim(currentAccountId ?? "")) {
+              await this.options.accountPool.updateModelRateLimit(
+                currentAccountId,
+                options.model,
+                nextUtc8DayStartMs()
+              );
+              rateLimitTried.add(currentAccountId);
+            }
+            const next = await pickNextAccount({
+              pool: this.options.accountPool,
+              provider: "codearts",
+              modelId: options.model,
+              tried: rateLimitTried
+            });
+            if (next !== void 0) {
+              credential = next.credential;
+              currentAccountId = next.accountId;
+              authRefreshed = false;
+              continue;
+            }
+          }
+          throw new LlmError13(message2, QUOTA_EXCEEDED_CODE, { status: response.status });
+        }
+        if (this.options.accountPool && isRateLimited2(errorText, response.status)) {
+          const parsed = parseRateLimitError2(errorText, options.model, response.status);
+          if (parsed) {
+            if (marked.claim(currentAccountId ?? "")) {
+              await this.options.accountPool.updateModelRateLimit(
+                currentAccountId,
+                parsed.modelId,
+                parsed.resetTimeMs
+              );
+            }
+            const next = await pickNextAccount({
+              pool: this.options.accountPool,
+              provider: "codearts",
+              modelId: options.model,
+              tried: rateLimitTried
+            });
+            if (next !== void 0) {
+              credential = next.credential;
+              currentAccountId = next.accountId;
+              authRefreshed = false;
+              continue;
+            }
+            throw new LlmError13(
+              `codearts: \u6A21\u578B ${options.model} \u6240\u6709\u8D26\u53F7\u5747\u53D7\u9650\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5`,
+              "QUOTA_EXCEEDED"
+            );
+          }
+        }
+        if (!isQueueError(response.status, errorText)) {
+          const probe = await this.queryQueueStatus(credential, options.model, options.signal);
+          if (probe === void 0 || probe.status === "working") {
+            const code = httpErrorCode4(response.status, errorText);
+            throw new LlmError13(`codearts: model request failed with HTTP ${response.status}`, code, { status: response.status });
+          }
+        }
+      }
+      queueAttempts += 1;
+      if (queueAttempts > QUEUE_MAX_ATTEMPTS2) {
+        throw new LlmError13("codearts: queue wait timed out after 30 minutes", "QUEUE");
+      }
+      if (options.signal?.aborted) throw new LlmError13("codearts: request aborted while waiting in queue", "QUEUE");
+      const status = await this.queryQueueStatus(credential, options.model, options.signal);
+      if (status?.status === "error" || status?.status === "queue_full") {
+        throw new LlmError13(`codearts: ${status.message || `queue status: ${status.status}`}`, "QUEUE");
+      }
+      await delay(QUEUE_RETRY_DELAY_MS, options.signal);
+    }
+  }
+  /**
+   * 消费一个 HTTP 200 的 SSE chat 响应并产出 StreamChunk。
+   *
+   * CodeArts 后端有时以 HTTP 200 + SSE 内嵌错误事件的形式返回排队/限流
+   * （如 `InferHub.ModelArts.81111.429` TPM 超限，事件形如
+   * `{"text":"[DONE]","error_code":"...","error_msg":"..."}`），而不是
+   * 4xx——这类错误若直接当成流结束会被静默吞掉（表现为"思考后无输出"）。
+   * 本方法解析每个 SSE 事件的 `error_code`/`error_msg`：可重试的排队/限流
+   * 错误抛 {@link SseQueueRetryError} 让外层重试循环按 TM.00001041 同等
+   * 处理（10s 间隔重试整个 chat 请求）；不可重试错误抛普通 LlmError。
+   */
+  async *consumeSse(response, options) {
+    if (!response.body) throw new LlmError13("codearts: empty model response body", "EMPTY_RESPONSE");
+    const blocks = [];
+    let nextIndex = 0;
+    const toolCalls = /* @__PURE__ */ new Map();
+    const toolOrder = [];
+    const toolIds = /* @__PURE__ */ new Map();
+    let buffer = "";
+    let streamEnded = false;
+    let finishReason2;
+    const loopGuard = isReasoningLoopGuardEnabled() ? createReasoningLoopDetector() : void 0;
+    let loopDetected = false;
+    const proseLoopGuard = isReasoningLoopGuardEnabled() ? createReasoningLoopDetector() : void 0;
+    let proseLoopDetected = false;
+    const suppressor = createBlankReasoningSuppressor();
+    const dsmlContentExtractor = new DsmlContentExtractor();
+    const dsmlReasoningExtractor = new DsmlContentExtractor();
+    async function* emitDsmlFeed(text, reasoning, dsmlCalls) {
+      if (text.length > 0) {
+        let block = blocks.find((candidate) => candidate.kind === "text");
+        if (block === void 0) {
+          block = { index: nextIndex++, kind: "text", text: "" };
+          blocks.push(block);
+          yield { type: "block-start", index: block.index, blockType: "text" };
+        }
+        if (proseLoopGuard !== void 0) {
+          if (proseLoopGuard.observe(text)) proseLoopDetected = true;
+        }
+        if (!proseLoopDetected) {
+          block.text += text;
+          yield { type: "text-delta", index: block.index, text };
+        }
+      }
+      if (reasoning.length > 0) {
+        if (loopGuard !== void 0) {
+          if (loopGuard.observe(reasoning)) loopDetected = true;
+        }
+        if (!loopDetected) {
+          const emit = suppressor.feed(reasoning);
+          if (emit !== void 0) {
+            let block = blocks.find((candidate) => candidate.kind === "reasoning");
+            if (block === void 0) {
+              block = { index: nextIndex++, kind: "reasoning", text: "" };
+              blocks.push(block);
+              yield { type: "block-start", index: block.index, blockType: "reasoning" };
+            }
+            block.text = suppressor.text();
+            yield { type: "reasoning-delta", index: block.index, text: emit };
+          }
+        }
+      }
+      for (const call of dsmlCalls) {
+        if (!hasUsableToolName(call.name)) continue;
+        const wireIndex = toolCalls.size;
+        const block = {
+          index: nextIndex++,
+          text: call.arguments,
+          name: call.name,
+          callId: ToolCallId6(`dsml-${crypto.randomUUID().replace(/-/g, "")}`),
+          announced: true
+        };
+        toolCalls.set(wireIndex, block);
+        toolOrder.push(block.index);
+        yield { type: "block-start", index: block.index, blockType: "tool-call" };
+        yield {
+          type: "tool-call-delta",
+          index: block.index,
+          id: block.callId,
+          name: block.name,
+          argumentsDelta: call.arguments
+        };
+      }
+    }
+    const reader = response.body.getReader();
+    const decoder2 = new TextDecoder();
+    let firstTokenReceived = false;
+    try {
+      for (; ; ) {
+        if (streamEnded) break;
+        let done;
+        let value;
+        try {
+          const timeoutMs = firstTokenReceived ? resolveChunkTimeoutMs5() : resolveFirstTokenTimeoutMs5();
+          const phase = firstTokenReceived ? "chunk" : "first-token";
+          const result = await readCodeArtsChunk(reader, timeoutMs, options.signal, phase);
+          done = result.done;
+          value = result.value;
+          if (!done) firstTokenReceived = true;
+        } catch (error) {
+          if (options.signal?.aborted) throw error;
+          if (error instanceof LlmError13) throw error;
+          if (isTransportError4(error)) {
+            throw new LlmError13(`codearts: sse transport error: ${errorMessage4(error)}`, "TRANSPORT", { cause: error });
+          }
+          throw error;
+        }
+        if (done) break;
+        buffer += decoder2.decode(value, { stream: true });
+        let newline;
+        while ((newline = buffer.indexOf("\n")) !== -1) {
+          const line2 = buffer.slice(0, newline).trim();
+          buffer = buffer.slice(newline + 1);
+          if (!line2.startsWith("data:")) continue;
+          const payload = line2.slice(5).trim();
+          if (payload === "[DONE]") {
+            streamEnded = true;
+            break;
+          }
+          let data;
+          try {
+            data = JSON.parse(payload);
+          } catch {
+            continue;
+          }
+          if (typeof data.error_code === "string" && data.error_code.length > 0) {
+            const message2 = typeof data.error_msg === "string" && data.error_msg.length > 0 ? data.error_msg : data.error_code;
+            if (isSseQuotaExhaustedErrorCode(data.error_code, message2)) {
+              throw new SseQuotaExhaustedError(data.error_code, message2);
+            }
+            if (isSseQueueErrorCode(data.error_code)) {
+              throw new SseQueueRetryError(data.error_code, message2);
+            }
+            if (data.error_code === CODEARTS_BENEFIT_NOT_FOUND_ERROR_CODE) {
+              throw new LlmError13(`codearts: ${message2}`, BENEFIT_NOT_FOUND_CODE, { status: 200 });
+            }
+            throw new LlmError13(`codearts: ${message2}`, "INVALID_REQUEST", { status: 200 });
+          }
+          const choice = data.choices?.[0];
+          const delta = choice?.delta;
+          if (typeof choice?.finish_reason === "string") {
+            finishReason2 = choice.finish_reason;
+          }
+          if (delta?.content) {
+            const { text, reasoning, toolCalls: dsmlCalls } = dsmlContentExtractor.feed(delta.content);
+            yield* emitDsmlFeed(text, reasoning, dsmlCalls);
+          }
+          if (delta?.reasoning_content) {
+            const { text, reasoning, toolCalls: reasoningDsmlCalls } = dsmlReasoningExtractor.feed(delta.reasoning_content);
+            const thinking = text + reasoning;
+            if (thinking.length > 0) {
+              if (loopGuard !== void 0) {
+                if (loopGuard.observe(thinking)) loopDetected = true;
+              }
+              if (!loopDetected) {
+                const emit = suppressor.feed(thinking);
+                if (emit !== void 0) {
+                  let block = blocks.find((candidate) => candidate.kind === "reasoning");
+                  if (block === void 0) {
+                    block = { index: nextIndex++, kind: "reasoning", text: "" };
+                    blocks.push(block);
+                    yield { type: "block-start", index: block.index, blockType: "reasoning" };
+                  }
+                  block.text = suppressor.text();
+                  yield { type: "reasoning-delta", index: block.index, text: emit };
+                }
+              }
+            }
+            for (const call of reasoningDsmlCalls) {
+              if (!hasUsableToolName(call.name)) continue;
+              const wireIndex = toolCalls.size;
+              const block = {
+                index: nextIndex++,
+                text: call.arguments,
+                name: call.name,
+                callId: ToolCallId6(`dsml-${crypto.randomUUID().replace(/-/g, "")}`),
+                announced: true
+              };
+              toolCalls.set(wireIndex, block);
+              toolOrder.push(block.index);
+              yield { type: "block-start", index: block.index, blockType: "tool-call" };
+              yield {
+                type: "tool-call-delta",
+                index: block.index,
+                id: block.callId,
+                name: block.name,
+                argumentsDelta: call.arguments
+              };
+            }
+          }
+          for (const call of delta?.tool_calls ?? []) {
+            const wireIndex = call.index ?? 0;
+            if (typeof call.id === "string" && call.id.length > 0) toolIds.set(wireIndex, call.id);
+            const callId = toolIds.get(wireIndex) ?? `call_${wireIndex}`;
+            let block = toolCalls.get(wireIndex);
+            if (block === void 0) {
+              block = { index: nextIndex++, text: "", announced: false };
+              toolCalls.set(wireIndex, block);
+            }
+            block.callId = callId;
+            if (typeof call.function?.name === "string" && call.function.name.length > 0) {
+              block.name = call.function.name;
+            }
+            const fragment = call.function?.arguments ?? "";
+            block.text += fragment;
+            if (!block.announced) {
+              if (!hasUsableToolName(block.name)) continue;
+              block.announced = true;
+              toolOrder.push(block.index);
+              yield { type: "block-start", index: block.index, blockType: "tool-call" };
+              yield {
+                type: "tool-call-delta",
+                index: block.index,
+                id: ToolCallId6(callId),
+                name: block.name,
+                argumentsDelta: block.text
+              };
+              continue;
+            }
+            yield {
+              type: "tool-call-delta",
+              index: block.index,
+              id: ToolCallId6(callId),
+              ...block.name !== void 0 ? { name: block.name } : {},
+              argumentsDelta: fragment
+            };
+          }
+          if (data.usage) {
+            const promptTokens = data.usage.prompt_tokens ?? 0;
+            const cachedTokens = data.usage.prompt_tokens_details?.cached_tokens ?? data.usage.prompt_cache_hit_tokens ?? 0;
+            const cacheWriteTokens = data.usage.prompt_tokens_details?.cache_write_tokens;
+            const reasoningTokens = data.usage.completion_tokens_details?.reasoning_tokens;
+            yield {
+              type: "usage",
+              usage: {
+                inputTokens: cachedTokens > 0 ? promptTokens - cachedTokens : promptTokens,
+                outputTokens: data.usage.completion_tokens ?? 0,
+                ...cachedTokens > 0 ? { cacheReadTokens: cachedTokens } : {},
+                ...cacheWriteTokens !== void 0 && cacheWriteTokens > 0 ? { cacheWriteTokens } : {},
+                ...reasoningTokens !== void 0 && reasoningTokens > 0 ? { reasoningTokens } : {}
+              }
+            };
+          }
+        }
+        if (loopDetected) {
+          await reader.cancel().catch(() => {
+          });
+          break;
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    {
+      const f = dsmlContentExtractor.flush();
+      if (f.text.length > 0 || f.reasoning.length > 0) yield* emitDsmlFeed(f.text, f.reasoning, []);
+    }
+    {
+      const f = dsmlReasoningExtractor.flush();
+      if (f.text.length > 0 || f.reasoning.length > 0) yield* emitDsmlFeed(f.text, f.reasoning, []);
+    }
+    const textBlock = blocks.find((block) => block.kind === "text");
+    const reasoningBlock = blocks.find((block) => block.kind === "reasoning");
+    const reasoningText = stripCourseLeakIfEnabled(
+      loopDetected && loopGuard?.cutAt !== void 0 ? suppressor.text().slice(0, loopGuard.cutAt) : suppressor.text()
+    );
+    const reasoningHasDsml = reasoningText.includes("\uFF5CDSML\uFF5C");
+    const truncatedText = proseLoopDetected && proseLoopGuard?.cutAt !== void 0 ? (textBlock?.text ?? "").slice(0, proseLoopGuard.cutAt) : void 0;
+    const visible = truncatedText !== void 0 ? stripCourseLeakIfEnabled(truncatedText) : textBlock !== void 0 && textBlock.text !== "" ? stripCourseLeakIfEnabled(textBlock.text) : reasoningBlock !== void 0 && toolOrder.length === 0 && !reasoningHasDsml && !loopDetected ? reasoningText : "";
+    let blockCount = 0;
+    for (const index of toolOrder) {
+      const block = [...toolCalls.values()].find((candidate) => candidate.index === index);
+      if (!hasUsableToolName(block.name)) continue;
+      blockCount += 1;
+      yield {
+        type: "block-end",
+        index,
+        block: {
+          type: "tool-call",
+          // ⚠️ 判据用 `||`（同时兜 undefined 与空串），**不可**退回成
+          // `block.callId ?? ''`：空串 id 会被格式 v4 校验拒绝（它判
+          // `length === 0`），落库即等于报废整条会话（见上方 `toolIds` 注释）。
+          // 正常路径下 `block.callId` 已在建块时填好，此处仅为最后一道防线。
+          id: ToolCallId6(block.callId || `call_${index}`),
+          name: block.name,
+          // 同上：空分片补 {}，残缺参数保持原样交由截断判定处理。
+          arguments: isTruncatedArguments(block.text) ? block.text : normalizeToolArguments(block.text)
+        }
+      };
+    }
+    if (textBlock !== void 0 || visible !== "") {
+      blockCount += 1;
+      yield { type: "block-end", index: textBlock?.index ?? nextIndex, block: { type: "text", text: visible } };
+    }
+    if (reasoningBlock !== void 0 && reasoningBlock.text.trim() !== "") {
+      if (reasoningText !== "") {
+        blockCount += 1;
+        yield { type: "block-end", index: reasoningBlock.index, block: { type: "reasoning", text: reasoningText } };
+      }
+    }
+    const droppedUnnamedCalls = [...toolCalls.values()].some((block) => !block.announced);
+    const reasoningLoopIsSoleOutput = loopDetected && visible === "" && toolOrder.length === 0;
+    const reason = reasoningLoopIsSoleOutput ? { kind: "error", failure: reasoningLoopFailure(
+      loopGuard?.diagnostics,
+      options.maxTokens,
+      "reasoning"
+    ) } : loopDetected ? { kind: "max-tokens" } : finishReason2 === "length" || droppedUnnamedCalls && toolOrder.length === 0 ? { kind: "max-tokens" } : finishReason2 === "tool_calls" || toolOrder.length > 0 ? { kind: "tool-calls" } : { kind: "stop" };
+    yield { type: "finish", reason: resolveEmptyResponseReason(reason, blockCount) };
+  }
+  /**
+   * 查询某个会话的 CodeArts 并发队列状态。该端点
+   * 与 chat API 一样使用 AK/SK 签名；GET 不携带请求体，因此无 content-type。
+   * @param credential - 用于签名请求的 AK/SK/SecurityToken。
+   * @param model - 模型 id，作为 `model` 查询参数回传。
+   * @param signal - 状态请求的取消信号。
+   * @returns 解析后的排队状态，或当端点不可达
+   *   或返回无法识别的载荷时返回 `undefined`。
+   */
+  async queryQueueStatus(credential, model, signal) {
+    const url = `${QUEUE_STATUS_BASE}?model=${encodeURIComponent(model)}&task_id=${encodeURIComponent(this.sessionId)}`;
+    const signed = await signRequestHuawei(
+      credential.access_key_id,
+      credential.secret_access_key,
+      credential.security_token,
+      "GET",
+      url,
+      new Uint8Array()
+    );
+    const headers = new Headers();
+    signed.forEach((value, key) => {
+      if (key !== "content-type") headers.set(key, value);
+    });
+    headers.set("x-snap-traceid", crypto.randomUUID());
+    headers.set("Agent-Type", "INFERHUB_AGENT");
+    headers.set("X-Language", "en");
+    let response;
+    try {
+      response = await this.fetchImpl(url, { method: "GET", headers, signal });
+    } catch {
+      return void 0;
+    }
+    if (response.status !== 200) return void 0;
+    let body;
+    try {
+      body = await response.json();
+    } catch {
+      return void 0;
+    }
+    const status = body.status;
+    if (status !== "waiting" && status !== "working" && status !== "error" && status !== "queue_full") return void 0;
+    return {
+      status,
+      queuePosition: Number(body.queue_position ?? -1),
+      message: typeof body.message === "string" ? body.message : ""
+    };
+  }
+};
+function registerCodeArtsLlm(ctx, options) {
+  const adapter = new CodeArtsAdapter(options);
+  registerAdapterIdempotent(ctx.llm, [PROVIDER], adapter);
+  return adapter;
+}
+var RATE_LIMIT_BUSINESS_CODE = 6004;
+var RATE_LIMIT_PATTERN2 = /频率限制|频率超出|使用量已超出|重置|rate.?limit|frequency limit|usage exceeds|too many requests/i;
+var MODEL_SATURATION_BUSINESS_CODE = 14003;
+var MODEL_SATURATION_PATTERN = /模型繁忙|请求量饱和|model\s+busy|currently\s+saturated/i;
+function isModelSaturationError(status, body) {
+  if (typeof status === "number" && status < 400) return false;
+  if (body.length === 0) return false;
+  try {
+    const code = JSON.parse(body).code;
+    if (code === MODEL_SATURATION_BUSINESS_CODE || code === String(MODEL_SATURATION_BUSINESS_CODE)) return true;
+  } catch {
+  }
+  return MODEL_SATURATION_PATTERN.test(body);
+}
+function hasRateLimitBusinessCode(body) {
+  try {
+    const data = JSON.parse(body);
+    const code = data.code;
+    return code === RATE_LIMIT_BUSINESS_CODE || code === String(RATE_LIMIT_BUSINESS_CODE);
+  } catch {
+    return false;
+  }
+}
+function isRateLimited2(body, status) {
+  if (status === 429) return true;
+  return hasRateLimitBusinessCode(body) || RATE_LIMIT_PATTERN2.test(body);
+}
+var RESET_TIME_PATTERN2 = /(?:将在|reset at)\s+([\d-]+\s+[\d:]+)\s+(UTC[+-]\d+(?::\d+)?)/i;
+var RATE_LIMIT_FALLBACK_MS2 = 36e5;
+function parseRateLimitError2(body, currentModel, status) {
+  const fallback = () => ({
+    modelId: currentModel,
+    resetTimeMs: Date.now() + RATE_LIMIT_FALLBACK_MS2
+  });
+  try {
+    const data = JSON.parse(body);
+    const msg = typeof data.msg === "string" ? data.msg : "";
+    const resetMatch = RESET_TIME_PATTERN2.exec(msg);
+    if (resetMatch) {
+      const resetMs = Date.parse(`${resetMatch[1]} ${resetMatch[2]}`);
+      if (!Number.isNaN(resetMs)) {
+        return { modelId: currentModel, resetTimeMs: resetMs };
+      }
+    }
+    if (isRateLimited2(body, status)) {
+      return fallback();
+    }
+    return null;
+  } catch {
+    return status === 429 ? fallback() : null;
+  }
+}
+
 // vendor/channel-pack/src/buddy-balance-rank.ts
 var BUDDY_EXPIRING_WINDOW_DAYS = 15;
 var BUDDY_EXPIRING_WINDOW_MS = BUDDY_EXPIRING_WINDOW_DAYS * 24 * 60 * 60 * 1e3;
@@ -44480,7 +45862,7 @@ function roundCredits2(value) {
 
 // vendor/channel-pack/src/qoder-machine.ts
 import { execFileSync, spawn as spawn3 } from "node:child_process";
-import { existsSync as existsSync5, readFileSync as readFileSync5, readdirSync } from "node:fs";
+import { existsSync as existsSync6, readFileSync as readFileSync6, readdirSync } from "node:fs";
 import { homedir as homedir3 } from "node:os";
 import { join as join5 } from "node:path";
 var RUNTIME_INFO_TIMEOUT_MS = 2e4;
@@ -44505,7 +45887,7 @@ function candidatePaths() {
 function parseFile(path2) {
   let raw;
   try {
-    raw = readFileSync5(path2, "utf8");
+    raw = readFileSync6(path2, "utf8");
   } catch {
     return void 0;
   }
@@ -44554,7 +45936,7 @@ function findRuntimeInfoExecutable(home, dataDirNames = QODER_DATA_DIR_NAMES) {
     const dir = entries.find((name2) => name2.startsWith("umid-"));
     if (dir === void 0) continue;
     const exe = join5(binDir, dir, exeName);
-    if (existsSync5(exe)) return exe;
+    if (existsSync6(exe)) return exe;
   }
   return void 0;
 }
@@ -44562,7 +45944,7 @@ function locateRuntimeInfo(override) {
   const fromEnv = process.env.QODER_RUNTIME_INFO;
   const candidate = override ?? (fromEnv !== void 0 && fromEnv.length > 0 ? fromEnv : void 0);
   if (candidate !== void 0) {
-    return existsSync5(candidate) ? candidate : void 0;
+    return existsSync6(candidate) ? candidate : void 0;
   }
   return findRuntimeInfoExecutable(homedir3());
 }
@@ -45691,52 +47073,6 @@ function classifyOpencodeError(status, body, headers) {
   return { kind: "auth", detail };
 }
 
-// vendor/channel-pack/src/sign.ts
-async function sha256Hex(data) {
-  const hash = await crypto.subtle.digest("SHA-256", data.slice().buffer);
-  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-async function hmacSha256Hex(key, data) {
-  const cryptoKey = await crypto.subtle.importKey("raw", key.slice().buffer, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const sig2 = await crypto.subtle.sign("HMAC", cryptoKey, data.slice().buffer);
-  return Array.from(new Uint8Array(sig2)).map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-function buildCanonicalRequest(method, uri, query, headers, payloadHash) {
-  const signedHeaders = [];
-  headers.forEach((_, k) => signedHeaders.push(k));
-  signedHeaders.sort();
-  const headerLines = signedHeaders.map((k) => `${k}:${headers.get(k) ?? ""}`);
-  return [method, uri, query, headerLines.join("\n"), "", signedHeaders.join(";"), payloadHash].join("\n");
-}
-async function signRequestHuawei(ak, sk, securityToken, method, urlStr, body, extraHeaders) {
-  const url = new URL(urlStr);
-  let uri = url.pathname;
-  if (!uri.endsWith("/")) uri += "/";
-  const query = url.search.slice(1);
-  const dateStamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
-  const payloadHash = await sha256Hex(body);
-  const headers = /* @__PURE__ */ new Map();
-  headers.set("host", url.host);
-  headers.set("x-sdk-date", dateStamp);
-  headers.set("x-sdk-content-sha256", payloadHash);
-  headers.set("x-security-token", securityToken);
-  if (extraHeaders !== void 0) {
-    for (const [key, value] of Object.entries(extraHeaders)) headers.set(key, value);
-  }
-  if (method.toUpperCase() !== "GET") headers.set("content-type", "application/json");
-  const signedHeaders = [];
-  headers.forEach((_, k) => signedHeaders.push(k));
-  signedHeaders.sort();
-  const canonicalRequest = buildCanonicalRequest(method, uri, query, headers, payloadHash);
-  const canonicalHash = await sha256Hex(new TextEncoder().encode(canonicalRequest));
-  const stringToSign = `SDK-HMAC-SHA256
-${dateStamp}
-${canonicalHash}`;
-  const signature = await hmacSha256Hex(new TextEncoder().encode(sk), new TextEncoder().encode(stringToSign));
-  headers.set("Authorization", `SDK-HMAC-SHA256 Access=${ak},SignedHeaders=${signedHeaders.join(";")},Signature=${signature}`);
-  return headers;
-}
-
 // vendor/channel-pack/src/codearts-credits.ts
 var CODEARTS_SNAP_ENGINE_URL = "https://snap-access.cn-north-4.myhuaweicloud.com";
 var CODEARTS_PACKAGE_INFO_PATH = "/snap-manager/v1/statistics/plugin";
@@ -46304,7 +47640,7 @@ function channelCredits(deps) {
         windowDays: buddyExpiringWindowDays()
       })
     },
-    codearts: {
+    [PROVIDER]: {
       // CodeArts 的可领状态要经 `statistics/plugin` + `/v1/ops/delivery` 两步才能得到，
       // 且与 CodeBuddy 的 CheckinStatus 不同构，故如实回 null。
       status: async (accounts) => ok(nullStatus(accounts)),
@@ -47078,7 +48414,7 @@ async function handleOpencodeRpc(ctx, pool, method, payload) {
 }
 
 // vendor/channel-pack/src/badge-preferences.ts
-import { existsSync as existsSync6, mkdirSync as mkdirSync4, readFileSync as readFileSync6, renameSync as renameSync4, writeFileSync as writeFileSync5 } from "node:fs";
+import { existsSync as existsSync7, mkdirSync as mkdirSync5, readFileSync as readFileSync7, renameSync as renameSync5, writeFileSync as writeFileSync6 } from "node:fs";
 import { join as join6 } from "node:path";
 var BADGE_PREFERENCES_FILE = "ui-preferences.json";
 var BADGE_PREFERENCES = ["auto", "subscription", "credits"];
@@ -47106,8 +48442,8 @@ var FilePreferenceStore = class {
   kind = "file";
   load() {
     try {
-      if (!existsSync6(this.path)) return DEFAULT_BADGE_PREFERENCE;
-      const parsed = JSON.parse(readFileSync6(this.path, "utf-8"));
+      if (!existsSync7(this.path)) return DEFAULT_BADGE_PREFERENCE;
+      const parsed = JSON.parse(readFileSync7(this.path, "utf-8"));
       return sanitizeBadgePreference(preferenceFieldOf(parsed));
     } catch (error) {
       this.logger?.warn(`[channel-pack] \u8BFB\u53D6 ${this.path} \u5931\u8D25\uFF0C\u7528\u91CF\u5FBD\u6807\u504F\u597D\u6309\u9ED8\u8BA4\u503C\u5904\u7406: ${String(error)}`);
@@ -47115,10 +48451,10 @@ var FilePreferenceStore = class {
     }
   }
   async save(preference) {
-    mkdirSync4(join6(this.path, ".."), { recursive: true });
+    mkdirSync5(join6(this.path, ".."), { recursive: true });
     const tmp = `${this.path}.tmp`;
-    writeFileSync5(tmp, JSON.stringify({ schema: SCHEMA3, badgePreference: preference }, null, 2), "utf-8");
-    renameSync4(tmp, this.path);
+    writeFileSync6(tmp, JSON.stringify({ schema: SCHEMA3, badgePreference: preference }, null, 2), "utf-8");
+    renameSync5(tmp, this.path);
   }
 };
 var SCHEMA3 = "channel-pack/ui-preferences/v1";
@@ -47308,7 +48644,7 @@ function isAllFailed(snapshot) {
 }
 
 // vendor/channel-pack/src/auto-checkin.ts
-import { existsSync as existsSync7, mkdirSync as mkdirSync5, readFileSync as readFileSync7, renameSync as renameSync5, writeFileSync as writeFileSync6 } from "node:fs";
+import { existsSync as existsSync8, mkdirSync as mkdirSync6, readFileSync as readFileSync8, renameSync as renameSync6, writeFileSync as writeFileSync7 } from "node:fs";
 import { join as join7 } from "node:path";
 var AUTO_CHECKIN_FILE = "auto-checkin.json";
 var SCHEMA4 = "channel-pack/auto-checkin/v1";
@@ -47382,17 +48718,17 @@ var FileAutoCheckinStore = class {
   kind = "file";
   load() {
     try {
-      if (!existsSync7(this.path)) return { ...DEFAULT_AUTO_CHECKIN };
-      return sanitizeAutoCheckin(JSON.parse(readFileSync7(this.path, "utf-8")));
+      if (!existsSync8(this.path)) return { ...DEFAULT_AUTO_CHECKIN };
+      return sanitizeAutoCheckin(JSON.parse(readFileSync8(this.path, "utf-8")));
     } catch (error) {
       this.logger?.warn(`[channel-pack] \u8BFB\u53D6 ${this.path} \u5931\u8D25\uFF0C\u81EA\u52A8\u7B7E\u5230\u6309\u9ED8\u8BA4\u8BBE\u7F6E\uFF08\u5F00\u542F\uFF09\u5904\u7406: ${String(error)}`);
       return { ...DEFAULT_AUTO_CHECKIN };
     }
   }
   async save(doc) {
-    mkdirSync5(join7(this.path, ".."), { recursive: true });
+    mkdirSync6(join7(this.path, ".."), { recursive: true });
     const tmp = `${this.path}.tmp`;
-    writeFileSync6(tmp, JSON.stringify({
+    writeFileSync7(tmp, JSON.stringify({
       schema: SCHEMA4,
       enabled: doc.enabled,
       lastDate: doc.lastDate,
@@ -47401,7 +48737,7 @@ var FileAutoCheckinStore = class {
       channels: doc.channels,
       dismissedRunAt: doc.dismissedRunAt
     }, null, 2), "utf-8");
-    renameSync5(tmp, this.path);
+    renameSync6(tmp, this.path);
   }
 };
 function createAutoCheckinStore(ctx) {
@@ -48473,7 +49809,7 @@ function registerChannelPackEndpoints(ctx, pool, auths, modelAdapters, config = 
       case "login.sendSms": {
         const req = payload;
         if (req.provider !== LOOMY.id) {
-          return { ok: false, error: { code: "bad-request", message: `unsupported provider: ${req.provider}` } };
+          return unsupportedProvider(req.provider);
         }
         const phone = typeof req.phone === "string" ? req.phone.trim() : "";
         if (!/^1[3-9]\d{9}$/.test(phone)) {
@@ -48491,7 +49827,7 @@ function registerChannelPackEndpoints(ctx, pool, auths, modelAdapters, config = 
       case "login.submitSms": {
         const req = payload;
         if (req.provider !== LOOMY.id) {
-          return { ok: false, error: { code: "bad-request", message: `unsupported provider: ${req.provider}` } };
+          return unsupportedProvider(req.provider);
         }
         const pending = pendingSmsMsgid.get(req.accountId);
         if (pending === void 0 || pending.msgid.length === 0) {
@@ -48540,7 +49876,7 @@ function registerChannelPackEndpoints(ctx, pool, auths, modelAdapters, config = 
       case "onboarding.status": {
         const req = payload;
         if (req.provider !== LOOMY.id && req.provider !== RACCOON.id) {
-          return { ok: false, error: { code: "bad-request", message: `unsupported provider: ${req.provider}` } };
+          return unsupportedProvider(req.provider);
         }
         const account2 = pool.findAccount(req.accountId);
         if (account2 === void 0) {
@@ -48634,7 +49970,7 @@ function registerChannelPackEndpoints(ctx, pool, auths, modelAdapters, config = 
       case "onboarding.claim": {
         const req = payload;
         if (req.provider !== LOOMY.id && req.provider !== RACCOON.id) {
-          return { ok: false, error: { code: "bad-request", message: `unsupported provider: ${req.provider}` } };
+          return unsupportedProvider(req.provider);
         }
         const account2 = pool.findAccount(req.accountId);
         if (account2 === void 0) {
@@ -48751,10 +50087,6 @@ function registerChannelPackEndpoints(ctx, pool, auths, modelAdapters, config = 
         return { ok: true, value };
       }
       // ── 每日签到（积分领取）──
-      // 查询某 provider 下全部启用账号的签到状态。
-      //
-      // 各渠道显式分派协议，未知或退役渠道不调用任何默认端点。
-      // ── 每日签到（积分领取）──
       // 三个动词的实现按渠道 id 收在 `credits-channels.ts`；这里只负责取账号列表
       // 与兜底文案。
       //
@@ -48802,7 +50134,7 @@ function registerChannelPackEndpoints(ctx, pool, auths, modelAdapters, config = 
       case "cline.quota": {
         const req = payload;
         if (typeof req.provider !== "string" || req.provider !== CLINE.id) {
-          return { ok: false, error: { code: "bad-request", message: `unsupported provider: ${String(req.provider)}` } };
+          return unsupportedProvider(String(req.provider));
         }
         const accounts = await pool.listAccounts(req.provider);
         const values = [];
@@ -48847,7 +50179,7 @@ function registerChannelPackEndpoints(ctx, pool, auths, modelAdapters, config = 
       case "cline.requestLog": {
         const req = payload;
         if (typeof req.provider !== "string" || req.provider !== CLINE.id) {
-          return { ok: false, error: { code: "bad-request", message: `unsupported provider: ${String(req.provider)}` } };
+          return unsupportedProvider(String(req.provider));
         }
         if (typeof req.accountId !== "string" || req.accountId.trim().length === 0) {
           return { ok: false, error: { code: "bad-request", message: "accountId \u4E0D\u80FD\u4E3A\u7A7A" } };
@@ -50934,179 +52266,6 @@ async function refreshAccountWithReconcile(params) {
   return true;
 }
 
-// vendor/channel-pack/src/models.ts
-import { existsSync as existsSync8, mkdirSync as mkdirSync6, readFileSync as readFileSync8, renameSync as renameSync6, writeFileSync as writeFileSync7 } from "node:fs";
-var OPENGW_GATEWAY_CONFIG_URL = "https://opengw.developer.huaweicloud.com/api/v1/gateway/config";
-var SNAP_MODEL_BUILTIN_URL = "https://snap-access.cn-north-4.myhuaweicloud.com/v1/model/builtin";
-var CODEARTS_MODELS_CACHE_FILENAME = "codearts_models.json";
-var CODEARTS_BENEFIT_CACHE_FILENAME = "codearts_benefit_models.json";
-var CODEARTS_BENEFIT_FALLBACK = ["glm-5.3-flash", "deepseek-v4.1-flash"];
-var FETCH_TIMEOUT_MS = 1e4;
-var MODEL_REFRESH_INTERVAL_MS = 2 * 36e5;
-var memoryCache;
-var benefitMemoryCache;
-function normalizeModelId(id) {
-  if (id.length > 5) {
-    const suffix = id.slice(-5);
-    if (suffix.startsWith("-") && /^\d{4}$/.test(suffix.slice(1))) {
-      return id.slice(0, -5);
-    }
-  }
-  return id;
-}
-function parseModelInfo(m, seen) {
-  const rawId = m["model_id"];
-  if (typeof rawId !== "string" || rawId.length === 0) return void 0;
-  const id = normalizeModelId(rawId);
-  if (id.includes("-VL-") || id.endsWith("-VL")) return void 0;
-  const rawName = m["model_name"];
-  const name2 = typeof rawName === "string" && rawName.length > 0 ? normalizeModelId(rawName) : id;
-  if (seen.has(id)) return void 0;
-  seen.add(id);
-  return { id, name: name2 };
-}
-function extractJsonArray(text, path2) {
-  try {
-    let value = JSON.parse(text);
-    for (const key of path2) {
-      if (typeof value !== "object" || value === null) return void 0;
-      value = value[key];
-    }
-    return Array.isArray(value) ? value : void 0;
-  } catch {
-    return void 0;
-  }
-}
-async function fetchSignedGet(fetcher, url, ak, sk, st, extraUnsignedHeaders) {
-  const signed = await signRequestHuawei(ak, sk, st, "GET", url, new Uint8Array());
-  const headers = new Headers();
-  signed.forEach((v, k) => {
-    if (k !== "host") headers.set(k, v);
-  });
-  if (extraUnsignedHeaders !== void 0) {
-    for (const [k, v] of Object.entries(extraUnsignedHeaders)) headers.set(k, v);
-  }
-  try {
-    const response = await fetcher(url, {
-      method: "GET",
-      headers,
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS)
-    });
-    if (!response.ok) return void 0;
-    return await response.text();
-  } catch {
-    return void 0;
-  }
-}
-async function fetchCodeArtsRemoteModels(credential, fetcher = fetch) {
-  const { access_key_id: ak, secret_access_key: sk, security_token: st } = credential;
-  if (!ak || !sk) return [];
-  const models = [];
-  const seen = /* @__PURE__ */ new Set();
-  const benefitIds = [];
-  const gatewayText = await fetchSignedGet(fetcher, OPENGW_GATEWAY_CONFIG_URL, ak, sk, st);
-  if (gatewayText !== void 0) {
-    const arr = extractJsonArray(gatewayText, ["result", "models"]);
-    if (arr !== void 0) {
-      for (const item of arr) {
-        if (typeof item === "object" && item !== null) {
-          const entry = item;
-          const rawId = typeof entry["model_id"] === "string" ? entry["model_id"] : "";
-          const mi = parseModelInfo(entry, seen);
-          if (mi) {
-            if (rawId.length > 0 && normalizeModelId(rawId) === rawId) benefitIds.push(mi.id);
-            models.push(mi);
-          }
-        }
-      }
-    }
-  }
-  const snapText = await fetchSignedGet(fetcher, SNAP_MODEL_BUILTIN_URL, ak, sk, st, {
-    "Content-Type": "application/json",
-    "Agent-Type": "PromptCenter",
-    "X-Language": "zh-cn"
-  });
-  if (snapText !== void 0) {
-    const arr = extractJsonArray(snapText, ["builtinModels"]);
-    if (arr !== void 0) {
-      for (const item of arr) {
-        if (typeof item === "object" && item !== null) {
-          const mi = parseModelInfo(item, seen);
-          if (mi) models.push(mi);
-        }
-      }
-    }
-  }
-  if (benefitIds.length > 0) {
-    setBenefitMemoryCache(benefitIds);
-    saveBenefitCache(benefitIds);
-  }
-  return models;
-}
-function cacheDir() {
-  const override = process.env.DSH_CODEARTS_CACHE_DIR;
-  if (override !== void 0 && override.length > 0) return override;
-  const home = process.env.USERPROFILE ?? process.env.HOME;
-  if (!home) return void 0;
-  return `${home}/.cache/deveco`;
-}
-function modelsCachePath() {
-  const dir = cacheDir();
-  return dir === void 0 ? void 0 : `${dir}/${CODEARTS_MODELS_CACHE_FILENAME}`;
-}
-function benefitCachePath() {
-  const dir = cacheDir();
-  return dir === void 0 ? void 0 : `${dir}/${CODEARTS_BENEFIT_CACHE_FILENAME}`;
-}
-function saveModelsCache(models) {
-  const path2 = modelsCachePath();
-  if (!path2) return;
-  const dir = path2.slice(0, path2.lastIndexOf("/"));
-  try {
-    mkdirSync6(dir, { recursive: true });
-    const tmp = path2 + ".tmp";
-    writeFileSync7(tmp, JSON.stringify(models), "utf-8");
-    renameSync6(tmp, path2);
-  } catch {
-  }
-}
-function setMemoryCache(models) {
-  memoryCache = models;
-}
-function saveBenefitCache(ids) {
-  const path2 = benefitCachePath();
-  if (!path2) return;
-  const dir = path2.slice(0, path2.lastIndexOf("/"));
-  try {
-    mkdirSync6(dir, { recursive: true });
-    const tmp = path2 + ".tmp";
-    writeFileSync7(tmp, JSON.stringify(ids), "utf-8");
-    renameSync6(tmp, path2);
-  } catch {
-  }
-}
-function loadBenefitCache() {
-  const path2 = benefitCachePath();
-  if (!path2) return void 0;
-  try {
-    if (!existsSync8(path2)) return void 0;
-    const text = readFileSync8(path2, "utf-8");
-    const ids = JSON.parse(text);
-    if (!Array.isArray(ids) || ids.length === 0) return void 0;
-    return ids.filter((id) => typeof id === "string");
-  } catch {
-    return void 0;
-  }
-}
-function setBenefitMemoryCache(ids) {
-  benefitMemoryCache = ids;
-}
-function isCodeArtsBenefitModel(model) {
-  if (benefitMemoryCache === void 0) benefitMemoryCache = loadBenefitCache();
-  if (benefitMemoryCache !== void 0 && benefitMemoryCache.includes(model)) return true;
-  return CODEARTS_BENEFIT_FALLBACK.includes(model);
-}
-
 // vendor/channel-pack/src/service.ts
 function isCodeArtsRefreshable(credential) {
   return Boolean(
@@ -51506,1153 +52665,6 @@ var CodeArtsAuth = class extends Service {
     return void 0;
   }
 };
-
-// vendor/channel-pack/src/llm-adapter.ts
-import {
-  attributionHeaders,
-  CONTEXT_WINDOW_EXCEEDED_CODE as CONTEXT_WINDOW_EXCEEDED_CODE2,
-  isContextWindowExceededError as isContextWindowExceededError2,
-  isQuotaExceededError as isQuotaExceededError2,
-  LlmAdapter as LlmAdapter7,
-  LlmError as LlmError13,
-  QUOTA_EXCEEDED_CODE
-} from "@deepseek-ai/dsh-llm";
-import { ReasoningEffortId as ReasoningEffortId8, ToolCallId as ToolCallId6 } from "@deepseek-ai/dsh-llm";
-var CHAT_API_BASE = "https://snap-access.cn-north-4.myhuaweicloud.com/api/v2";
-var PROVIDER = "codearts";
-var BENEFIT_NOT_FOUND_CODE = "BENEFIT_NOT_FOUND";
-var CODEARTS_BENEFIT_NOT_FOUND_ERROR_CODE = "InferHub.4004.200";
-var DEFAULT_MODELS = [
-  "GLM-5.2",
-  "GLM-5.1",
-  "GLM-5",
-  "glm-5.3-flash",
-  "openpangu-2.0-flash",
-  "openpangu-2.0-pro",
-  "deepseek-v4-flash",
-  "deepseek-v4-pro",
-  "deepseek-v4.1-flash"
-];
-var CONTEXT_WINDOWS = /* @__PURE__ */ new Map([
-  ["GLM-5.2", 202752],
-  ["glm-5.3-flash", 1048576],
-  ["deepseek-v4-flash", 1048576],
-  ["deepseek-v4-pro", 1048576],
-  ["deepseek-v4.1-flash", 1e6]
-]);
-function contentToText5(content) {
-  if (typeof content === "string") return content;
-  if (!Array.isArray(content)) return "";
-  return content.filter((block) => typeof block === "object" && block !== null && block.type === "text").map((block) => String(block.text)).join("");
-}
-function serializeMessages3(messages) {
-  const normalized = normalizeHarnessMessages(messages);
-  const wire = [];
-  const { keepCallIds, keepResultIds } = resolveToolPairing(normalized);
-  for (const message2 of normalized) {
-    if (message2.role === "assistant") {
-      const content2 = stripCourseLeakFromHistoryContent(
-        message2.role,
-        Array.isArray(message2.content) ? message2.content : []
-      );
-      const toolCalls = content2.filter((block) => typeof block === "object" && block !== null && block.type === "tool-call").filter((block) => keepCallIds.has(String(block.id))).map((block) => ({
-        id: String(block.id),
-        type: "function",
-        function: { name: String(block.name), arguments: normalizeToolArguments(String(block.arguments)) }
-      }));
-      const reasoning = content2.filter((block) => typeof block === "object" && block !== null && block.type === "reasoning").map((block) => String(block.text)).join("");
-      wire.push({
-        role: "assistant",
-        content: contentToText5(content2),
-        // 后端（deepseek-v4-flash/pro）校验要求 assistant 消息必须包含
-        // reasoning_content 字段：历史里的推理块在上一轮被持久化，回传时
-        // 若缺失该字段会直接 400（"Missing `reasoning_content` field"）。
-        // 始终携带该字段（无推理时为空串），确保字段存在。
-        reasoning_content: reasoning,
-        ...toolCalls.length > 0 ? { tool_calls: toolCalls } : {}
-      });
-      continue;
-    }
-    if (message2.role === "system") {
-      wire.push({ role: "system", content: contentToText5(message2.content) });
-      continue;
-    }
-    const content = Array.isArray(message2.content) ? message2.content : [];
-    const toolResults = content.filter((block) => typeof block === "object" && block !== null && block.type === "tool-result");
-    const text = contentToText5(message2.content);
-    if (text.length > 0 || toolResults.length === 0) wire.push({ role: "user", content: text });
-    for (const result of toolResults) {
-      if (!keepResultIds.has(String(result.toolCallId))) continue;
-      wire.push({
-        role: "tool",
-        tool_call_id: String(result.toolCallId),
-        content: contentToText5(result.content) || "(no output)"
-      });
-    }
-  }
-  return wire;
-}
-function isDeepseekV4Model(model) {
-  return /^deepseek-v4-(flash|pro)$/.test(model);
-}
-function needsDsmlToolMode(model, _toolNames) {
-  return isDeepseekV4Model(model);
-}
-function buildDsmlSystemPrompt(tools) {
-  const toolJson = JSON.stringify(tools.map((tool) => ({
-    name: tool.function.name,
-    description: tool.function.description,
-    parameters: tool.function.parameters
-  })), null, 2);
-  return [
-    "\u4EE5\u4E0B\u662F\u4F60\u53EF\u7528\u7684\u5DE5\u5177\u53CA\u5176 JSON Schema\u3002\u5F53\u9700\u8981\u8C03\u7528\u5DE5\u5177\u5B8C\u6210\u4EFB\u52A1\u65F6\uFF0C",
-    "\u5FC5\u987B\u4F7F\u7528\u539F\u751F DSML \u5DE5\u5177\u8C03\u7528\u8BED\u6CD5\u8F93\u51FA\uFF0C\u683C\u5F0F\u5982\u4E0B\uFF1A",
-    '<\uFF5CDSML\uFF5Ctool_calls><\uFF5CDSML\uFF5Cinvoke name="\u5DE5\u5177\u540D"><\uFF5CDSML\uFF5Cparameter name="\u53C2\u6570\u540D" string="true">\u53C2\u6570\u503C</\uFF5CDSML\uFF5Cparameter></\uFF5CDSML\uFF5Cinvoke></\uFF5CDSML\uFF5Ctool_calls>',
-    "",
-    "\u89C4\u5219\uFF1A",
-    "- \u5DE5\u5177\u540D\u5FC5\u987B\u662F\u4E0B\u9762\u5217\u8868\u4E2D\u7684 name\u3002",
-    "- \u6BCF\u4E2A\u53C2\u6570\u7528\u4E00\u4E2A <\uFF5CDSML\uFF5Cparameter> \u6807\u7B7E\u5305\u88F9\uFF0C\u53C2\u6570\u503C\u653E\u5728\u6807\u7B7E\u4E4B\u95F4\u3002",
-    '- \u5B57\u7B26\u4E32\u53C2\u6570\u52A0 string="true" \u5C5E\u6027\uFF1B\u5BF9\u8C61/\u6570\u7EC4/\u6570\u5B57/\u5E03\u5C14\u53C2\u6570\u4E0D\u8981\u52A0\u8BE5\u5C5E\u6027\u3002',
-    "- \u4E00\u6B21\u53EF\u4EE5\u8F93\u51FA\u591A\u4E2A <\uFF5CDSML\uFF5Cinvoke> \u8C03\u7528\uFF08\u5DE5\u5177\u53EF\u4EE5\u5E76\u884C\uFF09\u3002",
-    "- \u6587\u4EF6\u5185\u5BB9\u8BF7\u4E00\u6B21\u6027\u5B8C\u6574\u5199\u5165\u5355\u4E2A write \u8C03\u7528\u7684 content \u53C2\u6570\uFF0C\u4E0D\u8981\u62C6\u5206\u6216\u7701\u7565\u3002",
-    "",
-    "\u5DE5\u5177\u5217\u8868\uFF08JSON Schema\uFF09\uFF1A",
-    toolJson
-  ].join("\n");
-}
-var QUEUE_STATUS_BASE = "https://snap-access.cn-north-4.myhuaweicloud.com/api/v1/queue/status";
-var QUEUE_RETRY_DELAY_MS = 1e4;
-var QUEUE_MAX_ATTEMPTS2 = 180;
-function resolveFirstTokenTimeoutMs5() {
-  return Number.parseInt(process.env.DSH_CODEARTS_SSE_FIRST_TOKEN_TIMEOUT_MS ?? "", 10) || 3e5;
-}
-function resolveChunkTimeoutMs5() {
-  return Number.parseInt(process.env.DSH_CODEARTS_SSE_CHUNK_TIMEOUT_MS ?? "", 10) || 6e5;
-}
-function isTransportError4(error) {
-  if (!(error instanceof Error)) return false;
-  const message2 = error.message.toLowerCase();
-  if (message2.includes("terminated")) return true;
-  if (error.name.startsWith("UND_ERR_")) return true;
-  if (message2.includes("fetch failed")) return true;
-  if (message2.includes("econnreset") || message2.includes("epipe") || message2.includes("socket hang up")) return true;
-  return false;
-}
-var SseQueueRetryError = class extends Error {
-  code;
-  constructor(code, message2) {
-    super(message2);
-    this.name = "SseQueueRetryError";
-    this.code = code;
-  }
-};
-var SseQuotaExhaustedError = class extends Error {
-  code;
-  constructor(code, message2) {
-    super(message2);
-    this.name = "SseQuotaExhaustedError";
-    this.code = code;
-  }
-};
-function formatResetIn2(resetAtMs, nowMs = Date.now()) {
-  const diff = resetAtMs - nowMs;
-  if (diff <= 0) return "\u5373\u5C06\u91CD\u7F6E";
-  if (diff < 6e4) return "\u4E0D\u5230 1 \u5206\u949F";
-  if (diff < 36e5) return `${Math.round(diff / 6e4)} \u5206\u949F`;
-  return `${Math.round(diff / 36e4) / 10} \u5C0F\u65F6`;
-}
-function codeartsQuotaExhaustedMessage(model, resetAtMs, nowMs = Date.now()) {
-  const when = formatResetIn2(resetAtMs, nowMs);
-  return `codearts: \u6A21\u578B ${model} \u7684\u514D\u8D39\u989D\u5EA6\uFF08benefit\uFF09\u5DF2\u7528\u5C3D\uFF0C\u9884\u8BA1 ${when}\u540E\u91CD\u7F6E\uFF08\u6309 UTC+8 \u81EA\u7136\u65E5\u7ED3\u7B97\uFF0C\u9884\u8BA1 ${new Date(resetAtMs).toISOString()}\uFF09\u3002\u53EF\u6539\u7528\u5176\u5B83\u6A21\u578B\uFF0C\u6216\u5728 Channel Pack \u7684 CodeArts \u9762\u677F\u5207\u6362/\u6DFB\u52A0\u8D26\u53F7\u3002`;
-}
-function isQueueError(status, body) {
-  return status === 400 && (body.includes("TM.00001041") || /peak\s+usage|try\s+again\s+after|peak\s+hours/i.test(body) || /high\s+demand|too\s+many\s+requests/i.test(body));
-}
-function isAuthError(status, body) {
-  if (status === 401 || status === 403) return true;
-  return body.includes("APIG.0602") || /invalid\s+token|token\s+expired|token\s+is\s+invalid/i.test(body);
-}
-function isSseQueueErrorCode(code) {
-  return code === "TM.00001041" || /81111|TPM|(^|[^0-9])429([^0-9]|$)|rate.?limit|too many requests|排队|限流/i.test(code);
-}
-function isSseQuotaExhaustedErrorCode(code, message2) {
-  return code.includes("4291") || /insufficient[\s_-]+quota/i.test(message2);
-}
-function errorDetail4(body) {
-  try {
-    const data = JSON.parse(body);
-    const error = typeof data.error === "object" && data.error !== null ? data.error : void 0;
-    const parts = [
-      typeof error?.code === "string" ? error.code : void 0,
-      typeof error?.type === "string" ? error.type : void 0,
-      typeof error?.message === "string" ? error.message : void 0,
-      typeof data.error_code === "string" ? data.error_code : void 0,
-      typeof data.error_msg === "string" ? data.error_msg : void 0,
-      typeof data.message === "string" ? data.message : void 0
-    ].filter((value) => value !== void 0);
-    if (parts.length > 0) return parts.join(" ");
-  } catch {
-  }
-  return body;
-}
-function httpErrorCode4(status, body) {
-  if (status === 401 || status === 403) return "AUTH";
-  const detail = errorDetail4(body);
-  if (isQuotaExceededError2(detail)) return QUOTA_EXCEEDED_CODE;
-  if (status === 429) return "RATE_LIMIT";
-  if (status === 400) {
-    if (isContextWindowExceededError2(detail)) return CONTEXT_WINDOW_EXCEEDED_CODE2;
-    return "INVALID_REQUEST";
-  }
-  if (status >= 500) return "SERVER";
-  return `HTTP_${status}`;
-}
-function delay(ms, signal) {
-  return new Promise((resolve2) => {
-    if (signal?.aborted) return resolve2();
-    const onAbort = () => {
-      clearTimeout(timer);
-      resolve2();
-    };
-    const timer = setTimeout(() => {
-      signal?.removeEventListener("abort", onAbort);
-      resolve2();
-    }, ms);
-    signal?.addEventListener("abort", onAbort, { once: true });
-  });
-}
-function errorMessage4(error) {
-  if (error instanceof Error) return error.message;
-  try {
-    return String(error);
-  } catch {
-    return "unknown error";
-  }
-}
-function readCodeArtsChunk(reader, timeoutMs, signal, phase = "chunk") {
-  return readWithIdleTimeout(reader, timeoutMs, "codearts", signal, phase);
-}
-var DSML_TOOL_CALLS_OPEN = "<\uFF5CDSML\uFF5Ctool_calls>";
-var DSML_TOOL_CALLS_CLOSE = "</\uFF5CDSML\uFF5Ctool_calls>";
-var DSML_INVOKE_OPEN_PREFIX = "<\uFF5CDSML\uFF5Cinvoke";
-var DSML_INVOKE_CLOSE = "</\uFF5CDSML\uFF5Cinvoke>";
-var DSML_PARAM_OPEN_PREFIX = "<\uFF5CDSML\uFF5Cparameter";
-var DSML_PARAM_CLOSE = "</\uFF5CDSML\uFF5Cparameter>";
-var THOUGHT_OPEN = "<thought>";
-var THOUGHT_CLOSE = "</thought>";
-function tryParseScalar(value) {
-  if (value === "") return "";
-  const trimmed = value.trim();
-  if (trimmed === "") return value;
-  if (trimmed === "null") return null;
-  if (trimmed === "true") return true;
-  if (trimmed === "false") return false;
-  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
-    try {
-      const decoded = JSON.parse(trimmed);
-      if (typeof decoded === "string") return tryParseScalar(decoded);
-      return decoded;
-    } catch {
-    }
-  }
-  if (/^-?\d+$/.test(trimmed)) return Number(trimmed);
-  if (/^-?\d+\.\d+$/.test(trimmed)) return Number(trimmed);
-  if (trimmed.startsWith("[") || trimmed.startsWith("{")) {
-    try {
-      return JSON.parse(trimmed);
-    } catch {
-    }
-  }
-  return value;
-}
-function parseDsmlInvoke(block) {
-  const nameMatch = /name\s*=\s*"([^"]*)"/.exec(block);
-  if (nameMatch === null) return void 0;
-  const name2 = nameMatch[1];
-  const params = {};
-  let cursor = 0;
-  for (; ; ) {
-    const openStart = block.indexOf(DSML_PARAM_OPEN_PREFIX, cursor);
-    if (openStart === -1) break;
-    const openEnd = block.indexOf(">", openStart);
-    if (openEnd === -1) break;
-    const openTag = block.slice(openStart, openEnd + 1);
-    const paramNameMatch = /name\s*=\s*"([^"]*)"/.exec(openTag);
-    if (paramNameMatch === null) {
-      cursor = openEnd + 1;
-      continue;
-    }
-    const paramName = paramNameMatch[1];
-    const closeStart = block.indexOf(DSML_PARAM_CLOSE, openEnd + 1);
-    if (closeStart === -1) break;
-    const value = block.slice(openEnd + 1, closeStart);
-    const isString = /string\s*=\s*"true"/.test(openTag);
-    if (isString) {
-      const parsed = tryParseScalar(value);
-      params[paramName] = parsed;
-    } else {
-      try {
-        const parsed = JSON.parse(value);
-        params[paramName] = typeof parsed === "string" ? tryParseScalar(parsed) : parsed;
-      } catch {
-        params[paramName] = value;
-      }
-    }
-    cursor = closeStart + DSML_PARAM_CLOSE.length;
-  }
-  return { name: name2, arguments: JSON.stringify(params) };
-}
-function parseDsmlToolCalls(block) {
-  let inner = block;
-  if (inner.startsWith(DSML_TOOL_CALLS_OPEN)) inner = inner.slice(DSML_TOOL_CALLS_OPEN.length);
-  if (inner.endsWith(DSML_TOOL_CALLS_CLOSE)) inner = inner.slice(0, inner.length - DSML_TOOL_CALLS_CLOSE.length);
-  const calls = [];
-  let cursor = 0;
-  for (; ; ) {
-    const openStart = inner.indexOf(DSML_INVOKE_OPEN_PREFIX, cursor);
-    if (openStart === -1) break;
-    const openEnd = inner.indexOf(">", openStart);
-    if (openEnd === -1) break;
-    const closeStart = inner.indexOf(DSML_INVOKE_CLOSE, openEnd + 1);
-    if (closeStart === -1) break;
-    const invokeBlock = inner.slice(openStart, closeStart + DSML_INVOKE_CLOSE.length);
-    const parsed = parseDsmlInvoke(invokeBlock);
-    if (parsed === void 0) return void 0;
-    calls.push(parsed);
-    cursor = closeStart + DSML_INVOKE_CLOSE.length;
-  }
-  return calls;
-}
-function longestOpenPrefixTail(buffer, prefixes) {
-  let keepLen = 0;
-  const maxCheck = Math.min(buffer.length, Math.max(...prefixes.map((p) => p.length)));
-  for (let i = 1; i <= maxCheck; i++) {
-    const tail = buffer.slice(buffer.length - i);
-    if (prefixes.some((p) => p.startsWith(tail))) keepLen = i;
-  }
-  return keepLen;
-}
-var DsmlContentExtractor = class {
-  buffer = "";
-  state = "normal";
-  feed(chunk) {
-    let text = "";
-    let reasoning = "";
-    const toolCalls = [];
-    this.buffer += chunk;
-    for (; ; ) {
-      if (this.state === "normal") {
-        const thoughtIdx = this.buffer.indexOf(THOUGHT_OPEN);
-        const dsmlIdx = this.buffer.indexOf(DSML_TOOL_CALLS_OPEN);
-        let openIdx = -1;
-        let nextState = "in-thought";
-        if (thoughtIdx !== -1 && (dsmlIdx === -1 || thoughtIdx < dsmlIdx)) {
-          openIdx = thoughtIdx;
-          nextState = "in-thought";
-        } else if (dsmlIdx !== -1) {
-          openIdx = dsmlIdx;
-          nextState = "in-dsml";
-        }
-        if (openIdx === -1) {
-          const keepLen = longestOpenPrefixTail(this.buffer, [THOUGHT_OPEN, DSML_TOOL_CALLS_OPEN]);
-          if (keepLen === 0) {
-            text += this.buffer;
-            this.buffer = "";
-          } else if (this.buffer.length > keepLen) {
-            text += this.buffer.slice(0, this.buffer.length - keepLen);
-            this.buffer = this.buffer.slice(this.buffer.length - keepLen);
-          }
-          break;
-        }
-        if (openIdx > 0) text += this.buffer.slice(0, openIdx);
-        this.buffer = this.buffer.slice(openIdx);
-        const openLen = nextState === "in-thought" ? THOUGHT_OPEN.length : DSML_TOOL_CALLS_OPEN.length;
-        this.buffer = this.buffer.slice(openLen);
-        this.state = nextState;
-        continue;
-      }
-      if (this.state === "in-thought") {
-        const closeIdx2 = this.buffer.indexOf(THOUGHT_CLOSE);
-        if (closeIdx2 === -1) {
-          const keepLen = longestOpenPrefixTail(this.buffer, [THOUGHT_CLOSE]);
-          if (keepLen === 0) {
-            reasoning += this.buffer;
-            this.buffer = "";
-          } else if (this.buffer.length > keepLen) {
-            reasoning += this.buffer.slice(0, this.buffer.length - keepLen);
-            this.buffer = this.buffer.slice(this.buffer.length - keepLen);
-          }
-          break;
-        }
-        if (closeIdx2 > 0) reasoning += this.buffer.slice(0, closeIdx2);
-        this.buffer = this.buffer.slice(closeIdx2 + THOUGHT_CLOSE.length);
-        this.state = "normal";
-        continue;
-      }
-      const closeIdx = this.buffer.indexOf(DSML_TOOL_CALLS_CLOSE);
-      if (closeIdx === -1) {
-        break;
-      }
-      const block = this.buffer.slice(0, closeIdx + DSML_TOOL_CALLS_CLOSE.length);
-      const parsed = parseDsmlToolCalls(block);
-      if (parsed === void 0) {
-        text += block;
-      } else {
-        toolCalls.push(...parsed);
-      }
-      this.buffer = this.buffer.slice(closeIdx + DSML_TOOL_CALLS_CLOSE.length);
-      this.state = "normal";
-      continue;
-    }
-    return { text, reasoning, toolCalls };
-  }
-  flush() {
-    const remaining = this.buffer;
-    this.buffer = "";
-    if (this.state === "in-thought") {
-      this.state = "normal";
-      return { text: "", reasoning: remaining };
-    }
-    if (this.state === "in-dsml") {
-      this.state = "normal";
-      return { text: DSML_TOOL_CALLS_OPEN + remaining, reasoning: "" };
-    }
-    this.state = "normal";
-    return { text: remaining, reasoning: "" };
-  }
-};
-var CodeArtsAdapter = class extends LlmAdapter7 {
-  constructor(options) {
-    super();
-    this.options = options;
-    this.fetchImpl = options.fetchImpl ?? fetch;
-    this.chatId = options.chatId ?? crypto.randomUUID().replace(/-/g, "");
-    this.sessionId = options.sessionId ?? crypto.randomUUID().replace(/-/g, "");
-  }
-  options;
-  fetchImpl;
-  chatId;
-  sessionId;
-  /**
-   * 描述本适配器拥有的 provider 路由。
-   *
-   * 与 BuddyAdapter 同款防御：DSH 校验 `info.id === provider`，且模型设置页
-   * 会用该 id 计算 `deriveKeyRef(provider)`（内部 `provider.toUpperCase()`）。
-   * 入参异常时回退到 PROVIDER 常量，避免客户端抛
-   * `undefined.toUpperCase is not a function`。
-   */
-  providerInfo(provider) {
-    const id = typeof provider === "string" && provider.length > 0 ? provider : PROVIDER;
-    return { id, name: "CodeArts Agent" };
-  }
-  /** 动态模型缓存（首次 listModels 成功后填充）。 */
-  remoteModels;
-  /**
-   * 目录加载闸门：并发去重 + 失败冷却。
-   *
-   * ⚠ **不能省**：DSH 的 `buildModelCatalog` 对每个 provider `await listModels()`
-   * 后再对每个模型 `await resolveModelInfo()`，两处都会走到这里。原实现失败
-   * 直接返回（不落缓存）⇒ 一次网络故障被放大成「每模型重试一次」，每次顶着
-   * 10s 超时（`src/models.ts:55 FETCH_TIMEOUT_MS`），首屏因此长时间空转。
-   */
-  catalogGate = new RemoteCatalogGate();
-  /**
-   * 懒加载远端模型目录。resolveModel 可能先于 listModels 被调用
-   * （如直接进入会话），此时同样触发远端拉取。
-   */
-  async ensureRemoteModels() {
-    const fetchRemote = this.options.fetchRemoteModels;
-    if (this.remoteModels !== void 0 || fetchRemote === void 0) return;
-    await this.catalogGate.run(async () => {
-      const models = await fetchRemote();
-      if (models.length === 0) return false;
-      this.remoteModels = models;
-      return true;
-    });
-  }
-  /**
-   * 完整模型目录（**不应用用户黑名单**）。
-   *
-   * 设置页必须渲染被关闭的模型（否则用户无法重新打开），而 `listModels` 会按
-   * 黑名单过滤掉它们 —— RPC 层只能凭裸 id 补回，展示名随之丢失
-   * （用户报障：「关闭的就没有显示倍率」）。CodeArts 目录虽无倍率，但同样
-   * 需要正确的 `name`（否则关闭项显示 `deepseek-v4-flash` 这类裸 id）。
-   */
-  listAllModels() {
-    const source = this.remoteModels ?? DEFAULT_MODELS.map((id) => ({ id, name: id }));
-    return source.filter((m) => !/-VL-/i.test(m.id) && !/-VL$/i.test(m.id)).map((m) => ({ id: m.id, name: m.name }));
-  }
-  async listModels(_provider) {
-    if (!await providerCatalogVisible(this.options.accountPool, PROVIDER)) return [];
-    await this.ensureRemoteModels();
-    const visible = this.listAllModels();
-    const disabled = this.options.accountPool?.disabledModelsFor(PROVIDER);
-    const listed = disabled === void 0 || disabled.size === 0 ? visible : visible.filter((m) => !disabled.has(m.id));
-    return listed.map((m) => ({ provider: PROVIDER, id: m.id, name: m.name, inputModalities: ["text"] }));
-  }
-  async resolveModel(provider, model, _signal) {
-    await this.ensureRemoteModels();
-    const remoteModel = this.remoteModels?.find((m) => m.id === model);
-    const name2 = remoteModel?.name ?? model;
-    const contextWindow = CONTEXT_WINDOWS.get(model);
-    const resolved = { provider, id: model, name: name2 };
-    if (contextWindow !== void 0) resolved.context = { contextWindow };
-    resolved.reasoning = {
-      efforts: [
-        { id: ReasoningEffortId8("on"), name: "\u5F00\u542F" },
-        { id: ReasoningEffortId8("off"), name: "\u5173\u95ED" }
-      ],
-      defaultEffort: ReasoningEffortId8("on")
-    };
-    return resolved;
-  }
-  async prepareCall(provider, model, signal) {
-    return {
-      model: { ...await this.resolveModel(provider, model, signal), inputModalities: ["text"] },
-      stream: (options) => this.stream(options)
-    };
-  }
-  async *stream(options) {
-    let credential = await this.options.resolveCredential();
-    if (credential === void 0 || Date.parse(credential.expires_at) <= Date.now()) {
-      await this.options.refresh();
-      credential = await this.options.resolveCredential();
-    }
-    if (credential === void 0 || !credential.access_key_id || !credential.secret_access_key || !credential.security_token) {
-      throw new LlmError13("codearts: no usable credential; log in first", "MISSING_CREDENTIAL");
-    }
-    let currentAccountId = "";
-    if (this.options.accountPool && credential?.access_key_id) {
-      try {
-        currentAccountId = await this.options.accountPool.findAccountIdByCredential(
-          "codearts",
-          credential.access_key_id
-        );
-      } catch (error) {
-        console.warn("[codearts] \u8D26\u53F7\u5339\u914D\u5931\u8D25\uFF08\u4E0D\u5F71\u54CD\u672C\u6B21\u8BF7\u6C42\uFF09:", error);
-      }
-      if (currentAccountId) reportLedgerAccount(PROVIDER, currentAccountId);
-    }
-    const messages = serializeMessages3(options.messages);
-    if (options.system !== void 0 && options.system.length > 0) {
-      messages.unshift({ role: "system", content: options.system });
-    }
-    const tools = options.tools?.map((tool) => ({
-      type: "function",
-      function: {
-        name: tool.name,
-        description: tool.description,
-        parameters: tool.parameters
-      }
-    }));
-    let wireTools = tools;
-    if (wireTools !== void 0 && needsDsmlToolMode(options.model, wireTools.map((tool) => tool.function.name))) {
-      messages.splice(messages.findIndex((m) => m.role === "system") + 1, 0, { role: "system", content: buildDsmlSystemPrompt(wireTools) });
-      wireTools = void 0;
-    }
-    const body = JSON.stringify({
-      model: options.model,
-      messages,
-      stream: true,
-      // prompt_cache_key 让服务端启用前缀缓存并在 usage 中返回 cached_tokens，
-      // 缺少该字段时缓存命中恒为 0（实测 2026-08-24）。
-      prompt_cache_key: this.sessionId,
-      // include/reasoning_summary 对齐 Rust 端 CodeArtsExtraFields，
-      // 让服务端返回加密 reasoning 内容与摘要。
-      include: ["reasoning.encrypted_content"],
-      reasoning_summary: "auto",
-      // 思考开关（实测，2026-09-29）：档位「关闭」翻成本网关真正认的字段。
-      // ⚠️ 是**顶层** `thinking`，不是 raccoon 那种 `extra_body.thinking` 方言
-      // （两者是不同网关的方言，混用会静默无效）。
-      // 实测判据：`disabled` → reasoning_tokens 3/3 全为 0、正文仍正确；
-      // `enabled` 与不传等价（服务端默认就开着），故「开启」档**不发**该字段。
-      ...options.reasoningEffort === "off" ? { thinking: { type: "disabled" } } : {},
-      // 对齐 CodeArts Agent IDE 请求体（deveco-code 内核日志实证）：
-      // tool_stream=true 让后端将超大工具调用参数（如大文件 file_write）
-      // 分段流式传输，避免单次 SSE 事件过大导致连接被掐断
-      // （error decoding response body）。deepseek-v4 的 DSML 路径不受此
-      // 影响，保留该字段与 IDE 对齐。
-      tool_stream: true,
-      // 输出上限（对齐 deveco-code-rust 参考实现 codearts.rs 的 max_tokens 配置）：
-      // 大文件 write 工具参数（如 1000-2000+ 行文档）需要数万 token 的生成空间，
-      // 若沿用后端默认输出上限，参数 JSON 会在中途被截断成非法 JSON，harness
-      // 工具校验报 `invalid arguments: "arguments" must be an object`。
-      // 参考实现 e2e 实测：65536 可用，131072 反而触发空流被后端拒绝；
-      // 显式传入的 options.maxTokens 优先，未设置时默认 65536。
-      max_tokens: options.maxTokens ?? 65536,
-      ...wireTools !== void 0 && wireTools.length > 0 ? { tools: wireTools } : {}
-    });
-    const url = `${CHAT_API_BASE}/chat/completions`;
-    let response;
-    let queueAttempts = 0;
-    let authRefreshed = false;
-    let benefitHeaderDropped = false;
-    const rateLimitTried = /* @__PURE__ */ new Set();
-    if (currentAccountId) rateLimitTried.add(currentAccountId);
-    const isBenefitModel = isCodeArtsBenefitModel(options.model);
-    for (; ; ) {
-      const extraSignedHeaders = isBenefitModel && !benefitHeaderDropped ? { maas_type: "benefit" } : void 0;
-      const signed = await signRequestHuawei(
-        credential.access_key_id,
-        credential.secret_access_key,
-        credential.security_token,
-        "POST",
-        url,
-        new TextEncoder().encode(body),
-        extraSignedHeaders
-      );
-      const headers = new Headers(attributionHeaders());
-      signed.forEach((value, key) => {
-        if (key !== "content-type") headers.set(key, value);
-      });
-      headers.set("Content-Type", "application/json");
-      headers.set("Chat-Id", this.chatId);
-      headers.set("Session-Id", this.sessionId);
-      headers.set("lang", "en");
-      response = await this.fetchImpl(url, {
-        method: "POST",
-        headers,
-        body,
-        signal: options.signal
-      });
-      if (response.ok) {
-        try {
-          yield* this.consumeSse(response, options);
-          break;
-        } catch (error) {
-          if (error instanceof SseQuotaExhaustedError) {
-            const message2 = codeartsQuotaExhaustedMessage(options.model, nextUtc8DayStartMs());
-            if (this.options.accountPool && currentAccountId) {
-              await this.options.accountPool.updateModelRateLimit(
-                currentAccountId,
-                options.model,
-                nextUtc8DayStartMs()
-              );
-              rateLimitTried.add(currentAccountId);
-            }
-            if (this.options.accountPool) {
-              const next = await pickNextAccount({
-                pool: this.options.accountPool,
-                provider: "codearts",
-                modelId: options.model,
-                tried: rateLimitTried
-              });
-              if (next !== void 0) {
-                credential = next.credential;
-                currentAccountId = next.accountId;
-                authRefreshed = false;
-                continue;
-              }
-            }
-            throw new LlmError13(message2, QUOTA_EXCEEDED_CODE, { status: 200 });
-          }
-          if (error instanceof SseQueueRetryError) {
-          } else if (error instanceof LlmError13 && error.code === BENEFIT_NOT_FOUND_CODE && isBenefitModel && !benefitHeaderDropped) {
-            benefitHeaderDropped = true;
-            continue;
-          } else {
-            throw error;
-          }
-        }
-      } else {
-        const errorText = await response.text().catch(() => "");
-        if (isAuthError(response.status, errorText) && !authRefreshed) {
-          authRefreshed = true;
-          await this.options.refresh();
-          credential = await this.options.resolveCredential();
-          if (credential === void 0 || !credential.access_key_id || !credential.secret_access_key || !credential.security_token) {
-            throw new LlmError13("codearts: credential missing after refresh; log in again", "MISSING_CREDENTIAL");
-          }
-          continue;
-        }
-        if (isSseQuotaExhaustedErrorCode(errorDetail4(errorText), errorText)) {
-          const message2 = codeartsQuotaExhaustedMessage(options.model, nextUtc8DayStartMs());
-          if (this.options.accountPool) {
-            if (currentAccountId) {
-              await this.options.accountPool.updateModelRateLimit(
-                currentAccountId,
-                options.model,
-                nextUtc8DayStartMs()
-              );
-              rateLimitTried.add(currentAccountId);
-            }
-            const next = await pickNextAccount({
-              pool: this.options.accountPool,
-              provider: "codearts",
-              modelId: options.model,
-              tried: rateLimitTried
-            });
-            if (next !== void 0) {
-              credential = next.credential;
-              currentAccountId = next.accountId;
-              authRefreshed = false;
-              continue;
-            }
-          }
-          throw new LlmError13(message2, QUOTA_EXCEEDED_CODE, { status: response.status });
-        }
-        if (this.options.accountPool && isRateLimited2(errorText, response.status)) {
-          const parsed = parseRateLimitError2(errorText, options.model, response.status);
-          if (parsed) {
-            if (currentAccountId) {
-              await this.options.accountPool.updateModelRateLimit(
-                currentAccountId,
-                parsed.modelId,
-                parsed.resetTimeMs
-              );
-            }
-            const next = await pickNextAccount({
-              pool: this.options.accountPool,
-              provider: "codearts",
-              modelId: options.model,
-              tried: rateLimitTried
-            });
-            if (next !== void 0) {
-              credential = next.credential;
-              currentAccountId = next.accountId;
-              authRefreshed = false;
-              continue;
-            }
-            throw new LlmError13(
-              `codearts: \u6A21\u578B ${options.model} \u6240\u6709\u8D26\u53F7\u5747\u53D7\u9650\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5`,
-              "QUOTA_EXCEEDED"
-            );
-          }
-        }
-        if (!isQueueError(response.status, errorText)) {
-          const probe = await this.queryQueueStatus(credential, options.model, options.signal);
-          if (probe === void 0 || probe.status === "working") {
-            const code = httpErrorCode4(response.status, errorText);
-            throw new LlmError13(`codearts: model request failed with HTTP ${response.status}`, code, { status: response.status });
-          }
-        }
-      }
-      queueAttempts += 1;
-      if (queueAttempts > QUEUE_MAX_ATTEMPTS2) {
-        throw new LlmError13("codearts: queue wait timed out after 30 minutes", "QUEUE");
-      }
-      if (options.signal?.aborted) throw new LlmError13("codearts: request aborted while waiting in queue", "QUEUE");
-      const status = await this.queryQueueStatus(credential, options.model, options.signal);
-      if (status?.status === "error" || status?.status === "queue_full") {
-        throw new LlmError13(`codearts: ${status.message || `queue status: ${status.status}`}`, "QUEUE");
-      }
-      await delay(QUEUE_RETRY_DELAY_MS, options.signal);
-    }
-  }
-  /**
-   * 消费一个 HTTP 200 的 SSE chat 响应并产出 StreamChunk。
-   *
-   * CodeArts 后端有时以 HTTP 200 + SSE 内嵌错误事件的形式返回排队/限流
-   * （如 `InferHub.ModelArts.81111.429` TPM 超限，事件形如
-   * `{"text":"[DONE]","error_code":"...","error_msg":"..."}`），而不是
-   * 4xx——这类错误若直接当成流结束会被静默吞掉（表现为"思考后无输出"）。
-   * 本方法解析每个 SSE 事件的 `error_code`/`error_msg`：可重试的排队/限流
-   * 错误抛 {@link SseQueueRetryError} 让外层重试循环按 TM.00001041 同等
-   * 处理（10s 间隔重试整个 chat 请求）；不可重试错误抛普通 LlmError。
-   */
-  async *consumeSse(response, options) {
-    if (!response.body) throw new LlmError13("codearts: empty model response body", "EMPTY_RESPONSE");
-    const blocks = [];
-    let nextIndex = 0;
-    const toolCalls = /* @__PURE__ */ new Map();
-    const toolOrder = [];
-    const toolIds = /* @__PURE__ */ new Map();
-    let buffer = "";
-    let streamEnded = false;
-    let finishReason2;
-    const loopGuard = isReasoningLoopGuardEnabled() ? createReasoningLoopDetector() : void 0;
-    let loopDetected = false;
-    const proseLoopGuard = isReasoningLoopGuardEnabled() ? createReasoningLoopDetector() : void 0;
-    let proseLoopDetected = false;
-    const suppressor = createBlankReasoningSuppressor();
-    const dsmlContentExtractor = new DsmlContentExtractor();
-    const dsmlReasoningExtractor = new DsmlContentExtractor();
-    async function* emitDsmlFeed(text, reasoning, dsmlCalls) {
-      if (text.length > 0) {
-        let block = blocks.find((candidate) => candidate.kind === "text");
-        if (block === void 0) {
-          block = { index: nextIndex++, kind: "text", text: "" };
-          blocks.push(block);
-          yield { type: "block-start", index: block.index, blockType: "text" };
-        }
-        if (proseLoopGuard !== void 0) {
-          if (proseLoopGuard.observe(text)) proseLoopDetected = true;
-        }
-        if (!proseLoopDetected) {
-          block.text += text;
-          yield { type: "text-delta", index: block.index, text };
-        }
-      }
-      if (reasoning.length > 0) {
-        if (loopGuard !== void 0) {
-          if (loopGuard.observe(reasoning)) loopDetected = true;
-        }
-        if (!loopDetected) {
-          const emit = suppressor.feed(reasoning);
-          if (emit !== void 0) {
-            let block = blocks.find((candidate) => candidate.kind === "reasoning");
-            if (block === void 0) {
-              block = { index: nextIndex++, kind: "reasoning", text: "" };
-              blocks.push(block);
-              yield { type: "block-start", index: block.index, blockType: "reasoning" };
-            }
-            block.text = suppressor.text();
-            yield { type: "reasoning-delta", index: block.index, text: emit };
-          }
-        }
-      }
-      for (const call of dsmlCalls) {
-        if (!hasUsableToolName(call.name)) continue;
-        const wireIndex = toolCalls.size;
-        const block = {
-          index: nextIndex++,
-          text: call.arguments,
-          name: call.name,
-          callId: ToolCallId6(`dsml-${crypto.randomUUID().replace(/-/g, "")}`),
-          announced: true
-        };
-        toolCalls.set(wireIndex, block);
-        toolOrder.push(block.index);
-        yield { type: "block-start", index: block.index, blockType: "tool-call" };
-        yield {
-          type: "tool-call-delta",
-          index: block.index,
-          id: block.callId,
-          name: block.name,
-          argumentsDelta: call.arguments
-        };
-      }
-    }
-    const reader = response.body.getReader();
-    const decoder2 = new TextDecoder();
-    let firstTokenReceived = false;
-    try {
-      for (; ; ) {
-        if (streamEnded) break;
-        let done;
-        let value;
-        try {
-          const timeoutMs = firstTokenReceived ? resolveChunkTimeoutMs5() : resolveFirstTokenTimeoutMs5();
-          const phase = firstTokenReceived ? "chunk" : "first-token";
-          const result = await readCodeArtsChunk(reader, timeoutMs, options.signal, phase);
-          done = result.done;
-          value = result.value;
-          if (!done) firstTokenReceived = true;
-        } catch (error) {
-          if (options.signal?.aborted) throw error;
-          if (error instanceof LlmError13) throw error;
-          if (isTransportError4(error)) {
-            throw new LlmError13(`codearts: sse transport error: ${errorMessage4(error)}`, "TRANSPORT", { cause: error });
-          }
-          throw error;
-        }
-        if (done) break;
-        buffer += decoder2.decode(value, { stream: true });
-        let newline;
-        while ((newline = buffer.indexOf("\n")) !== -1) {
-          const line2 = buffer.slice(0, newline).trim();
-          buffer = buffer.slice(newline + 1);
-          if (!line2.startsWith("data:")) continue;
-          const payload = line2.slice(5).trim();
-          if (payload === "[DONE]") {
-            streamEnded = true;
-            break;
-          }
-          let data;
-          try {
-            data = JSON.parse(payload);
-          } catch {
-            continue;
-          }
-          if (typeof data.error_code === "string" && data.error_code.length > 0) {
-            const message2 = typeof data.error_msg === "string" && data.error_msg.length > 0 ? data.error_msg : data.error_code;
-            if (isSseQuotaExhaustedErrorCode(data.error_code, message2)) {
-              throw new SseQuotaExhaustedError(data.error_code, message2);
-            }
-            if (isSseQueueErrorCode(data.error_code)) {
-              throw new SseQueueRetryError(data.error_code, message2);
-            }
-            if (data.error_code === CODEARTS_BENEFIT_NOT_FOUND_ERROR_CODE) {
-              throw new LlmError13(`codearts: ${message2}`, BENEFIT_NOT_FOUND_CODE, { status: 200 });
-            }
-            throw new LlmError13(`codearts: ${message2}`, "INVALID_REQUEST", { status: 200 });
-          }
-          const choice = data.choices?.[0];
-          const delta = choice?.delta;
-          if (typeof choice?.finish_reason === "string") {
-            finishReason2 = choice.finish_reason;
-          }
-          if (delta?.content) {
-            const { text, reasoning, toolCalls: dsmlCalls } = dsmlContentExtractor.feed(delta.content);
-            yield* emitDsmlFeed(text, reasoning, dsmlCalls);
-          }
-          if (delta?.reasoning_content) {
-            const { text, reasoning, toolCalls: reasoningDsmlCalls } = dsmlReasoningExtractor.feed(delta.reasoning_content);
-            const thinking = text + reasoning;
-            if (thinking.length > 0) {
-              if (loopGuard !== void 0) {
-                if (loopGuard.observe(thinking)) loopDetected = true;
-              }
-              if (!loopDetected) {
-                const emit = suppressor.feed(thinking);
-                if (emit !== void 0) {
-                  let block = blocks.find((candidate) => candidate.kind === "reasoning");
-                  if (block === void 0) {
-                    block = { index: nextIndex++, kind: "reasoning", text: "" };
-                    blocks.push(block);
-                    yield { type: "block-start", index: block.index, blockType: "reasoning" };
-                  }
-                  block.text = suppressor.text();
-                  yield { type: "reasoning-delta", index: block.index, text: emit };
-                }
-              }
-            }
-            for (const call of reasoningDsmlCalls) {
-              if (!hasUsableToolName(call.name)) continue;
-              const wireIndex = toolCalls.size;
-              const block = {
-                index: nextIndex++,
-                text: call.arguments,
-                name: call.name,
-                callId: ToolCallId6(`dsml-${crypto.randomUUID().replace(/-/g, "")}`),
-                announced: true
-              };
-              toolCalls.set(wireIndex, block);
-              toolOrder.push(block.index);
-              yield { type: "block-start", index: block.index, blockType: "tool-call" };
-              yield {
-                type: "tool-call-delta",
-                index: block.index,
-                id: block.callId,
-                name: block.name,
-                argumentsDelta: call.arguments
-              };
-            }
-          }
-          for (const call of delta?.tool_calls ?? []) {
-            const wireIndex = call.index ?? 0;
-            if (typeof call.id === "string" && call.id.length > 0) toolIds.set(wireIndex, call.id);
-            const callId = toolIds.get(wireIndex) ?? `call_${wireIndex}`;
-            let block = toolCalls.get(wireIndex);
-            if (block === void 0) {
-              block = { index: nextIndex++, text: "", announced: false };
-              toolCalls.set(wireIndex, block);
-            }
-            block.callId = callId;
-            if (typeof call.function?.name === "string" && call.function.name.length > 0) {
-              block.name = call.function.name;
-            }
-            const fragment = call.function?.arguments ?? "";
-            block.text += fragment;
-            if (!block.announced) {
-              if (!hasUsableToolName(block.name)) continue;
-              block.announced = true;
-              toolOrder.push(block.index);
-              yield { type: "block-start", index: block.index, blockType: "tool-call" };
-              yield {
-                type: "tool-call-delta",
-                index: block.index,
-                id: ToolCallId6(callId),
-                name: block.name,
-                argumentsDelta: block.text
-              };
-              continue;
-            }
-            yield {
-              type: "tool-call-delta",
-              index: block.index,
-              id: ToolCallId6(callId),
-              ...block.name !== void 0 ? { name: block.name } : {},
-              argumentsDelta: fragment
-            };
-          }
-          if (data.usage) {
-            const promptTokens = data.usage.prompt_tokens ?? 0;
-            const cachedTokens = data.usage.prompt_tokens_details?.cached_tokens ?? data.usage.prompt_cache_hit_tokens ?? 0;
-            const cacheWriteTokens = data.usage.prompt_tokens_details?.cache_write_tokens;
-            const reasoningTokens = data.usage.completion_tokens_details?.reasoning_tokens;
-            yield {
-              type: "usage",
-              usage: {
-                inputTokens: cachedTokens > 0 ? promptTokens - cachedTokens : promptTokens,
-                outputTokens: data.usage.completion_tokens ?? 0,
-                ...cachedTokens > 0 ? { cacheReadTokens: cachedTokens } : {},
-                ...cacheWriteTokens !== void 0 && cacheWriteTokens > 0 ? { cacheWriteTokens } : {},
-                ...reasoningTokens !== void 0 && reasoningTokens > 0 ? { reasoningTokens } : {}
-              }
-            };
-          }
-        }
-        if (loopDetected) {
-          await reader.cancel().catch(() => {
-          });
-          break;
-        }
-      }
-    } finally {
-      reader.releaseLock();
-    }
-    {
-      const f = dsmlContentExtractor.flush();
-      if (f.text.length > 0 || f.reasoning.length > 0) yield* emitDsmlFeed(f.text, f.reasoning, []);
-    }
-    {
-      const f = dsmlReasoningExtractor.flush();
-      if (f.text.length > 0 || f.reasoning.length > 0) yield* emitDsmlFeed(f.text, f.reasoning, []);
-    }
-    const textBlock = blocks.find((block) => block.kind === "text");
-    const reasoningBlock = blocks.find((block) => block.kind === "reasoning");
-    const reasoningText = stripCourseLeakIfEnabled(
-      loopDetected && loopGuard?.cutAt !== void 0 ? suppressor.text().slice(0, loopGuard.cutAt) : suppressor.text()
-    );
-    const reasoningHasDsml = reasoningText.includes("\uFF5CDSML\uFF5C");
-    const truncatedText = proseLoopDetected && proseLoopGuard?.cutAt !== void 0 ? (textBlock?.text ?? "").slice(0, proseLoopGuard.cutAt) : void 0;
-    const visible = truncatedText !== void 0 ? stripCourseLeakIfEnabled(truncatedText) : textBlock !== void 0 && textBlock.text !== "" ? stripCourseLeakIfEnabled(textBlock.text) : reasoningBlock !== void 0 && toolOrder.length === 0 && !reasoningHasDsml && !loopDetected ? reasoningText : "";
-    let blockCount = 0;
-    for (const index of toolOrder) {
-      const block = [...toolCalls.values()].find((candidate) => candidate.index === index);
-      if (!hasUsableToolName(block.name)) continue;
-      blockCount += 1;
-      yield {
-        type: "block-end",
-        index,
-        block: {
-          type: "tool-call",
-          // ⚠️ 判据用 `||`（同时兜 undefined 与空串），**不可**退回成
-          // `block.callId ?? ''`：空串 id 会被格式 v4 校验拒绝（它判
-          // `length === 0`），落库即等于报废整条会话（见上方 `toolIds` 注释）。
-          // 正常路径下 `block.callId` 已在建块时填好，此处仅为最后一道防线。
-          id: ToolCallId6(block.callId || `call_${index}`),
-          name: block.name,
-          // 同上：空分片补 {}，残缺参数保持原样交由截断判定处理。
-          arguments: isTruncatedArguments(block.text) ? block.text : normalizeToolArguments(block.text)
-        }
-      };
-    }
-    if (textBlock !== void 0 || visible !== "") {
-      blockCount += 1;
-      yield { type: "block-end", index: textBlock?.index ?? nextIndex, block: { type: "text", text: visible } };
-    }
-    if (reasoningBlock !== void 0 && reasoningBlock.text.trim() !== "") {
-      if (reasoningText !== "") {
-        blockCount += 1;
-        yield { type: "block-end", index: reasoningBlock.index, block: { type: "reasoning", text: reasoningText } };
-      }
-    }
-    const droppedUnnamedCalls = [...toolCalls.values()].some((block) => !block.announced);
-    const reasoningLoopIsSoleOutput = loopDetected && visible === "" && toolOrder.length === 0;
-    const reason = reasoningLoopIsSoleOutput ? { kind: "error", failure: reasoningLoopFailure(
-      loopGuard?.diagnostics,
-      options.maxTokens,
-      "reasoning"
-    ) } : loopDetected ? { kind: "max-tokens" } : finishReason2 === "length" || droppedUnnamedCalls && toolOrder.length === 0 ? { kind: "max-tokens" } : finishReason2 === "tool_calls" || toolOrder.length > 0 ? { kind: "tool-calls" } : { kind: "stop" };
-    yield { type: "finish", reason: resolveEmptyResponseReason(reason, blockCount) };
-  }
-  /**
-   * 查询某个会话的 CodeArts 并发队列状态。该端点
-   * 与 chat API 一样使用 AK/SK 签名；GET 不携带请求体，因此无 content-type。
-   * @param credential - 用于签名请求的 AK/SK/SecurityToken。
-   * @param model - 模型 id，作为 `model` 查询参数回传。
-   * @param signal - 状态请求的取消信号。
-   * @returns 解析后的排队状态，或当端点不可达
-   *   或返回无法识别的载荷时返回 `undefined`。
-   */
-  async queryQueueStatus(credential, model, signal) {
-    const url = `${QUEUE_STATUS_BASE}?model=${encodeURIComponent(model)}&task_id=${encodeURIComponent(this.sessionId)}`;
-    const signed = await signRequestHuawei(
-      credential.access_key_id,
-      credential.secret_access_key,
-      credential.security_token,
-      "GET",
-      url,
-      new Uint8Array()
-    );
-    const headers = new Headers();
-    signed.forEach((value, key) => {
-      if (key !== "content-type") headers.set(key, value);
-    });
-    headers.set("x-snap-traceid", crypto.randomUUID());
-    headers.set("Agent-Type", "INFERHUB_AGENT");
-    headers.set("X-Language", "en");
-    let response;
-    try {
-      response = await this.fetchImpl(url, { method: "GET", headers, signal });
-    } catch {
-      return void 0;
-    }
-    if (response.status !== 200) return void 0;
-    let body;
-    try {
-      body = await response.json();
-    } catch {
-      return void 0;
-    }
-    const status = body.status;
-    if (status !== "waiting" && status !== "working" && status !== "error" && status !== "queue_full") return void 0;
-    return {
-      status,
-      queuePosition: Number(body.queue_position ?? -1),
-      message: typeof body.message === "string" ? body.message : ""
-    };
-  }
-};
-function registerCodeArtsLlm(ctx, options) {
-  const adapter = new CodeArtsAdapter(options);
-  registerAdapterIdempotent(ctx.llm, [PROVIDER], adapter);
-  return adapter;
-}
-var RATE_LIMIT_BUSINESS_CODE = 6004;
-var RATE_LIMIT_PATTERN2 = /频率限制|频率超出|使用量已超出|重置|rate.?limit|frequency limit|usage exceeds|too many requests/i;
-var MODEL_SATURATION_BUSINESS_CODE = 14003;
-var MODEL_SATURATION_PATTERN = /模型繁忙|请求量饱和|model\s+busy|currently\s+saturated/i;
-function isModelSaturationError(status, body) {
-  if (typeof status === "number" && status < 400) return false;
-  if (body.length === 0) return false;
-  try {
-    const code = JSON.parse(body).code;
-    if (code === MODEL_SATURATION_BUSINESS_CODE || code === String(MODEL_SATURATION_BUSINESS_CODE)) return true;
-  } catch {
-  }
-  return MODEL_SATURATION_PATTERN.test(body);
-}
-function hasRateLimitBusinessCode(body) {
-  try {
-    const data = JSON.parse(body);
-    const code = data.code;
-    return code === RATE_LIMIT_BUSINESS_CODE || code === String(RATE_LIMIT_BUSINESS_CODE);
-  } catch {
-    return false;
-  }
-}
-function isRateLimited2(body, status) {
-  if (status === 429) return true;
-  return hasRateLimitBusinessCode(body) || RATE_LIMIT_PATTERN2.test(body);
-}
-var RESET_TIME_PATTERN2 = /(?:将在|reset at)\s+([\d-]+\s+[\d:]+)\s+(UTC[+-]\d+(?::\d+)?)/i;
-var RATE_LIMIT_FALLBACK_MS2 = 36e5;
-function parseRateLimitError2(body, currentModel, status) {
-  const fallback = () => ({
-    modelId: currentModel,
-    resetTimeMs: Date.now() + RATE_LIMIT_FALLBACK_MS2
-  });
-  try {
-    const data = JSON.parse(body);
-    const msg = typeof data.msg === "string" ? data.msg : "";
-    const resetMatch = RESET_TIME_PATTERN2.exec(msg);
-    if (resetMatch) {
-      const resetMs = Date.parse(`${resetMatch[1]} ${resetMatch[2]}`);
-      if (!Number.isNaN(resetMs)) {
-        return { modelId: currentModel, resetTimeMs: resetMs };
-      }
-    }
-    if (isRateLimited2(body, status)) {
-      return fallback();
-    }
-    return null;
-  } catch {
-    return status === 429 ? fallback() : null;
-  }
-}
 
 // vendor/channel-pack/src/channels/codearts.ts
 function createCodeArtsChannel(deps) {
@@ -55776,8 +55788,7 @@ function createQoderChannel(deps) {
     namespace: "llm-qoder",
     displayName: "Qoder",
     rpcAuthKey: "qoder",
-    credentialRefName: QODER.defaultCredentialRef,
-    registerComment: ""
+    credentialRefName: QODER.defaultCredentialRef
   });
 }
 function createQoderCnChannel(deps) {
@@ -55788,8 +55799,7 @@ function createQoderCnChannel(deps) {
     // ⚠️ 只有这里与渠道 id 不同：渠道 id 是全小写 `qodercn`，而 RPC 的
     // `ChannelPackAuths` 形参沿用驼峰 `qoderCn`（历史命名）。
     rpcAuthKey: "qoderCn",
-    credentialRefName: QODER_CN.defaultCredentialRef,
-    registerComment: ""
+    credentialRefName: QODER_CN.defaultCredentialRef
   });
 }
 function makeQoderChannel(deps, options) {
@@ -68866,14 +68876,18 @@ function apply(ctx, config = {}) {
     createLoomyChannel({ pool }),
     createRaccoonChannel({ pool }),
     createMinimaxChannel({ pool }),
+    // ⚠️ 顺序沿用重构前的**装配**顺序（gemini 在 zcode 之前，见重构前 index.ts
+    // :1288 与 :1405）：llm provider 的注册顺序会体现在目录/选择器的排列上，
+    // 故这里以装配顺序为准。续期目标表由同一张表派生，因此 zcode 与 gemini 的
+    // 续期先后与重构前相反 —— 两者互不依赖且各自 try/catch，仅影响日志行序。
     createGeminiChannel({ pool, fetcher: network.fetch }),
     createZcodeChannel({ pool }),
     // opencode 的条件装配在这里判：注册表只按给定的表装，不认识这条开关。
     ...config.disableOpencode === true ? [] : [createOpencodeChannel({ pool })]
   ];
-  const channelRuntimes = mountChannels(ctx, host, specs);
-  const namespaces = channelRuntimes.map((runtime) => runtime.spec.namespace).filter((namespace) => namespace !== void 0);
+  const namespaces = specs.map((spec) => spec.namespace).filter((namespace) => namespace !== void 0);
   registerProviderSettings(ctx, ...namespaces);
+  const channelRuntimes = mountChannels(ctx, host, specs);
   const REFRESH_INTERVAL_MS = 30 * 60 * 1e3;
   const refreshTargets = channelRuntimes.flatMap((runtime) => runtime.spec.refreshAll === void 0 ? [] : [[runtime.spec.id, runtime.spec.refreshAll]]);
   async function refreshAllCredentials() {
@@ -68916,9 +68930,28 @@ function apply(ctx, config = {}) {
   for (const runtime of channelRuntimes) {
     modelAdapters[runtime.spec.id] = pruned(runtime.spec.id, runtime.adapter);
   }
-  const auths = Object.fromEntries(
-    channelRuntimes.map((runtime) => [runtime.spec.rpcAuthKey ?? runtime.spec.id, runtime.auth])
-  );
+  const authOf = (key) => {
+    const found = channelRuntimes.find((runtime) => (runtime.spec.rpcAuthKey ?? runtime.spec.id) === key);
+    if (found === void 0) {
+      throw new Error(`[channel-pack] \u88C5\u914D\u8868\u91CC\u6CA1\u6709 rpcAuthKey \u4E3A \`${key}\` \u7684\u6E20\u9053\uFF08auths \u8868\u4E0E specs \u8868\u8131\u8282\uFF09`);
+    }
+    return found.auth;
+  };
+  const auths = {
+    codearts: authOf("codearts"),
+    buddy: authOf("buddy"),
+    workbuddy: authOf("workbuddy"),
+    lobsterai: authOf("lobsterai"),
+    qoder: authOf("qoder"),
+    qoderCn: authOf("qoderCn"),
+    trae: authOf("trae"),
+    cline: authOf("cline"),
+    loomy: authOf("loomy"),
+    raccoon: authOf("raccoon"),
+    minimax: authOf("minimax"),
+    zcode: authOf("zcode"),
+    gemini: authOf("gemini")
+  };
   registerChannelPackRpc(ctx, pool, auths, modelAdapters, {
     ...config
   });
