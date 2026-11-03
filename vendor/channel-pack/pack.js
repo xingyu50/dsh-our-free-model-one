@@ -30837,6 +30837,28 @@ function registerAdapterIdempotent(llm, providers, adapter, warn) {
   }
 }
 
+// vendor/channel-pack/src/account-rotation.ts
+async function pickNextAccount(options) {
+  const { pool, provider, modelId, tried } = options;
+  if (pool === void 0) return void 0;
+  const next = await pool.getAvailableAccount(provider, modelId, tried);
+  if (next === null || next === void 0) return void 0;
+  if (tried.has(next.entry.id)) return void 0;
+  tried.add(next.entry.id);
+  return { accountId: next.entry.id, credential: next.credential };
+}
+function createMarkRegistry() {
+  const marked = /* @__PURE__ */ new Set();
+  return {
+    claim(accountId) {
+      if (accountId.length === 0) return false;
+      if (marked.has(accountId)) return false;
+      marked.add(accountId);
+      return true;
+    }
+  };
+}
+
 // vendor/channel-pack/src/llm-adapter.ts
 var CHAT_API_BASE = "https://snap-access.cn-north-4.myhuaweicloud.com/api/v2";
 var PROVIDER = "codearts";
@@ -31451,15 +31473,15 @@ var CodeArtsAdapter = class extends LlmAdapter {
               rateLimitTried.add(currentAccountId);
             }
             if (this.options.accountPool) {
-              const next = await this.options.accountPool.getAvailableAccount(
-                "codearts",
-                options.model,
-                rateLimitTried
-              );
-              if (next && !rateLimitTried.has(next.entry.id)) {
-                rateLimitTried.add(next.entry.id);
+              const next = await pickNextAccount({
+                pool: this.options.accountPool,
+                provider: "codearts",
+                modelId: options.model,
+                tried: rateLimitTried
+              });
+              if (next !== void 0) {
                 credential = next.credential;
-                currentAccountId = next.entry.id;
+                currentAccountId = next.accountId;
                 authRefreshed = false;
                 continue;
               }
@@ -31496,15 +31518,15 @@ var CodeArtsAdapter = class extends LlmAdapter {
               );
               rateLimitTried.add(currentAccountId);
             }
-            const next = await this.options.accountPool.getAvailableAccount(
-              "codearts",
-              options.model,
-              rateLimitTried
-            );
-            if (next && !rateLimitTried.has(next.entry.id)) {
-              rateLimitTried.add(next.entry.id);
+            const next = await pickNextAccount({
+              pool: this.options.accountPool,
+              provider: "codearts",
+              modelId: options.model,
+              tried: rateLimitTried
+            });
+            if (next !== void 0) {
               credential = next.credential;
-              currentAccountId = next.entry.id;
+              currentAccountId = next.accountId;
               authRefreshed = false;
               continue;
             }
@@ -31521,11 +31543,15 @@ var CodeArtsAdapter = class extends LlmAdapter {
                 parsed.resetTimeMs
               );
             }
-            const next = await this.options.accountPool.getAvailableAccount("codearts", options.model);
-            if (next && !rateLimitTried.has(next.entry.id)) {
-              rateLimitTried.add(next.entry.id);
+            const next = await pickNextAccount({
+              pool: this.options.accountPool,
+              provider: "codearts",
+              modelId: options.model,
+              tried: rateLimitTried
+            });
+            if (next !== void 0) {
               credential = next.credential;
-              currentAccountId = next.entry.id;
+              currentAccountId = next.accountId;
               authRefreshed = false;
               continue;
             }
@@ -33591,16 +33617,16 @@ var BuddyAdapter = class _BuddyAdapter extends LlmAdapter2 {
       let rejectionBody = contentRejected ? rejectedBody : "";
       if ((response.status === 401 || response.status === 403) && this.options.accountPool !== void 0) {
         for (; ; ) {
-          const next = await this.options.accountPool.getAvailableAccount(
-            this.product.id,
-            options.model,
-            triedAuth
-          );
-          if (!next || triedAuth.has(next.entry.id)) break;
-          triedAuth.add(next.entry.id);
+          const next = await pickNextAccount({
+            pool: this.options.accountPool,
+            provider: this.product.id,
+            modelId: options.model,
+            tried: triedAuth
+          });
+          if (next === void 0) break;
           rotated = true;
           credential = next.credential;
-          currentAccountId = next.entry.id;
+          currentAccountId = next.accountId;
           response = await this.send(credential, body, options);
           if (response.ok) {
             yield* this.consumeSse(response, options, currentAccountId);
@@ -33680,10 +33706,9 @@ var BuddyAdapter = class _BuddyAdapter extends LlmAdapter2 {
         let sawContentRejection = false;
         let contentRejectionStatus = 0;
         let contentRejectionBody = "";
-        const rateLimitMarked = /* @__PURE__ */ new Set();
+        const rateLimitMarks = createMarkRegistry();
         for (; ; ) {
-          if (currentAccountId !== "" && isRateLimited(errorText, response.status) && !rateLimitMarked.has(currentAccountId)) {
-            rateLimitMarked.add(currentAccountId);
+          if (isRateLimited(errorText, response.status) && rateLimitMarks.claim(currentAccountId)) {
             const parsed = parseRateLimitError(errorText, options.model, response.status);
             await this.options.accountPool.updateModelRateLimit(
               currentAccountId,
@@ -33691,15 +33716,15 @@ var BuddyAdapter = class _BuddyAdapter extends LlmAdapter2 {
               parsed?.resetTimeMs ?? Date.now() + RATE_LIMIT_FALLBACK_MS
             );
           }
-          const next = await this.options.accountPool.getAvailableAccount(
-            this.product.id,
-            options.model,
+          const next = await pickNextAccount({
+            pool: this.options.accountPool,
+            provider: this.product.id,
+            modelId: options.model,
             tried
-          );
-          if (!next || tried.has(next.entry.id)) break;
-          tried.add(next.entry.id);
+          });
+          if (next === void 0) break;
           credential = next.credential;
-          currentAccountId = next.entry.id;
+          currentAccountId = next.accountId;
           response = await this.send(credential, body, options);
           if (response.ok) {
             yield* this.consumeSse(response, options, currentAccountId);
@@ -35104,12 +35129,13 @@ var LobsteraiAdapter = class extends LlmAdapter3 {
           exhausted: true
         });
       }
-      const next = await this.options.accountPool.getAvailableAccount(
-        this.product.id,
-        options.model,
+      const next = await pickNextAccount({
+        pool: this.options.accountPool,
+        provider: this.product.id,
+        modelId: options.model,
         tried
-      );
-      if (!next || tried.has(next.entry.id)) {
+      });
+      if (next === void 0) {
         throw buildLobsteraiFailure({
           kind: lastKind,
           status: lastStatus,
@@ -35119,9 +35145,8 @@ var LobsteraiAdapter = class extends LlmAdapter3 {
           exhausted: true
         });
       }
-      tried.add(next.entry.id);
       credential = next.credential;
-      currentAccountId = next.entry.id;
+      currentAccountId = next.accountId;
       response = await this.send(credential, body, options);
     }
   }
@@ -37357,11 +37382,15 @@ var QoderAdapter = class extends LlmAdapter4 {
       await pool.updateModelRateLimit(activeAccountId, options.model, nextUtc8DayStartMs());
       tried.add(activeAccountId);
     }
-    const next = await pool.getAvailableAccount(this.product.id, options.model, tried);
-    if (next === null || tried.has(next.entry.id)) return void 0;
-    tried.add(next.entry.id);
+    const next = await pickNextAccount({
+      pool,
+      provider: this.product.id,
+      modelId: options.model,
+      tried
+    });
+    if (next === void 0) return void 0;
     const credential = next.credential;
-    return { credential: await this.ensureUid(credential), accountId: next.entry.id };
+    return { credential: await this.ensureUid(credential), accountId: next.accountId };
   }
   /**
    * 排队等待（HTTP 层与 SSE 层**共用**）。
@@ -40364,12 +40393,10 @@ var ClineAdapter = class extends LlmAdapter6 {
         const tried = /* @__PURE__ */ new Set();
         if (currentAccountId.length > 0) tried.add(currentAccountId);
         const maxRotate = CLINE_MAX_ROTATE - 1;
-        let markedAccountId = "";
+        const limitedMarks = createMarkRegistry();
         const markLimited = async () => {
-          if (currentAccountId.length === 0) return;
-          if (currentAccountId === markedAccountId) return;
           if (!recordsClineRateLimit(response.status, errorText)) return;
-          markedAccountId = currentAccountId;
+          if (!limitedMarks.claim(currentAccountId)) return;
           await this.options.accountPool?.updateModelRateLimit(
             currentAccountId,
             options.model,
@@ -40378,15 +40405,15 @@ var ClineAdapter = class extends LlmAdapter6 {
         };
         for (let round = 0; round < maxRotate; round++) {
           await markLimited();
-          const next = await this.options.accountPool.getAvailableAccount(
-            this.product.id,
-            options.model,
+          const next = await pickNextAccount({
+            pool: this.options.accountPool,
+            provider: this.product.id,
+            modelId: options.model,
             tried
-          );
-          if (next === null || next === void 0 || tried.has(next.entry.id)) break;
-          tried.add(next.entry.id);
+          });
+          if (next === void 0) break;
           credential = next.credential;
-          currentAccountId = next.entry.id;
+          currentAccountId = next.accountId;
           response = await this.send(credential, body, options);
           if (response.ok) {
             yield* this.consumeWithLog(response, options, {
@@ -52857,14 +52884,18 @@ var ZcodeAdapter = class extends LlmAdapter8 {
       await pool.updateModelRateLimit(activeAccountId, options.model, nextUtc8DayStartMs());
       tried.add(activeAccountId);
     }
-    const next = await pool.getAvailableAccount(this.product.id, options.model, tried);
-    if (next === null || next === void 0 || tried.has(next.entry.id)) return void 0;
-    tried.add(next.entry.id);
+    const next = await pickNextAccount({
+      pool,
+      provider: this.product.id,
+      modelId: options.model,
+      tried
+    });
+    if (next === void 0) return void 0;
     return {
       // 池的凭据类型是历史遗留的联合类型；运行时安全性由 provider 过滤保证
       // （查询用 `this.product.id`，取到的必是 zcode 凭据）。
       credential: next.credential,
-      accountId: next.entry.id
+      accountId: next.accountId
     };
   }
   /**
@@ -54579,11 +54610,15 @@ var GeminiAdapter = class extends LlmAdapter9 {
             });
           }
           if (rotations < GEMINI_MAX_ROTATE - 1) {
-            const next = await pool.getAvailableAccount(this.product.id, options.model, tried);
-            if (next !== null && next !== void 0 && !tried.has(next.entry.id)) {
+            const next = await pickNextAccount({
+              pool,
+              provider: this.product.id,
+              modelId: options.model,
+              tried
+            });
+            if (next !== void 0) {
               rotations++;
-              tried.add(next.entry.id);
-              currentAccountId = next.entry.id;
+              currentAccountId = next.accountId;
               credential = next.credential;
               endpointIdx = 0;
               endpointSwitched = false;
@@ -62222,9 +62257,12 @@ function createRaccoonChannel(deps) {
           if (!resolved) throw new Error("raccoon: credential no longer exists");
           return JSON.parse(resolved.value);
         },
+        // 注入回调拿到的是 `ReadonlySet`（见 `RaccoonAdapterOptions.nextAccount`），
+        // 而 `pickNextAccount` 会就地记入 `tried` —— 所以这一处保留直接问池；
+        // 记入 `tried` 由适配器自己每轮做（`raccoon-adapter.ts` 的 `tried.add`）。
         nextAccount: async (modelId, tried) => {
           const next = await pool.getAvailableAccount(RACCOON.id, modelId, tried);
-          if (!next) return void 0;
+          if (!next || tried.has(next.entry.id)) return void 0;
           reportLedgerAccount(RACCOON.id, next.entry.id);
           return { accountId: next.entry.id, credential: next.credential };
         },
