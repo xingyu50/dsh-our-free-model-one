@@ -29364,17 +29364,40 @@ var RemoteCatalogGate = class {
   }
 };
 
+// vendor/channel-pack/src/utc8.ts
+var MS_PER_DAY = 864e5;
+var QODER_BILLING_UTC_OFFSET_MS = 8 * 36e5;
+function utc8MsIntoDay(nowMs = Date.now()) {
+  const shifted = nowMs + QODER_BILLING_UTC_OFFSET_MS;
+  return (shifted % MS_PER_DAY + MS_PER_DAY) % MS_PER_DAY;
+}
+function utc8MinutesOfDay(nowMs = Date.now()) {
+  return Math.floor(utc8MsIntoDay(nowMs) / 6e4);
+}
+function utc8DateString(nowMs = Date.now()) {
+  return new Date(nowMs + QODER_BILLING_UTC_OFFSET_MS).toISOString().slice(0, 10);
+}
+function nextUtc8DayStartMs(nowMs = Date.now()) {
+  const msIntoDay = utc8MsIntoDay(nowMs);
+  return nowMs + (MS_PER_DAY - msIntoDay);
+}
+function utc8DayKey(ts) {
+  const shifted = new Date(ts + QODER_BILLING_UTC_OFFSET_MS);
+  const month = String(shifted.getUTCMonth() + 1).padStart(2, "0");
+  const day = String(shifted.getUTCDate()).padStart(2, "0");
+  return `${shifted.getUTCFullYear()}-${month}-${day}`;
+}
+function utc8DayKeyStartMs(day) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return Number.NaN;
+  const parsed = Date.parse(`${day}T00:00:00Z`);
+  return Number.isFinite(parsed) ? parsed - QODER_BILLING_UTC_OFFSET_MS : Number.NaN;
+}
+
 // vendor/channel-pack/src/model-queue.ts
 var QUEUE_BUSINESS_CODE = "10605";
 var BILLING_BUSINESS_CODE = "110";
 function isBillingBusinessCode(code) {
   return code === BILLING_BUSINESS_CODE || code === Number(BILLING_BUSINESS_CODE);
-}
-var QODER_BILLING_UTC_OFFSET_MS = 8 * 36e5;
-function nextUtc8DayStartMs(nowMs = Date.now()) {
-  const shifted = nowMs + QODER_BILLING_UTC_OFFSET_MS;
-  const msIntoDay = (shifted % 864e5 + 864e5) % 864e5;
-  return nowMs + (864e5 - msIntoDay);
 }
 function looksLikeBillingError(text) {
   return /billing\s+daily\s+count\s+exceeded|daily\s+count\s+exceeded|billing_error/i.test(text);
@@ -30380,12 +30403,6 @@ function attachTokenLedgerStore(next) {
 }
 function readTokenLedgerDayMap() {
   return backend?.load() ?? /* @__PURE__ */ new Map();
-}
-function utc8DayKey(ts) {
-  const shifted = new Date(ts + 8 * 60 * 60 * 1e3);
-  const month = String(shifted.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(shifted.getUTCDate()).padStart(2, "0");
-  return `${shifted.getUTCFullYear()}-${month}-${day}`;
 }
 function clampCount(value) {
   const n = Number(value);
@@ -37423,8 +37440,7 @@ function promotionActiveNow2(promotion, now) {
   const start = toMinutes(windowStart);
   const end = toMinutes(windowEnd);
   if (start === void 0 || end === void 0) return promotion.active;
-  const utc8 = new Date(now.getTime() + 8 * 36e5);
-  const minutes = utc8.getUTCHours() * 60 + utc8.getUTCMinutes();
+  const minutes = utc8MinutesOfDay(now.getTime());
   return start <= end ? minutes >= start && minutes < end : minutes >= start || minutes < end;
 }
 function qoderDisplayName(model, now = /* @__PURE__ */ new Date()) {
@@ -54501,8 +54517,7 @@ var QODER_USAGE_PATH = "/sash/api/v2/me/usage";
 var QODER_CAMPAIGNS_PATH = "/sash/api/v1/me/campaigns";
 var QODER_CAMPAIGN_REFRESH_HOUR_UTC8 = 10;
 function hasQoderCampaignRefreshedToday(nowMs = Date.now()) {
-  const utc8 = new Date(nowMs + QODER_BILLING_UTC_OFFSET_MS);
-  return utc8.getUTCHours() >= QODER_CAMPAIGN_REFRESH_HOUR_UTC8;
+  return utc8MinutesOfDay(nowMs) >= QODER_CAMPAIGN_REFRESH_HOUR_UTC8 * 60;
 }
 var QODER_CREDITS_TIMEOUT_MS = 15e3;
 var NOT_ACTIVATED_HINT = "\u8BE5\u8D26\u53F7\u5C1A\u672A\u5728 Qoder \u4FA7\u5F00\u901A\u6BCF\u65E5\u9886\u53D6\uFF08\u6BCF\u65E5 100 Credits\uFF09\u3002\u8BF7\u5148\u7528 Qoder \u5B98\u65B9\u5BA2\u6237\u7AEF\u767B\u5F55\u4E00\u6B21\u8BE5\u8D26\u53F7\uFF0C\u5F00\u901A\u540E\u518D\u56DE\u6765\u9886\u53D6\u3002";
@@ -57615,13 +57630,6 @@ function sanitizeAutoCheckin(raw) {
     channels: sanitizeChannels(record.channels),
     dismissedRunAt: ms(record.dismissedRunAt)
   };
-}
-function utc8DateString(nowMs = Date.now()) {
-  return new Date(nowMs + QODER_BILLING_UTC_OFFSET_MS).toISOString().slice(0, 10);
-}
-function utc8MsIntoDay(nowMs = Date.now()) {
-  const shifted = nowMs + QODER_BILLING_UTC_OFFSET_MS;
-  return (shifted % 864e5 + 864e5) % 864e5;
 }
 var RETRY_MS = 36e5;
 var DAY_START_SKEW_MS = 30 * 6e4;
@@ -64442,10 +64450,10 @@ var TOKEN_LEDGER_DAYS = 90;
 var TOKEN_LEDGER_FLUSH_MS = 2e3;
 var SCHEMA5 = "channel-pack/token-ledger/v1";
 function pruneDays(days) {
-  const cutoff = Date.now() + 8 * 60 * 60 * 1e3 - TOKEN_LEDGER_DAYS * 24 * 60 * 60 * 1e3;
+  const cutoff = Date.now() + QODER_BILLING_UTC_OFFSET_MS - TOKEN_LEDGER_DAYS * MS_PER_DAY;
   const pruned = /* @__PURE__ */ new Map();
   for (const [day, buckets] of days) {
-    const dayStartUtc8 = Date.parse(`${day}T00:00:00Z`) - 8 * 60 * 60 * 1e3;
+    const dayStartUtc8 = utc8DayKeyStartMs(day);
     if (Number.isFinite(dayStartUtc8) && dayStartUtc8 < cutoff) continue;
     pruned.set(day, buckets);
   }

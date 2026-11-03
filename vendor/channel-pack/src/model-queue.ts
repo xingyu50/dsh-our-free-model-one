@@ -78,7 +78,7 @@ export function isBillingBusinessCode(code: unknown): boolean {
 }
 
 /**
- * Qoder 的计费日界时区（**固定 UTC+8**）。
+ * Qoder 的计费日界时区（**固定 UTC+8**）与「当日 24:00」的算法。
  *
  * ## 为什么写死 UTC+8 而不取本机时区
  *
@@ -88,31 +88,14 @@ export function isBillingBusinessCode(code: unknown): boolean {
  * 取本机时区会在用户出差/改系统时区时算出**错的解禁时刻**：
  * 时区偏东会让标记过早失效（马上再撞一次额度墙），偏西则白等几小时。
  *
- * 这里刻意**不**用 `Intl` 做通用时区换算：需求就是「固定的 UTC+8 日界」，
- * 写死偏移量（`8 * 3600_000`）比引入时区数据库更可预测、也便于单测。
+ * ⚠️ 算术本身只在 `utc8.ts` 里留一份；这里 re-export 是为了不动 13 个既有
+ * import 点（`qoder-adapter` / `llm-adapter` / `raccoon-adapter` 等都在这里取）。
+ * 新增调用请直接用 `./utc8.js`。
  */
-export const QODER_BILLING_UTC_OFFSET_MS = 8 * 3_600_000
-
-/**
- * 算出「**UTC+8 的当日 24:00**」对应的 UTC 毫秒时间戳。
- *
- * 语义：额度按**自然日**重置，故受限时间取「今天（UTC+8）结束的那一刻」——
- * 即次日 00:00:00.000（UTC+8）。
- *
- * ⚠️ 用**算术**而非 `setHours`：`Date` 的 `setHours` 按**本机时区**运算，
- * 在非 UTC+8 的机器上会得到错的时间。这里先把时间戳平移到 UTC+8 的「墙上时间」，
- * 取到该日末尾，再平移回来。
- *
- * @param nowMs - 当前 UTC 毫秒时间戳（注入以便单测；默认 `Date.now()`）。
- * @returns UTC+8 次日 00:00 的 UTC 毫秒时间戳（**严格大于** `nowMs`）。
- */
-export function nextUtc8DayStartMs(nowMs: number = Date.now()): number {
-  const shifted = nowMs + QODER_BILLING_UTC_OFFSET_MS
-  // 当天已过的毫秒数（对一天的整数倍取余）
-  const msIntoDay = ((shifted % 86_400_000) + 86_400_000) % 86_400_000
-  // 补足到当日结束 = 次日 00:00（UTC+8）
-  return nowMs + (86_400_000 - msIntoDay)
-}
+export {
+  QODER_BILLING_UTC_OFFSET_MS,
+  nextUtc8DayStartMs,
+} from './utc8.js'
 
 /**
  * 从错误体里提取**额度类**文案（客户端映射之外的兜底判据）。

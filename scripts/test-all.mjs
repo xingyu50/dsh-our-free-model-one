@@ -73,6 +73,7 @@ const suites = [
   ['channel-auto-checkin-boundary', 'auto-checkin-boundary-test.mjs', []],
   ['channel-source', 'channel-pack-test.mjs', ['--source', '--channels-only']],
   ['channel-source-loader', 'channel-source-test.mjs', []],
+  ['channel-utc8', 'utc8-test.mjs', []],
   ['channel-network', 'channel-network-test.mjs', []],
   ['channel-credits-rpc', 'channel-credits-rpc-test.mjs', []],
   ['channel-credits-ui', 'channel-credits-ui-test.mjs', []],

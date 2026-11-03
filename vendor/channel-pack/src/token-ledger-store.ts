@@ -62,6 +62,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
+import { MS_PER_DAY, QODER_BILLING_UTC_OFFSET_MS, utc8DayKeyStartMs } from './utc8.js'
 import { resolveChannelPackHome } from './channel-pack-store.js'
 import { mergeDayEntry, type TokenLedgerDayBucket, type TokenLedgerDayMap } from './token-ledger.js'
 
@@ -95,11 +96,12 @@ export interface TokenLedgerStore {
 
 /** 淘汰过老日键后的浅拷贝（不改调用方的表）。 */
 function pruneDays(days: TokenLedgerDayMap): TokenLedgerDayMap {
-  const cutoff = Date.now() + 8 * 60 * 60 * 1000 - TOKEN_LEDGER_DAYS * 24 * 60 * 60 * 1000
+  // ⚠️ 口径保持原样（`现在 + 8h - 保留天数`），不改成「今日日首 - 保留天数」：
+  // 后者会把淘汰边界提前最多 32 小时，属行为变化，不属本轮的「算法归位」。
+  const cutoff = Date.now() + QODER_BILLING_UTC_OFFSET_MS - TOKEN_LEDGER_DAYS * MS_PER_DAY
   const pruned: TokenLedgerDayMap = new Map()
   for (const [day, buckets] of days) {
-    // 日键 `YYYY-MM-DD` 的 UTC+8 当日 24:00 ≈ 该日 00:00 + 1 天；用日首 +8h 对齐比较即可。
-    const dayStartUtc8 = Date.parse(`${day}T00:00:00Z`) - 8 * 60 * 60 * 1000
+    const dayStartUtc8 = utc8DayKeyStartMs(day)
     if (Number.isFinite(dayStartUtc8) && dayStartUtc8 < cutoff) continue
     pruned.set(day, buckets)
   }

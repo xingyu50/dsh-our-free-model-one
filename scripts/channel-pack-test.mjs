@@ -170,9 +170,10 @@ try {
    * 在 23:52 变绿、在 00:45 变红 —— 判据依赖运行时刻，与代码无关。真正的判据是「签到
    * 确实发生过」（下面那条 automaticClaims），ranToday 只在窗口外才成立。
    */
-  // 直接取生产算式：口径不再靠注释互相提醒，改 auto-checkin.ts 时这里自动跟随。
+  // 直接取生产算式与常量：口径不再靠注释互相提醒，改 auto-checkin.ts 时这里自动跟随。
   const { utc8MsIntoDay: msIntoUtc8Day } = await importChannelSource('auto-checkin.ts')
-  if (msIntoUtc8Day() >= 30 * 60_000) {
+  const { DAY_START_SKEW_MS } = await importChannelSource('auto-checkin.ts')
+  if (msIntoUtc8Day() >= DAY_START_SKEW_MS) {
     assert.equal(automatic.ranToday, true, 'automatic check-in recorded today')
   } else {
     assert.equal(automatic.ranToday, false, 'inside the day-boundary window the run deliberately does not record today')

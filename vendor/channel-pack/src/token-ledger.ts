@@ -29,6 +29,8 @@
  * 推理失败。所有入参截断/钳制，`Object.freeze` 防止调用方修改共享对象。
  */
 
+import { utc8DayKey } from './utc8.js'
+
 /** 一条请求记录。 */
 export interface TokenLedgerEntry {
   /** 请求**发起**时刻（毫秒时间戳）。 */
@@ -282,18 +284,13 @@ export function readTokenLedgerDayMap(): TokenLedgerDayMap {
 }
 
 /**
- * **UTC+8 日键**（`YYYY-MM-DD`）。
+ * **UTC+8 日键**（`YYYY-MM-DD`），账本按天分桶用。
  *
- * ⚠️ 必须用**算术**换算（+8h 后取 UTC 日期），绝不能用 `Date.setHours` 等
- * 本机时区方法 —— 与 `qoder-adapter.ts` 的 `nextUtc8DayStartMs` 同一条纪律：
- * 各渠道的每日额度都按 UTC+8 结算，本机时区不同（出差/改设置）会算错日界。
+ * ⚠️ 算术只在 `utc8.ts` 里留一份（`+8h` 平移后取 UTC 日期，绝不用
+ * `Date.setHours` 等本机时区方法：各渠道的每日额度都按 UTC+8 结算，本机时区
+ * 不同（出差/改设置）会算错日界）。这里 re-export 只为不动既有调用点。
  */
-export function utc8DayKey(ts: number): string {
-  const shifted = new Date(ts + 8 * 60 * 60 * 1000)
-  const month = String(shifted.getUTCMonth() + 1).padStart(2, '0')
-  const day = String(shifted.getUTCDate()).padStart(2, '0')
-  return `${shifted.getUTCFullYear()}-${month}-${day}`
-}
+export { utc8DayKey }
 
 /** 数值字段的统一钳制：非有限值/负数 → 0，截断小数。 */
 function clampCount(value: unknown): number {

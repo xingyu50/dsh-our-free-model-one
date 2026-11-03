@@ -33,6 +33,7 @@ import { QoderEncryptedInfer, type QoderInferMessage, type QoderInferRequest, ty
 import { unwrapQoderEnvelopeStream } from './qoder-envelope.js'
 import { QODER, type QoderFallbackModel, type QoderModelPromotion, type QoderProduct } from './qoder-product.js'
 import { reasoningRankOf } from './reasoning-ladder.js'
+import { utc8MinutesOfDay } from './utc8.js'
 import { projectRequestImage, type ImageRequestTarget } from './image-budget.js'
 import {
   registerAdapterIdempotent,
@@ -1084,8 +1085,7 @@ export function promotionActiveNow(promotion: QoderModelPromotion, now: Date): b
   if (start === undefined || end === undefined) return promotion.active
 
   // 取 UTC+8 的「墙上时间」（目录时区与用户一致，故无需真实时区换算）
-  const utc8 = new Date(now.getTime() + 8 * 3_600_000)
-  const minutes = utc8.getUTCHours() * 60 + utc8.getUTCMinutes()
+  const minutes = utc8MinutesOfDay(now.getTime())
   return start <= end
     ? minutes >= start && minutes < end
     : minutes >= start || minutes < end

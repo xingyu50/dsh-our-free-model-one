@@ -62,7 +62,8 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
-import { QODER_BILLING_UTC_OFFSET_MS, nextUtc8DayStartMs } from './model-queue.js'
+import { nextUtc8DayStartMs } from './model-queue.js'
+import { utc8DateString, utc8MsIntoDay } from './utc8.js'
 import { resolveChannelPackHome } from './channel-pack-store.js'
 import { formatClaimGains } from './credits.js'
 import { ZCODE } from './zcode-product.js'
@@ -164,27 +165,17 @@ export function sanitizeAutoCheckin(raw: unknown): AutoCheckinDoc {
 }
 
 /**
- * 取「UTC+8 的当天日期」（`YYYY-MM-DD`）。
+ * 取「UTC+8 的当天日期」（`YYYY-MM-DD`）与「距当日 00:00 的偏移量」，两者都是
+ * `utc8.ts` 那一份算术的实现。
  *
- * ⚠️ 必须用**算术平移**而不是本机时区：日界归服务端（各渠道的每日额度按 UTC+8
- * 结算），取本机时区会在用户出差/改系统时区时得到错的「今天」—— 偏东会提前把
- * 当天记为已跑（真的漏签），偏西会一天跑两次。偏移量复用 `model-queue.ts` 的
- * `QODER_BILLING_UTC_OFFSET_MS`（同一口径，不另立常量）。
- */
-export function utc8DateString(nowMs: number = Date.now()): string {
-  return new Date(nowMs + QODER_BILLING_UTC_OFFSET_MS).toISOString().slice(0, 10)
-}
-
-/**
- * 「今天（UTC+8）已经过去多少毫秒」—— 即距当日 00:00 的偏移量。
+ * ⚠️ 日界归服务端（各渠道的每日额度按 UTC+8 结算），取本机时区会在用户出差/改系统
+ * 时区时得到错的「今天」—— 偏东会提前把当天记为已跑（真的漏签），偏西会一天跑两次。
+ * 调用方只取一次 `now()`，避免两次取时在日界附近读出矛盾值。
  *
- * 与 `utc8DateString` / `nextUtc8DayStartMs` 同一套算术平移，不另立第二份
- * 日界算法；调用方只取一次 `now()`，避免两次取时在日界附近读出矛盾值。
+ * ⚠️ re-export 而非本地实现：这两个函数最早长在这里，后来被抄到四处。收敛到
+ * `utc8.ts` 后保留出口只为不动既有 import 点。新增调用请直接用 `./utc8.js`。
  */
-export function utc8MsIntoDay(nowMs: number = Date.now()): number {
-  const shifted = nowMs + QODER_BILLING_UTC_OFFSET_MS
-  return ((shifted % 86_400_000) + 86_400_000) % 86_400_000
-}
+export { utc8DateString, utc8MsIntoDay } from './utc8.js'
 
 /**
  * 今天还没记入时的重试间隔（毫秒）。
@@ -193,7 +184,7 @@ export function utc8MsIntoDay(nowMs: number = Date.now()): number {
  * 「下次启动会重试」—— 但 dsh 进程能连续存活多天，这个兜底在长命进程里等于不存在，
  * 那天的额度会被整天漏领。改成「一小时后自己重试」，直到记入或跨过日界。
  */
-const RETRY_MS = 3_600_000
+export const RETRY_MS = 3_600_000
 
 /**
  * 日界之后多久才开始认「今天」（毫秒）。
@@ -203,7 +194,7 @@ const RETRY_MS = 3_600_000
  * 排在「日界 + 这一段」而不是踩在日界上；同一判据也用在 `performRun` 的闸上，
  * 免得别的路径（手动打开开关、按小时重试、启动轮）抢在窗口里把昨天记成今天。
  */
-const DAY_START_SKEW_MS = 30 * 60_000
+export const DAY_START_SKEW_MS = 30 * 60_000
 
 /** 环境变量：启动后延迟多久再尝试自动签到（毫秒）。 */
 export const DSH_CHANNEL_PACK_AUTO_CHECKIN_DELAY_MS = 'DSH_CHANNEL_PACK_AUTO_CHECKIN_DELAY_MS'

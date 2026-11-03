@@ -68,7 +68,7 @@
  */
 
 import { roundCredits, type CheckinStatus, type ClaimOutcome, type CreditBalance, type CreditPackage } from './credits.js'
-import { QODER_BILLING_UTC_OFFSET_MS } from './model-queue.js'
+import { utc8MinutesOfDay } from './utc8.js'
 import { withQoderMachineHeadersAsync } from './qoder-machine.js'
 import { qoderBearerToken, type QoderCredential } from './qoder.js'
 import type { QoderProduct } from './qoder-product.js'
@@ -93,12 +93,13 @@ export const QODER_CAMPAIGN_REFRESH_HOUR_UTC8 = 10
  *
  * **必须用算术平移而不是 `Date.getHours()`**：活动按 **UTC+8** 结算，
  * 取本机时区会让用户出差 / 改系统时区时得到错的答案（偏东会提前把当天
- * 记为已处理、真漏领；偏西会一天判两次）。口径与 `model-queue.ts` 的
- * `QODER_BILLING_UTC_OFFSET_MS` 一致，不另立偏移常量。
+ * 记为已处理、真漏领；偏西会一天判两次）。偏移常量直接取 `utc8.ts` 那一份，
+ * 不另立第二份。
  */
 export function hasQoderCampaignRefreshedToday(nowMs: number = Date.now()): boolean {
-  const utc8 = new Date(nowMs + QODER_BILLING_UTC_OFFSET_MS)
-  return utc8.getUTCHours() >= QODER_CAMPAIGN_REFRESH_HOUR_UTC8
+  // `floor(距日界分钟 / 60)` 就是 UTC+8 墙钟小时；比较「分钟 >= 10:00」与
+  // 「小时 >= 10」在整点边界上完全等价（10 点整那一刻两者同时成立）。
+  return utc8MinutesOfDay(nowMs) >= QODER_CAMPAIGN_REFRESH_HOUR_UTC8 * 60
 }
 
 /** 单次请求超时（毫秒）。 */
