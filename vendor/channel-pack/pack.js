@@ -27844,7 +27844,7 @@ ${captureLines}` : capture.stack;
 });
 
 // vendor/channel-pack/src/index.ts
-import { credentialRef as credentialRef17 } from "@deepseek-ai/dsh-credentials";
+import { credentialRef as credentialRef18 } from "@deepseek-ai/dsh-credentials";
 import { LlmError as LlmError20 } from "@deepseek-ai/dsh-llm";
 import Schema2 from "@deepseek-ai/schemastery";
 
@@ -49324,8 +49324,8 @@ var CarrierPageServer = class {
       const server = createHttpServer((request2, response) => {
         this.handle(request2, response);
       });
-      const settle = (ok) => {
-        resolve2(ok);
+      const settle = (ok2) => {
+        resolve2(ok2);
       };
       server.once("error", () => {
         try {
@@ -49968,14 +49968,14 @@ async function claimZcodePlan(credential, planId, captcha, fetchImpl = fetch) {
     code = 3012;
   }
   const alreadyClaimed = code === 1003;
-  const ok = response.ok && (code === 0 || alreadyClaimed);
+  const ok2 = response.ok && (code === 0 || alreadyClaimed);
   return {
     planId,
     code,
-    ok,
+    ok: ok2,
     alreadyClaimed,
     httpStatus: response.status,
-    message: message2 ?? (ok ? void 0 : `HTTP ${response.status}`)
+    message: message2 ?? (ok2 ? void 0 : `HTTP ${response.status}`)
   };
 }
 async function fetchZcodeCaptchaConfig(credential, fetchImpl = fetch) {
@@ -52994,7 +52994,7 @@ function registerZcodeLlm(ctx, options) {
 }
 
 // vendor/channel-pack/src/channel-pack-rpc.ts
-import { credentialRef as credentialRef12 } from "@deepseek-ai/dsh-credentials";
+import { credentialRef as credentialRef13 } from "@deepseek-ai/dsh-credentials";
 
 // vendor/channel-pack/src/openai-gateway/config.ts
 var DEFAULT_GATEWAY_HOST = "127.0.0.1";
@@ -53196,67 +53196,6 @@ async function disposeGatewayRuntime() {
   lastApiKey = null;
 }
 
-// vendor/channel-pack/src/credit-expiry-window.ts
-var DEFAULT_CREDIT_EXPIRING_WINDOW_DAYS = 15;
-function creditExpiringWindowDays(env = process.env) {
-  const raw = env.DSH_CREDIT_EXPIRING_WINDOW_DAYS;
-  if (typeof raw !== "string" || raw.trim().length === 0) return DEFAULT_CREDIT_EXPIRING_WINDOW_DAYS;
-  const parsed = Number(raw.trim());
-  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_CREDIT_EXPIRING_WINDOW_DAYS;
-  return parsed;
-}
-
-// vendor/channel-pack/src/buddy-balance-rank.ts
-var BUDDY_EXPIRING_WINDOW_DAYS = 15;
-var BUDDY_EXPIRING_WINDOW_MS = BUDDY_EXPIRING_WINDOW_DAYS * 24 * 60 * 60 * 1e3;
-var DSH_BUDDY_EXPIRING_WINDOW_DAYS = "DSH_BUDDY_EXPIRING_WINDOW_DAYS";
-function buddyExpiringWindowDays(env = process.env) {
-  const raw = env[DSH_BUDDY_EXPIRING_WINDOW_DAYS];
-  if (typeof raw !== "string" || raw.trim().length === 0) return BUDDY_EXPIRING_WINDOW_DAYS;
-  const parsed = Number(raw.trim());
-  if (!Number.isFinite(parsed) || parsed < 0) return BUDDY_EXPIRING_WINDOW_DAYS;
-  return parsed;
-}
-var BUDDY_BALANCE_TIER = Object.freeze({
-  /** 有 15 天内到期的积分 —— 优先消耗（再不用就作废）。 */
-  expiring: 0,
-  /** 只剩永久积分（≥ 15 天后到期）。 */
-  permanent: 1,
-  /** 无余额 / 查询失败。 */
-  none: 2
-});
-function splitBuddyCreditsByExpiry(balance, now = Date.now(), windowMs = BUDDY_EXPIRING_WINDOW_MS) {
-  if (balance === null || balance === void 0) return void 0;
-  let expiring = 0;
-  let permanent = 0;
-  for (const pkg of balance.packages) {
-    if (pkg.active !== true) continue;
-    const remaining = positiveOrZero(pkg.remaining);
-    if (remaining <= 0) continue;
-    const endTime = pkg.deductionEndTime;
-    const known = typeof endTime === "number" && Number.isFinite(endTime) && endTime > 0;
-    if (known && endTime - now < windowMs) expiring += remaining;
-    else permanent += remaining;
-  }
-  return { expiring, permanent };
-}
-function buddyBalanceTier(balance, options = {}) {
-  if (positiveOrZero(balance.expiringBalance) > 0) return BUDDY_BALANCE_TIER.expiring;
-  if (options.allowPermanent === false) return BUDDY_BALANCE_TIER.none;
-  if (positiveOrZero(balance.permanentBalance) > 0) return BUDDY_BALANCE_TIER.permanent;
-  return BUDDY_BALANCE_TIER.none;
-}
-function buddyTierUsable(tier) {
-  return tier !== BUDDY_BALANCE_TIER.none;
-}
-function positiveOrZero(value) {
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n : 0;
-}
-function rankBuddyAccountsByBalance(accounts, options = {}) {
-  return accounts.map((account, index) => ({ account, index, tier: buddyBalanceTier(account, options) })).sort((a, b) => a.tier - b.tier || a.index - b.index).map((entry) => entry.account);
-}
-
 // vendor/channel-pack/src/minimax-product.ts
 var MINIMAX_FALLBACK_MODELS = [
   {
@@ -53441,453 +53380,6 @@ function fallbackToEntry(model) {
 }
 function minimaxFallbackEntries(product = MINIMAX) {
   return product.fallbackModels.map(fallbackToEntry);
-}
-
-// vendor/channel-pack/src/credits.ts
-var CHECKIN_ACTIVITY_STATUS_PATH = "/v2/billing/meter/checkin-activity-status";
-var DAILY_CHECKIN_PATH = "/v2/billing/meter/daily-checkin";
-var USER_RESOURCE_PATH = "/v2/billing/meter/get-user-resource";
-var REQUEST_TIMEOUT_MS2 = 3e4;
-var CODE_ALREADY_CLAIMED = 10001;
-var CODE_ALREADY_CLAIMED_ALT = 1001;
-var CODE_NO_QUALIFICATION = 1002;
-var CODE_ACTIVITY_ENDED = 1003;
-function roundCredits(value) {
-  return Math.round(value * 100) / 100;
-}
-function normalizeCreditUnit(unit) {
-  return unit === "token" ? "token" : "credit";
-}
-function claimUnitOf(unit) {
-  return normalizeCreditUnit(typeof unit === "string" ? unit : "");
-}
-function formatCreditAmount(value) {
-  if (!Number.isFinite(value)) return "?";
-  return Number.isInteger(value) ? String(value) : value.toFixed(2);
-}
-function formatTokenAmount(value) {
-  if (!Number.isFinite(value)) return "?";
-  const abs = Math.abs(value);
-  if (abs >= 1e6) return `${(value / 1e6).toFixed(2)}M`;
-  if (abs >= 1e3) return `${(value / 1e3).toFixed(2)}K`;
-  return String(Math.round(value));
-}
-function claimUnitLabel(unit) {
-  return unit === "token" ? "Token" : "\u79EF\u5206";
-}
-function formatUnitAmount(value, unit) {
-  const text = unit === "token" ? formatTokenAmount(value) : formatCreditAmount(value);
-  return `${text}${claimUnitLabel(unit)}`;
-}
-function formatClaimGains(totals) {
-  if (totals === void 0 || totals === null || typeof totals !== "object") return null;
-  const parts = [];
-  for (const unit of ["token", "credit"]) {
-    const value = Number(totals[unit]);
-    if (!Number.isFinite(value) || value <= 0) continue;
-    parts.push(`+${formatUnitAmount(value, unit)}`);
-  }
-  return parts.length === 0 ? null : parts.join(", ");
-}
-function checkinHeaders(credential, product) {
-  const headers = new Headers();
-  headers.set("Authorization", `Bearer ${credential.access_token}`);
-  headers.set("Accept", "application/json");
-  headers.set("Content-Type", "application/json");
-  headers.set(HTTP_HEADER_DOMAIN, product.apiDomain || credential.domain || "");
-  headers.set(HTTP_HEADER_PRODUCT, BUDDY_DEPLOYMENT_TYPE);
-  headers.set(HTTP_HEADER_PRODUCT_CODE, product.productCode);
-  if (credential.user_id !== void 0 && credential.user_id.length > 0) {
-    headers.set("X-User-Id", credential.user_id);
-  }
-  if (credential.enterprise_id !== void 0 && credential.enterprise_id.length > 0) {
-    headers.set("X-Enterprise-Id", credential.enterprise_id);
-    headers.set("X-Tenant-Id", credential.enterprise_id);
-  }
-  headers.set("User-Agent", product.userAgent);
-  return headers;
-}
-function readBool(source, key) {
-  return source[key] === true;
-}
-function readNumber2(source, key) {
-  const value = source[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-function readString3(source, key) {
-  const value = source[key];
-  return typeof value === "string" ? value : "";
-}
-function readStringArray(source, key) {
-  const value = source[key];
-  return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
-}
-var UNPARSABLE_RESPONSE_MESSAGE = "\u8BF7\u6C42\u5931\u8D25\u6216\u54CD\u5E94\u65E0\u6CD5\u89E3\u6790";
-async function postJson(path2, credential, product, fetcher) {
-  try {
-    const response = await fetcher(`${product.endpoint}${path2}`, {
-      method: "POST",
-      headers: checkinHeaders(credential, product),
-      body: "{}",
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS2)
-    });
-    const text = await response.text();
-    let parsed;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      return { ok: false, message: describeNonJsonResponse(response.status, text) };
-    }
-    if (typeof parsed !== "object" || parsed === null) {
-      return { ok: false, message: UNPARSABLE_RESPONSE_MESSAGE };
-    }
-    return { ok: true, body: parsed };
-  } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : String(error) };
-  }
-}
-function describeNonJsonResponse(status, text) {
-  if (status === 401 || status === 403) {
-    return `\u51ED\u636E\u5DF2\u5931\u6548\uFF08HTTP ${status}\uFF09\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55\u8BE5\u8D26\u53F7`;
-  }
-  const snippet = text.trim().slice(0, 80).replace(/\s+/g, " ");
-  return `\u670D\u52A1\u7AEF\u8FD4\u56DE\u4E86\u975E JSON \u54CD\u5E94\uFF08HTTP ${status}\uFF09\uFF1A${snippet}`;
-}
-async function fetchCheckinStatus(credential, product, fetcher = fetch) {
-  const result = await postJson(CHECKIN_ACTIVITY_STATUS_PATH, credential, product, fetcher);
-  if (!result.ok) return null;
-  const body = result.body;
-  if (body.code !== 0) return null;
-  const data = body.data;
-  if (typeof data !== "object" || data === null) return null;
-  const record = data;
-  return {
-    active: readBool(record, "active"),
-    todayCheckedIn: readBool(record, "today_checked_in"),
-    streakDays: readNumber2(record, "streak_days"),
-    dailyCredit: readNumber2(record, "daily_credit"),
-    todayCredit: readNumber2(record, "today_credit"),
-    isStreakDay: readBool(record, "is_streak_day"),
-    totalCredits: readNumber2(record, "total_credits"),
-    checkinDates: readStringArray(record, "checkin_dates"),
-    activityName: readString3(record, "activity_name"),
-    themeName: readString3(record, "theme_name"),
-    endTime: readString3(record, "end_time")
-  };
-}
-async function claimDailyCheckin(credential, product, fetcher = fetch) {
-  const result = await postJson(DAILY_CHECKIN_PATH, credential, product, fetcher);
-  if (!result.ok) {
-    return { kind: "failed", code: -1, message: result.message };
-  }
-  const body = result.body;
-  const code = typeof body.code === "number" ? body.code : -1;
-  const message2 = readString3(body, "msg");
-  if (code === CODE_ALREADY_CLAIMED || code === CODE_ALREADY_CLAIMED_ALT) {
-    return { kind: "already-claimed", message: message2.length > 0 ? message2 : "\u4ECA\u5929\u5DF2\u7B7E\u5230" };
-  }
-  if (code === CODE_NO_QUALIFICATION || code === CODE_ACTIVITY_ENDED) {
-    return { kind: "inactive", message: message2.length > 0 ? message2 : "\u5F53\u524D\u65E0\u9886\u53D6\u8D44\u683C" };
-  }
-  if (code !== 0) {
-    return { kind: "failed", code, message: message2.length > 0 ? message2 : "\u9886\u53D6\u5931\u8D25" };
-  }
-  const data = body.data;
-  if (typeof data !== "object" || data === null) {
-    return { kind: "failed", code, message: "\u9886\u53D6\u54CD\u5E94\u7F3A\u5C11 data \u5B57\u6BB5" };
-  }
-  const record = data;
-  const delayed = readString3(record, "message");
-  return {
-    kind: "claimed",
-    credit: readNumber2(record, "credit"),
-    streakDays: readNumber2(record, "streak_days"),
-    isStreakDay: readBool(record, "is_streak_day"),
-    ...delayed.length > 0 ? { delayedMessage: delayed } : {}
-  };
-}
-function readPreciseNumber(source, baseKey) {
-  const precise = source[`${baseKey}Precise`];
-  if (typeof precise === "string") {
-    const parsed = Number.parseFloat(precise);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  if (typeof precise === "number" && Number.isFinite(precise)) return precise;
-  return readNumber2(source, baseKey);
-}
-var PACKAGE_STATUS_EXPIRED = 3;
-function parseCreditPackage(entry) {
-  const name2 = readString3(entry, "PackageName") || readString3(entry, "SubProductName") || readString3(entry, "PackageCode");
-  const unit = readString3(entry, "CapacityUnit") || readString3(entry, "OriginUnit");
-  const status = entry.Status;
-  const expiredTime = readString3(entry, "ExpiredTime");
-  const deductionEndTime = readNumber2(entry, "DeductionEndTime");
-  const expiredAt = expiredTime.length > 0 ? Date.parse(expiredTime.replace(" ", "T")) : Number.NaN;
-  const active = status !== PACKAGE_STATUS_EXPIRED && !(Number.isFinite(expiredAt) && Date.now() >= expiredAt) && !(deductionEndTime > 0 && Date.now() >= deductionEndTime);
-  return {
-    name: name2,
-    unit,
-    remaining: readPreciseNumber(entry, "CycleCapacityRemain"),
-    total: readPreciseNumber(entry, "CycleCapacitySize"),
-    used: readPreciseNumber(entry, "CycleCapacityUsed"),
-    active,
-    cycleStartTime: readString3(entry, "CycleStartTime"),
-    cycleEndTime: readString3(entry, "CycleEndTime"),
-    expiredTime,
-    ...deductionEndTime > 0 ? { deductionEndTime } : {}
-  };
-}
-async function fetchCreditBalance(credential, product, fetcher = fetch) {
-  const result = await postJson(USER_RESOURCE_PATH, credential, product, fetcher);
-  if (!result.ok) return null;
-  const body = result.body;
-  if (body.code !== 0) return null;
-  const outer = body.data;
-  if (typeof outer !== "object" || outer === null) return null;
-  const response = outer.Response;
-  if (typeof response !== "object" || response === null) return null;
-  const inner = response.Data;
-  if (typeof inner !== "object" || inner === null) return null;
-  const accounts = inner.Accounts;
-  if (!Array.isArray(accounts)) return null;
-  const packages = [];
-  for (const item of accounts) {
-    if (typeof item !== "object" || item === null) continue;
-    packages.push(parseCreditPackage(item));
-  }
-  const total = roundCredits(
-    packages.reduce((sum, pkg) => sum + (pkg.active ? pkg.remaining : 0), 0)
-  );
-  const expiredTotal = roundCredits(
-    packages.reduce((sum, pkg) => sum + (pkg.active ? 0 : pkg.remaining), 0)
-  );
-  return { total, packages, expiredTotal };
-}
-
-// vendor/channel-pack/src/minimax-credits.ts
-var MINIMAX_SIGNIN_STATUS = Object.freeze({
-  Upcoming: 1,
-  Claimable: 2,
-  Claimed: 3,
-  Disabled: 4
-});
-var MINIMAX_CLAIM_RESULT = Object.freeze({
-  Claimed: 1,
-  AlreadyClaimed: 2
-});
-var MINIMAX_PANEL_SCENE = Object.freeze({
-  Unknown: 0,
-  First: 1,
-  Active: 2,
-  Completed: 3,
-  Broken: 4
-});
-var MINIMAX_SIGNIN_STATUS_VALUES = Object.values(MINIMAX_SIGNIN_STATUS);
-var MINIMAX_PANEL_SCENE_VALUES = Object.values(MINIMAX_PANEL_SCENE);
-function resolveMinimaxTimezoneId(resolve2 = () => Intl.DateTimeFormat().resolvedOptions().timeZone) {
-  try {
-    const zone = resolve2();
-    return typeof zone === "string" && zone.trim().length > 0 ? zone.trim() : "UTC";
-  } catch {
-    return "UTC";
-  }
-}
-function finiteNumber(value) {
-  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
-}
-function looseAmount(value) {
-  if (typeof value === "number") return Number.isFinite(value) ? value : void 0;
-  if (typeof value !== "string") return void 0;
-  const trimmed = value.trim();
-  if (trimmed === "") return void 0;
-  const parsed = Number(trimmed);
-  return Number.isFinite(parsed) ? parsed : void 0;
-}
-function parseMinimaxSigninPanel(data) {
-  if (typeof data !== "object" || data === null || Array.isArray(data)) return void 0;
-  const record = data;
-  const scene = finiteNumber(record.scene);
-  if (scene === void 0 || !MINIMAX_PANEL_SCENE_VALUES.includes(scene)) return void 0;
-  const rawDays = record.days;
-  if (!Array.isArray(rawDays) || rawDays.length !== 7) return void 0;
-  const days = [];
-  const seen = /* @__PURE__ */ new Set();
-  let claimable = 0;
-  let today = 0;
-  for (const raw of rawDays) {
-    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return void 0;
-    const day = raw;
-    const dayNo = finiteNumber(day.day_no);
-    const points = finiteNumber(day.points);
-    const status = finiteNumber(day.status);
-    const bonusRaw = day.bonus_points;
-    const bonusPoints = bonusRaw === void 0 ? 0 : finiteNumber(bonusRaw);
-    if (dayNo === void 0 || !Number.isInteger(dayNo) || dayNo < 1 || dayNo > 7) return void 0;
-    if (seen.has(dayNo)) return void 0;
-    if (points === void 0 || points < 0) return void 0;
-    if (bonusPoints === void 0 || bonusPoints < 0) return void 0;
-    if (typeof day.is_today !== "boolean") return void 0;
-    if (status === void 0 || !MINIMAX_SIGNIN_STATUS_VALUES.includes(status)) {
-      return void 0;
-    }
-    seen.add(dayNo);
-    if (status === MINIMAX_SIGNIN_STATUS.Claimable) claimable++;
-    if (day.is_today) today++;
-    days.push({ dayNo, points, bonusPoints, status, isToday: day.is_today });
-  }
-  if (claimable > 1 || today > 1) return void 0;
-  return { scene, days };
-}
-function minimaxPanelToCheckinStatus(panel) {
-  const today = panel.days.find((day) => day.isToday);
-  const claimedToday = today !== void 0 && today.status === MINIMAX_SIGNIN_STATUS.Claimed;
-  const sorted = [...panel.days].sort((a, b) => a.dayNo - b.dayNo);
-  const todayIndex = sorted.findIndex((day) => day.isToday);
-  let streakDays = 0;
-  if (todayIndex >= 0) {
-    let index = sorted[todayIndex]?.status === MINIMAX_SIGNIN_STATUS.Claimed ? todayIndex : sorted[todayIndex]?.status === MINIMAX_SIGNIN_STATUS.Claimable ? todayIndex - 1 : -1;
-    for (; index >= 0; index -= 1) {
-      if (sorted[index]?.status !== MINIMAX_SIGNIN_STATUS.Claimed) break;
-      streakDays += 1;
-    }
-  }
-  const claimable = panel.days.find((day) => day.status === MINIMAX_SIGNIN_STATUS.Claimable);
-  const target = today ?? claimable;
-  return {
-    active: true,
-    todayCheckedIn: claimedToday,
-    streakDays,
-    // ⚠️ points 就是总数，不相加 bonus_points
-    dailyCredit: target?.points ?? 0,
-    todayCredit: claimedToday ? today?.points ?? 0 : 0,
-    // ⚠️⚠️ **本字段当前不可判读，且几乎恒为 `true`**（2026-09-29 实测发现，
-    // **未修复** —— 因为缺权威语义依据，不擅自改）。
-    //
-    // 实测本机 7 天面板：`bonus_points` 是 **800 档日 400 / 2000 档日 1000**，
-    // **七天全都有值**。故 `bonusPoints > 0` 恒真，不携带任何信息 ——
-    // 与 `credit/details` 那个 `total_count` 误读（见 `fetchMinimaxCreditBalance`）
-    // 是**同一类缺陷形态**：拿一个「在已知样本上恰好符合预期」的字段当判据。
-    //
-    // 危害**目前为零**：`isStreakDay` 在 RPC（`computeClaimSummary` 只用
-    // `credit`）与 Channel Pack UI 上**都没有消费者**（已全仓检索确认）。
-    // 但语义仍是错的：`bonus_points` 看起来是「该日的额外奖励数额」，
-    // **不是**「今天是连续奖励日」的布尔标志。
-    //
-    // 客户端权威实现（`.minimax-forensics/shared-dist/daily-signin.js`）里
-    // **根本没有 `isStreakDay` 这个概念** —— 它只有 `getCurrentSigninStreak()`
-    //（与我们的 `streakDays` 逐行一致）。故无法从客户端反推正确判据。
-    // ⚠️ 要改先拿到 `bonus_points` 的权威语义（或真实「非连续日」样本），
-    // **不要**凭猜测把它改成别的表达式。
-    isStreakDay: (target?.bonusPoints ?? 0) > 0,
-    totalCredits: 0,
-    checkinDates: [],
-    activityName: "",
-    themeName: "",
-    endTime: ""
-  };
-}
-function unwrapEnvelopeData(payload) {
-  const nested = payload.data;
-  return typeof nested === "object" && nested !== null && !Array.isArray(nested) ? nested : payload;
-}
-async function requestEnvelope(url, credential, init, fetcher) {
-  try {
-    const headers = minimaxHeaders(credential);
-    if (init.body !== void 0) headers.set("Content-Type", "application/json");
-    const response = await fetcher(url, {
-      method: init.method,
-      headers,
-      ...init.body === void 0 ? {} : { body: init.body },
-      signal: AbortSignal.timeout(MINIMAX_REQUEST_TIMEOUT_MS)
-    });
-    const text = await response.text();
-    let payload;
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      return {
-        ok: false,
-        code: response.status,
-        message: response.status === 401 || response.status === 403 ? `\u51ED\u636E\u5DF2\u5931\u6548\uFF08HTTP ${response.status}\uFF09\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55\u8BE5\u8D26\u53F7` : `\u670D\u52A1\u7AEF\u8FD4\u56DE\u4E86\u975E JSON \u54CD\u5E94\uFF08HTTP ${response.status}\uFF09`
-      };
-    }
-    if (typeof payload !== "object" || payload === null) {
-      return { ok: false, code: -1, message: "\u54CD\u5E94\u65E0\u6CD5\u89E3\u6790" };
-    }
-    const record = payload;
-    const baseResp = typeof record.base_resp === "object" && record.base_resp !== null ? record.base_resp : {};
-    const statusCode = finiteNumber(baseResp.status_code);
-    const statusMsg = typeof baseResp.status_msg === "string" ? baseResp.status_msg : "";
-    if (statusCode !== void 0 && statusCode !== 0) {
-      return { ok: false, code: statusCode, message: statusMsg || `\u4E1A\u52A1\u9519\u8BEF ${statusCode}` };
-    }
-    return { ok: true, payload: record };
-  } catch (error) {
-    return {
-      ok: false,
-      code: -1,
-      message: error instanceof Error ? error.message : String(error)
-    };
-  }
-}
-function withTimezone(base, path2, timezoneId) {
-  const url = new URL(`${base}${path2}`);
-  url.searchParams.set("timezone_id", timezoneId);
-  return url.toString();
-}
-async function fetchMinimaxSigninStatus(credential, fetcher = fetch, product = MINIMAX) {
-  const url = withTimezone(
-    product.apiHost,
-    MINIMAX_SIGNIN_STATUS_PATH,
-    resolveMinimaxTimezoneId()
-  );
-  const result = await requestEnvelope(url, credential, { method: "GET" }, fetcher);
-  if (!result.ok) return null;
-  const panel = parseMinimaxSigninPanel(unwrapEnvelopeData(result.payload));
-  return panel === void 0 ? null : minimaxPanelToCheckinStatus(panel);
-}
-async function claimMinimaxDailyCheckin(credential, fetcher = fetch, product = MINIMAX) {
-  const url = withTimezone(
-    product.apiHost,
-    MINIMAX_SIGNIN_CLAIM_PATH,
-    resolveMinimaxTimezoneId()
-  );
-  const result = await requestEnvelope(url, credential, { method: "POST", body: "{}" }, fetcher);
-  if (!result.ok) {
-    return { kind: "failed", code: result.code, message: result.message };
-  }
-  const data = unwrapEnvelopeData(result.payload);
-  const claimResult = finiteNumber(data.claim_result);
-  if (claimResult === MINIMAX_CLAIM_RESULT.AlreadyClaimed) {
-    return { kind: "already-claimed", message: "\u4ECA\u65E5\u5DF2\u7B7E\u5230" };
-  }
-  if (claimResult !== MINIMAX_CLAIM_RESULT.Claimed) {
-    return { kind: "failed", code: -1, message: "\u7B7E\u5230\u54CD\u5E94\u7F3A\u5C11\u6709\u6548\u7684 claim_result" };
-  }
-  const points = finiteNumber(data.points) ?? 0;
-  const panel = parseMinimaxSigninPanel(data.panel);
-  const status = panel === void 0 ? void 0 : minimaxPanelToCheckinStatus(panel);
-  return {
-    kind: "claimed",
-    credit: points,
-    streakDays: status?.streakDays ?? 0,
-    isStreakDay: status?.isStreakDay ?? false
-  };
-}
-async function fetchMinimaxCreditBalance(credential, fetcher = fetch, product = MINIMAX) {
-  const url = `${product.apiHost}${MINIMAX_CREDIT_DETAILS_PATH}`;
-  const result = await requestEnvelope(url, credential, { method: "GET" }, fetcher);
-  if (!result.ok) return null;
-  const data = unwrapEnvelopeData(result.payload);
-  const details = Array.isArray(data.details) ? data.details : void 0;
-  if (details === void 0 && finiteNumber(data.total_count) === void 0) return null;
-  let total = 0;
-  for (const entry of details ?? []) {
-    if (typeof entry !== "object" || entry === null) continue;
-    const remaining = looseAmount(entry.remaining_amount);
-    if (remaining !== void 0) total += remaining;
-  }
-  return { total: roundCredits(total), packages: [], expiredTotal: 0 };
 }
 
 // vendor/channel-pack/src/gemini.ts
@@ -54160,699 +53652,10 @@ function normalizeBase64(data) {
   return cleaned;
 }
 
-// vendor/channel-pack/src/gemini-credits.ts
-var GEMINI_UNAUTHORIZED_MESSAGE = "\u5C1A\u672A\u6388\u6743 Google \u8D26\u53F7";
-var GEMINI_BUCKET_FIVE_HOUR = "gemini-5h";
-var GEMINI_BUCKET_WEEKLY = "gemini-weekly";
-var GEMINI_WINDOW_LABEL_FIVE_HOUR = "5 \u5C0F\u65F6\u7A97\u53E3";
-var GEMINI_WINDOW_LABEL_WEEKLY = "\u5468\u7A97\u53E3";
-var GEMINI_QUOTA_UNIT = "%";
-function tierLabel(id, name2) {
-  const combined = `${id} ${name2}`.toLowerCase();
-  if (combined.includes("ultra")) return "Ultra";
-  if (combined.includes("pro")) return "Pro";
-  if (combined.includes("free")) return "Free";
-  return name2 !== "" ? name2 : id;
-}
-function pickTier(raw) {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return void 0;
-  const record = raw;
-  const id = typeof record.id === "string" ? record.id : "";
-  const name2 = typeof record.name === "string" ? record.name : "";
-  if (id === "" && name2 === "") return void 0;
-  return { id, name: name2 };
-}
-function parseGeminiAccountTier(payload) {
-  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return void 0;
-  const record = payload;
-  const tier = pickTier(record.paidTier) ?? pickTier(record.currentTier);
-  if (tier === void 0) return void 0;
-  return { id: tier.id, name: tier.name, label: tierLabel(tier.id, tier.name) };
-}
-var cache3 = /* @__PURE__ */ new Map();
-function parseGeminiQuotaWindow(raw) {
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return void 0;
-  const record = raw;
-  const bucketId = typeof record.bucketId === "string" ? record.bucketId : "";
-  if (bucketId === "") return void 0;
-  const fraction = record.remainingFraction;
-  if (typeof fraction !== "number" || !Number.isFinite(fraction)) return void 0;
-  const resetTime = typeof record.resetTime === "string" ? record.resetTime : "";
-  if (resetTime === "" || Number.isNaN(Date.parse(resetTime))) return void 0;
-  const window = typeof record.window === "string" ? record.window : "";
-  return { bucketId, window, resetTime, remainingFraction: fraction };
-}
-function parseGeminiQuotaWindows(payload) {
-  if (typeof payload !== "object" || payload === null) return {};
-  const groups = payload.groups;
-  if (!Array.isArray(groups)) return {};
-  let fiveHour;
-  let weekly;
-  for (const group of groups) {
-    if (typeof group !== "object" || group === null || Array.isArray(group)) continue;
-    const buckets = group.buckets;
-    if (!Array.isArray(buckets)) continue;
-    for (const bucket of buckets) {
-      const parsed = parseGeminiQuotaWindow(bucket);
-      if (parsed === void 0) continue;
-      if (parsed.bucketId === GEMINI_BUCKET_FIVE_HOUR && fiveHour === void 0) fiveHour = parsed;
-      if (parsed.bucketId === GEMINI_BUCKET_WEEKLY && weekly === void 0) weekly = parsed;
-    }
-  }
-  return {
-    ...fiveHour === void 0 ? {} : { fiveHour },
-    ...weekly === void 0 ? {} : { weekly }
-  };
-}
-function percentOf(window) {
-  const clamped = Math.min(1, Math.max(0, window.remainingFraction));
-  return Math.round(clamped * 100);
-}
-function makeQuotaPackage(label, window) {
-  const remaining = percentOf(window);
-  return {
-    name: label,
-    unit: GEMINI_QUOTA_UNIT,
-    remaining,
-    total: 100,
-    used: 100 - remaining,
-    active: true,
-    cycleStartTime: "",
-    cycleEndTime: window.resetTime,
-    expiredTime: ""
-  };
-}
-function toGeminiCreditBalance(fiveHour, weekly) {
-  const packages = [];
-  if (fiveHour !== void 0) packages.push(makeQuotaPackage(GEMINI_WINDOW_LABEL_FIVE_HOUR, fiveHour));
-  if (weekly !== void 0) packages.push(makeQuotaPackage(GEMINI_WINDOW_LABEL_WEEKLY, weekly));
-  if (packages.length === 0) return { total: 0, packages: [], expiredTotal: 0 };
-  const sum = packages.reduce((acc, item) => acc + item.remaining, 0);
-  return {
-    total: roundCredits(sum / packages.length),
-    packages,
-    expiredTotal: 0
-  };
-}
-async function fetchGeminiCreditBalance(credential, _product = GEMINI, options = {}) {
-  const token = credential.access_token ?? "";
-  if (token === "") return { balance: null, error: GEMINI_UNAUTHORIZED_MESSAGE };
-  const now = options.now?.() ?? Date.now();
-  if (options.force !== true) {
-    const cached2 = cache3.get(token);
-    if (cached2 !== void 0 && now - cached2.at < GEMINI_QUOTA_CACHE_TTL_MS) return cached2.result;
-  }
-  const result = await requestQuota(credential, options.fetcher ?? fetch);
-  cache3.set(token, { at: now, result });
-  return result;
-}
-async function requestQuota(credential, fetcher) {
-  const project = credential.cloudaicompanionProject ?? GEMINI_DEFAULT_PROJECT;
-  const [quota, tier] = await Promise.all([
-    requestQuotaSummary(credential, fetcher, project),
-    requestAccountTier(credential, fetcher).catch(() => void 0)
-  ]);
-  return tier === void 0 ? quota : { ...quota, tier };
-}
-async function requestQuotaSummary(credential, fetcher, project) {
-  let response;
-  try {
-    response = await fetcher(`${GEMINI_ENDPOINT_SANDBOX}${GEMINI_QUOTA_PATH}`, {
-      method: "POST",
-      // ⚠️ 身份头与推理请求**完全一致**（含五个伪装头）；流式才刻意不带 Accept，
-      // 配额是普通 JSON 请求，`includeAccept` 保持默认 false 与抓包一致。
-      headers: geminiHeaders(credential),
-      // ⚠️ 必须带 `project`（见文件头注释）：空对象 `{}` 对第二个账号会 403。
-      body: JSON.stringify({ project }),
-      signal: AbortSignal.timeout(GEMINI_CREDITS_TIMEOUT_MS)
-    });
-  } catch (error) {
-    return { balance: null, error: `\u914D\u989D\u67E5\u8BE2\u7F51\u7EDC\u5931\u8D25\uFF1A${describe(error)}` };
-  }
-  const text = await response.text().catch(() => "");
-  if (!response.ok) {
-    return {
-      balance: null,
-      // ⚠️ 403 有两种成因，文案不能一概说"凭据已失效"：本账号缺 5 小时窗口时
-      // 上游对 `{}` 回 `SUBSCRIPTION_REQUIRED`，凭据其实是好的（用户报障形态）。
-      // 这里把上游的 `reason` 透出来，否则面板只会误导人去重新登录。
-      error: response.status === 401 || response.status === 403 ? `\u914D\u989D\u67E5\u8BE2\u88AB\u62D2\uFF08HTTP ${response.status}\uFF09${quotaRejectionHint(text)}` : `\u914D\u989D\u67E5\u8BE2\u5931\u8D25\uFF08HTTP ${response.status}\uFF09\uFF1A${text.slice(0, 200)}`
-    };
-  }
-  let payload;
-  try {
-    payload = JSON.parse(text);
-  } catch {
-    return { balance: null, error: `\u914D\u989D\u54CD\u5E94\u4E0D\u662F JSON\uFF08HTTP ${response.status}\uFF09` };
-  }
-  const { fiveHour, weekly } = parseGeminiQuotaWindows(payload);
-  if (fiveHour === void 0 && weekly === void 0) {
-    return { balance: null, error: "\u914D\u989D\u54CD\u5E94\u91CC\u6CA1\u6709 Gemini \u914D\u989D\u6876" };
-  }
-  return { balance: toGeminiCreditBalance(fiveHour, weekly) };
-}
-async function requestAccountTier(credential, fetcher) {
-  const response = await fetcher(`${GEMINI_ENDPOINT_SANDBOX}${GEMINI_LOAD_CODE_ASSIST_PATH}`, {
-    method: "POST",
-    headers: geminiHeaders(credential),
-    body: GEMINI_LOAD_CODE_ASSIST_BODY,
-    signal: AbortSignal.timeout(GEMINI_CREDITS_TIMEOUT_MS)
-  });
-  if (!response.ok) return void 0;
-  const text = await response.text().catch(() => "");
-  if (text === "") return void 0;
-  try {
-    return parseGeminiAccountTier(JSON.parse(text));
-  } catch {
-    return void 0;
-  }
-}
-function describe(error) {
-  return error instanceof Error ? error.message : String(error);
-}
-function quotaRejectionHint(text) {
-  try {
-    const payload = JSON.parse(text);
-    if (typeof payload === "object" && payload !== null) {
-      const error = payload.error;
-      if (typeof error === "object" && error !== null) {
-        const record = error;
-        const details = Array.isArray(record.details) ? record.details : [];
-        const reason = details.map((item) => typeof item === "object" && item !== null ? item.reason : void 0).find((value) => typeof value === "string" && value !== "");
-        const message2 = typeof record.message === "string" ? record.message : "";
-        if (reason !== void 0) return `\uFF08${reason}\uFF09\uFF1A${message2.slice(0, 160)}`;
-        if (message2 !== "") return `\uFF1A${message2.slice(0, 160)}`;
-      }
-    }
-  } catch {
-  }
-  return text === "" ? "" : `\uFF1A${text.slice(0, 160)}`;
-}
-
-// vendor/channel-pack/src/qoder-machine.ts
-import { execFileSync, spawn as spawn4 } from "node:child_process";
-import { existsSync as existsSync6, readFileSync as readFileSync6, readdirSync } from "node:fs";
-import { homedir as homedir3 } from "node:os";
-import { join as join5 } from "node:path";
-var RUNTIME_INFO_TIMEOUT_MS = 2e4;
-var cached;
-function candidatePaths() {
-  const override = process.env.QODER_MACHINE_TOKEN_PATH;
-  if (override !== void 0 && override.length > 0) return [override];
-  const paths = [];
-  const appData = process.env.APPDATA;
-  if (appData !== void 0 && appData.length > 0) {
-    for (const dir of ["Qoder", "Qoder CN"]) {
-      paths.push(join5(appData, dir, "SharedClientCache", "cache", "machine_token.json"));
-    }
-  }
-  const home = homedir3();
-  for (const dir of ["Qoder", "Qoder CN"]) {
-    paths.push(join5(home, "Library", "Application Support", dir, "SharedClientCache", "cache", "machine_token.json"));
-    paths.push(join5(home, ".config", dir, "SharedClientCache", "cache", "machine_token.json"));
-  }
-  return paths;
-}
-function parseFile(path2) {
-  let raw;
-  try {
-    raw = readFileSync6(path2, "utf8");
-  } catch {
-    return void 0;
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return void 0;
-  }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return void 0;
-  const record = parsed;
-  const token = record.token;
-  const type = record.type;
-  if (typeof token !== "string" || token.length === 0) return void 0;
-  if (typeof type !== "string" || type.length === 0) return void 0;
-  return { token, type };
-}
-async function resolveQoderMachineIdentityAsync(forceExecutable) {
-  if (cached !== void 0) return cached ?? void 0;
-  const live = await readFromRuntimeInfoAsync(forceExecutable);
-  if (live !== void 0) {
-    cached = live;
-    return live;
-  }
-  for (const path2 of candidatePaths()) {
-    const identity = parseFile(path2);
-    if (identity !== void 0) {
-      cached = identity;
-      return identity;
-    }
-  }
-  cached = null;
-  return void 0;
-}
-var QODER_DATA_DIR_NAMES = [".qoder", ".qoder-cn"];
-function findRuntimeInfoExecutable(home, dataDirNames = QODER_DATA_DIR_NAMES) {
-  const exeName = process.platform === "win32" ? "runtime-info.exe" : "runtime-info";
-  for (const dirName of dataDirNames) {
-    const binDir = join5(home, dirName, ".bin");
-    let entries;
-    try {
-      entries = readdirSync(binDir);
-    } catch {
-      continue;
-    }
-    const dir = entries.find((name2) => name2.startsWith("umid-"));
-    if (dir === void 0) continue;
-    const exe = join5(binDir, dir, exeName);
-    if (existsSync6(exe)) return exe;
-  }
-  return void 0;
-}
-function locateRuntimeInfo(override) {
-  const fromEnv = process.env.QODER_RUNTIME_INFO;
-  const candidate = override ?? (fromEnv !== void 0 && fromEnv.length > 0 ? fromEnv : void 0);
-  if (candidate !== void 0) {
-    return existsSync6(candidate) ? candidate : void 0;
-  }
-  return findRuntimeInfoExecutable(homedir3());
-}
-var RUNTIME_INFO_ENVIRONMENT = "3";
-function runtimeInfoArgs() {
-  return [RUNTIME_INFO_ENVIRONMENT, "--account-stdin"];
-}
-function parseRuntimeInfoOutput(out) {
-  const start = out.indexOf("{");
-  if (start < 0) return void 0;
-  let parsed;
-  try {
-    parsed = JSON.parse(out.slice(start));
-  } catch {
-    return void 0;
-  }
-  if (typeof parsed !== "object" || parsed === null) return void 0;
-  const record = parsed;
-  const token = record.machineToken;
-  const type = record.machineType;
-  if (typeof token !== "string" || token.length === 0) return void 0;
-  if (typeof type !== "string" || type.length === 0) return void 0;
-  return { token, type };
-}
-async function readFromRuntimeInfoAsync(override) {
-  const exe = locateRuntimeInfo(override);
-  if (exe === void 0) return void 0;
-  return await new Promise((resolve2) => {
-    let settled = false;
-    const done = (value) => {
-      if (settled) return;
-      settled = true;
-      resolve2(value);
-    };
-    let child;
-    try {
-      child = spawn4(exe, [...runtimeInfoArgs()], { windowsHide: true });
-    } catch {
-      done(void 0);
-      return;
-    }
-    const timer = setTimeout(() => {
-      try {
-        child.kill();
-      } catch {
-      }
-      done(void 0);
-    }, RUNTIME_INFO_TIMEOUT_MS);
-    timer.unref?.();
-    let stdout = "";
-    child.stdout?.on("data", (chunk) => {
-      stdout += String(chunk);
-    });
-    child.stderr?.on("data", () => {
-    });
-    child.once("error", () => {
-      clearTimeout(timer);
-      done(void 0);
-    });
-    child.once("close", () => {
-      clearTimeout(timer);
-      done(parseRuntimeInfoOutput(stdout));
-    });
-    child.stdin?.on("error", () => {
-    });
-    child.stdin?.end(JSON.stringify({ account: "" }));
-  });
-}
-async function withQoderMachineHeadersAsync(headers, forceExecutable) {
-  const identity = await resolveQoderMachineIdentityAsync(forceExecutable);
-  if (identity === void 0) return headers;
-  return {
-    ...headers,
-    "Cosy-MachineToken": identity.token,
-    "Cosy-MachineType": identity.type
-  };
-}
-
-// vendor/channel-pack/src/qoder-credits.ts
-var QODER_USAGE_PATH = "/sash/api/v2/me/usage";
-var QODER_CAMPAIGNS_PATH = "/sash/api/v1/me/campaigns";
-var QODER_CAMPAIGN_REFRESH_HOUR_UTC8 = 10;
-function hasQoderCampaignRefreshedToday(nowMs = Date.now()) {
-  return utc8MinutesOfDay(nowMs) >= QODER_CAMPAIGN_REFRESH_HOUR_UTC8 * 60;
-}
-var QODER_CREDITS_TIMEOUT_MS = 15e3;
-var NOT_ACTIVATED_HINT = "\u8BE5\u8D26\u53F7\u5C1A\u672A\u5728 Qoder \u4FA7\u5F00\u901A\u6BCF\u65E5\u9886\u53D6\uFF08\u6BCF\u65E5 100 Credits\uFF09\u3002\u8BF7\u5148\u7528 Qoder \u5B98\u65B9\u5BA2\u6237\u7AEF\u767B\u5F55\u4E00\u6B21\u8BE5\u8D26\u53F7\uFF0C\u5F00\u901A\u540E\u518D\u56DE\u6765\u9886\u53D6\u3002";
-var NOT_REFRESHED_YET_HINT = `\u4ECA\u5929\u7684\u6BCF\u65E5\u6D3B\u52A8\u5C1A\u672A\u5237\u65B0\uFF08\u6BCF\u65E5 ${QODER_CAMPAIGN_REFRESH_HOUR_UTC8}:00\uFF08UTC+8\uFF09\u5237\u65B0\uFF09\uFF0C\u5F53\u524D\u770B\u5230\u7684\u662F\u6628\u5929\u90A3\u4E00\u8F6E\uFF0C\u8BF7\u7A0D\u540E\u518D\u6765\u9886\u53D6\u3002`;
-function isQoderNotActivated(campaigns, usageBody) {
-  if (campaigns === void 0) return false;
-  const hasBenefit = campaigns.campaigns.some((c) => c.actionType === "CLAIM_BENEFIT");
-  if (hasBenefit) return false;
-  if (typeof usageBody !== "object" || usageBody === null) return false;
-  const usage = usageBody.qoderUsage;
-  if (typeof usage !== "object" || usage === null) return false;
-  const record = usage;
-  return record.addOnQuota === void 0;
-}
-async function fetchQoderUsageRaw(credential, product, fetcher = fetch) {
-  try {
-    const response = await fetcher(`${product.openApiBase}${QODER_USAGE_PATH}`, {
-      method: "GET",
-      headers: await creditsHeaders(credential, product),
-      signal: AbortSignal.timeout(QODER_CREDITS_TIMEOUT_MS)
-    });
-    if (!response.ok) return void 0;
-    return await response.json();
-  } catch {
-    return void 0;
-  }
-}
-async function creditsHeaders(credential, product) {
-  return await withQoderMachineHeadersAsync({
-    Accept: "application/json",
-    Authorization: `Bearer ${qoderBearerToken(credential)}`,
-    // 桌面 app 身份（`'10'`）；服务端据此进入活动下发分支。
-    "Cosy-ClientType": product.sashClientType,
-    "User-Agent": "Qoder"
-  });
-}
-function readNumber3(source, key) {
-  if (typeof source !== "object" || source === null) return void 0;
-  const value = source[key];
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim().length > 0) {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? parsed : void 0;
-  }
-  return void 0;
-}
-function readString4(source, key) {
-  if (typeof source !== "object" || source === null) return void 0;
-  const value = source[key];
-  return typeof value === "string" && value.length > 0 ? value : void 0;
-}
-var QODER_PLAN_PACKAGE = "\u5957\u9910\u989D\u5EA6";
-function toPackage(name2, quota, options = {}) {
-  const total = readNumber3(quota, "total");
-  const used = readNumber3(quota, "used");
-  const remainingRaw = readNumber3(quota, "remaining");
-  if (total === void 0 && used === void 0 && remainingRaw === void 0) return void 0;
-  const totalValue = Math.max(0, total ?? 0);
-  const usedValue = Math.max(0, used ?? 0);
-  const remaining = remainingRaw !== void 0 ? Math.max(0, remainingRaw) : Math.max(0, totalValue - usedValue);
-  const expMs = options.expiredTime && options.expiredTime.length > 0 ? Date.parse(options.expiredTime.replace(" ", "T")) : Number.NaN;
-  return {
-    name: name2,
-    unit: readString4(quota, "unit") ?? "credits",
-    remaining,
-    total: totalValue,
-    used: usedValue,
-    active: options.active ?? true,
-    cycleStartTime: "",
-    cycleEndTime: "",
-    expiredTime: options.expiredTime ?? "",
-    ...Number.isFinite(expMs) ? { deductionEndTime: expMs } : {}
-  };
-}
-async function fetchQoderCreditBalance(credential, product, fetcher = fetch) {
-  let response;
-  try {
-    response = await fetcher(`${product.openApiBase}${QODER_USAGE_PATH}`, {
-      method: "GET",
-      headers: await creditsHeaders(credential, product),
-      signal: AbortSignal.timeout(QODER_CREDITS_TIMEOUT_MS)
-    });
-  } catch {
-    return null;
-  }
-  if (!response.ok) return null;
-  let body;
-  try {
-    body = await response.json();
-  } catch {
-    return null;
-  }
-  if (typeof body !== "object" || body === null || Array.isArray(body)) return null;
-  const root = body;
-  if (root.displayMode === "enterprise") return null;
-  const usage = root.qoderUsage;
-  if (typeof usage !== "object" || usage === null) return null;
-  const packages = [];
-  const userQuota = toPackage(QODER_PLAN_PACKAGE, usage.userQuota);
-  if (userQuota !== void 0) packages.push(userQuota);
-  const addOnQuota = toPackage("\u8D44\u6E90\u5305", usage.addOnQuota);
-  if (addOnQuota !== void 0) packages.push(addOnQuota);
-  const dedicated = usage.dedicatedResourcePackages;
-  if (Array.isArray(dedicated)) {
-    for (const item of dedicated) {
-      const pkg = toPackage(
-        readString4(item, "name") ?? readString4(item, "id") ?? "\u4E13\u7528\u8D44\u6E90\u5305",
-        item,
-        { expiredTime: readString4(item, "expiresAt") ?? readString4(item, "expires_at") ?? "" }
-      );
-      if (pkg !== void 0) packages.push(pkg);
-    }
-  }
-  if (packages.length === 0) return null;
-  const total = roundCredits(packages.reduce((sum, pkg) => sum + pkg.remaining, 0));
-  return { total, packages, expiredTotal: 0 };
-}
-function parseQoderCampaigns(body) {
-  if (typeof body !== "object" || body === null || Array.isArray(body)) return void 0;
-  const root = body;
-  const raw = root.campaigns;
-  const campaigns = [];
-  if (Array.isArray(raw)) {
-    for (const item of raw) {
-      const id = readString4(item, "campaignId");
-      if (id === void 0) continue;
-      campaigns.push({
-        campaignId: id,
-        ...readString4(item, "campaignKey") !== void 0 ? { campaignKey: readString4(item, "campaignKey") } : {},
-        ...readString4(item, "actionType") !== void 0 ? { actionType: readString4(item, "actionType") } : {},
-        ...readString4(item, "claimStatus") !== void 0 ? { claimStatus: readString4(item, "claimStatus") } : {},
-        ...benefitAmount(item) !== void 0 ? { amount: benefitAmount(item) } : {}
-      });
-    }
-  }
-  return {
-    showCampaign: root.showCampaign === true,
-    claimable: root.claimable === true,
-    campaigns
-  };
-}
-function benefitAmount(item) {
-  if (typeof item !== "object" || item === null) return void 0;
-  return readNumber3(item.benefit, "amount");
-}
-async function loadCampaigns(credential, product, fetcher) {
-  let response;
-  try {
-    response = await fetcher(`${product.openApiBase}${QODER_CAMPAIGNS_PATH}`, {
-      method: "GET",
-      headers: await creditsHeaders(credential, product),
-      signal: AbortSignal.timeout(QODER_CREDITS_TIMEOUT_MS)
-    });
-  } catch {
-    return void 0;
-  }
-  if (!response.ok) return void 0;
-  let body;
-  try {
-    body = await response.json();
-  } catch {
-    return void 0;
-  }
-  return parseQoderCampaigns(body);
-}
-function claimableCampaigns(parsed) {
-  return parsed.campaigns.filter(
-    (c) => c.actionType === "CLAIM_BENEFIT" && c.claimStatus === "CLAIMABLE"
-  );
-}
-function parseClaimResult(body) {
-  if (typeof body !== "object" || body === null || Array.isArray(body)) return {};
-  const root = body;
-  return {
-    ...readString4(root, "status") !== void 0 ? { status: readString4(root, "status") } : {},
-    ...typeof root.replayed === "boolean" ? { replayed: root.replayed } : {},
-    ...benefitAmount(root) !== void 0 ? { amount: benefitAmount(root) } : {}
-  };
-}
-async function claimQoderCampaign(credential, product, campaignId, fetcher = fetch) {
-  const url = `${product.openApiBase}${QODER_CAMPAIGNS_PATH}/${encodeURIComponent(campaignId)}/claim`;
-  let response;
-  try {
-    response = await fetcher(url, {
-      method: "POST",
-      headers: { ...await creditsHeaders(credential, product), "Content-Type": "application/json" },
-      body: "",
-      signal: AbortSignal.timeout(QODER_CREDITS_TIMEOUT_MS)
-    });
-  } catch (error) {
-    return { kind: "failed", code: -1, message: error instanceof Error ? error.message : String(error) };
-  }
-  const text = await response.text().catch(() => "");
-  let body;
-  try {
-    body = text.length > 0 ? JSON.parse(text) : {};
-  } catch {
-    return { kind: "failed", code: response.status, message: describeNonJson(response.status, text) };
-  }
-  if (!response.ok) {
-    return { kind: "failed", code: response.status, message: describeNonJson(response.status, text) };
-  }
-  const result = parseClaimResult(body);
-  if (result.replayed === true) {
-    return { kind: "already-claimed", message: "\u4ECA\u5929\u5DF2\u9886\u53D6" };
-  }
-  if (result.status !== void 0 && result.status !== "CLAIMED") {
-    return { kind: "failed", code: -1, message: `\u9886\u53D6\u672A\u6210\u529F\uFF08status=${result.status}\uFF09` };
-  }
-  return { kind: "claimed", credit: result.amount ?? 0, streakDays: 0, isStreakDay: false };
-}
-function describeNonJson(status, text) {
-  if (status === 401 || status === 403) return `\u51ED\u636E\u5DF2\u5931\u6548\uFF08HTTP ${status}\uFF09\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55\u8BE5\u8D26\u53F7`;
-  const snippet = text.trim().slice(0, 80).replace(/\s+/g, " ");
-  return `\u670D\u52A1\u7AEF\u8FD4\u56DE\u4E86\u975E JSON \u54CD\u5E94\uFF08HTTP ${status}\uFF09\uFF1A${snippet}`;
-}
-async function claimQoderDailyCheckin(credential, product, fetcher = fetch, nowMs = Date.now()) {
-  const parsed = await loadCampaigns(credential, product, fetcher);
-  if (parsed === void 0) {
-    return { kind: "failed", code: -1, message: "\u6D3B\u52A8\u5217\u8868\u67E5\u8BE2\u5931\u8D25" };
-  }
-  const refreshed = hasQoderCampaignRefreshedToday(nowMs);
-  const stale = refreshed ? void 0 : { coversToday: false };
-  const targets = claimableCampaigns(parsed);
-  if (targets.length === 0) {
-    const claimedBefore = parsed.campaigns.some(
-      (c) => c.actionType === "CLAIM_BENEFIT" && c.claimStatus === "CLAIMED"
-    );
-    if (claimedBefore) {
-      if (!refreshed) return { kind: "inactive", message: NOT_REFRESHED_YET_HINT };
-      return { kind: "already-claimed", message: "\u4ECA\u5929\u5DF2\u9886\u53D6" };
-    }
-    const usage = await fetchQoderUsageRaw(credential, product, fetcher);
-    if (isQoderNotActivated(parsed, usage)) {
-      return { kind: "inactive", message: NOT_ACTIVATED_HINT, actionRequired: true };
-    }
-    return { kind: "inactive", message: "\u5F53\u524D\u6CA1\u6709\u53EF\u9886\u53D6\u7684\u6D3B\u52A8" };
-  }
-  let total = 0;
-  let firstError;
-  for (const target of targets) {
-    const outcome = await claimQoderCampaign(credential, product, target.campaignId, fetcher);
-    if (outcome.kind === "claimed") total += outcome.credit;
-    else if (outcome.kind === "failed" && firstError === void 0) firstError = outcome.message;
-  }
-  if (total > 0) return { kind: "claimed", credit: total, streakDays: 0, isStreakDay: false, ...stale };
-  if (firstError !== void 0) return { kind: "failed", code: -1, message: firstError };
-  return { kind: "already-claimed", message: "\u4ECA\u5929\u5DF2\u9886\u53D6", ...stale };
-}
-
-// vendor/channel-pack/src/cline-credits.ts
-var CLINE_CREDITS_TIMEOUT_MS = 3e4;
-var CLINE_BALANCE_SCALE = 1e5;
-function readNumber4(source, key) {
-  const value = source[key];
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim().length > 0) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return void 0;
-}
-function toClineCreditBalance(rawBalance) {
-  const total = roundCredits(rawBalance / CLINE_BALANCE_SCALE);
-  const pkg = {
-    name: "Cline \u8D26\u6237\u4F59\u989D",
-    unit: "USD",
-    remaining: total,
-    total,
-    used: 0,
-    active: true,
-    cycleStartTime: "",
-    cycleEndTime: "",
-    expiredTime: ""
-  };
-  return { total, packages: [pkg], expiredTotal: 0 };
-}
-function parseClineBalanceResponse(value) {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return { error: "\u54CD\u5E94\u4E0D\u662F JSON \u5BF9\u8C61" };
-  }
-  const record = value;
-  const serverError = typeof record.error === "string" && record.error.trim().length > 0 ? record.error.trim() : void 0;
-  if (record.success === false || serverError !== void 0 && record.success !== true) {
-    return { error: serverError ?? "\u670D\u52A1\u7AEF\u8FD4\u56DE\u5931\u8D25" };
-  }
-  const data = typeof record.data === "object" && record.data !== null && !Array.isArray(record.data) ? record.data : void 0;
-  if (data === void 0) return { error: "\u54CD\u5E94\u7F3A\u5C11 data \u5B57\u6BB5" };
-  const rawBalance = readNumber4(data, "balance");
-  if (rawBalance === void 0) return { error: "\u54CD\u5E94\u7F3A\u5C11 balance \u5B57\u6BB5" };
-  return { rawBalance };
-}
-async function fetchClineCreditBalance(credential, product, fetcher = fetch, options = {}) {
-  const userId = credential.account_id;
-  if (typeof userId !== "string" || userId.trim().length === 0) {
-    return { balance: null, error: "\u51ED\u636E\u7F3A\u5C11\u8D26\u53F7 id\uFF0C\u65E0\u6CD5\u67E5\u8BE2\u4F59\u989D" };
-  }
-  const url = `${product.apiBase}/api/v1/users/${encodeURIComponent(userId.trim())}/balance`;
-  let response;
-  try {
-    response = await fetcher(url, {
-      method: "GET",
-      headers: clineAuthHeaders(credential.access_token, product),
-      signal: options.signal ?? AbortSignal.timeout(CLINE_CREDITS_TIMEOUT_MS)
-    });
-  } catch (error) {
-    return { balance: null, error: `\u4F59\u989D\u67E5\u8BE2\u7F51\u7EDC\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}` };
-  }
-  let parsed;
-  try {
-    parsed = await response.json();
-  } catch {
-    return { balance: null, error: `\u4F59\u989D\u54CD\u5E94\u4E0D\u662F JSON\uFF08HTTP ${response.status}\uFF09` };
-  }
-  if (!response.ok) {
-    const detail = parseClineBalanceResponse(parsed);
-    return {
-      balance: null,
-      error: detail.error !== void 0 ? `\u4F59\u989D\u67E5\u8BE2\u5931\u8D25\uFF08HTTP ${response.status}\uFF09\uFF1A${detail.error}` : `\u4F59\u989D\u67E5\u8BE2\u5931\u8D25\uFF08HTTP ${response.status}\uFF09`
-    };
-  }
-  const result = parseClineBalanceResponse(parsed);
-  if (result.rawBalance === void 0) {
-    return { balance: null, ...result.error === void 0 ? {} : { error: result.error } };
-  }
-  return {
-    balance: toClineCreditBalance(result.rawBalance),
-    rawBalance: result.rawBalance
-  };
-}
-
 // vendor/channel-pack/src/cline-quota.ts
 var CLINE_QUOTA_TIMEOUT_MS = 3e4;
 var CLINE_USAGE_LIMITS_PATH = "/api/v1/users/me/plan/usage-limits";
-function readNumber5(source, key) {
+function readNumber2(source, key) {
   const value = source[key];
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim().length > 0) {
@@ -54861,7 +53664,7 @@ function readNumber5(source, key) {
   }
   return void 0;
 }
-function readString5(source, key) {
+function readString3(source, key) {
   const value = source[key];
   if (typeof value !== "string") return void 0;
   const trimmed = value.trim();
@@ -54905,15 +53708,15 @@ function parseClineUsageLimits(value) {
   for (const item of raw) {
     if (typeof item !== "object" || item === null || Array.isArray(item)) continue;
     const entry = item;
-    const type = readString5(entry, "type");
+    const type = readString3(entry, "type");
     if (type === void 0) continue;
     windows.push({
       type,
-      percentUsed: readNumber5(entry, "percentUsed") ?? 0,
+      percentUsed: readNumber2(entry, "percentUsed") ?? 0,
       // ⚠️ `resetsAt` 是 ISO 字符串。若网关某天回数字时间戳，也不要在这里
       // 猜单位（秒/毫秒），原样转成字符串交由展示层判定 —— 猜错会显示
       // 1970 年或 5 万年后的时间，比不显示更难排查。
-      resetsAt: readString5(entry, "resetsAt") ?? ""
+      resetsAt: readString3(entry, "resetsAt") ?? ""
     });
   }
   return { windows, error: serverError === "" ? void 0 : serverError };
@@ -54960,665 +53763,6 @@ async function fetchClineUsageLimits(credential, product, fetcher = fetch, optio
     return { ok: false, windows: [], error: result.error };
   }
   return { ok: true, windows: result.windows, ...result.error === void 0 ? {} : { error: result.error } };
-}
-
-// vendor/channel-pack/src/lobsterai-credits.ts
-import { randomUUID as randomUUID8 } from "node:crypto";
-var LOBSTERAI_ACTIVITY_SLOT_PATH = "/api/client-activities/slot";
-var LOBSTERAI_ACTIVITY_CONTEXT_PATH = "/api/client-activities";
-var LOBSTERAI_PROFILE_SUMMARY_PATH = "/api/user/profile-summary";
-var LOBSTERAI_SLOT_PLACEMENT = "desktop_sidebar";
-var LOBSTERAI_SLOT_CONTAINER_API_VERSION = "2";
-var LOBSTERAI_SLOT_PLATFORM = "win32";
-var UNPARSABLE_RESPONSE_MESSAGE2 = "\u8BF7\u6C42\u5931\u8D25\u6216\u54CD\u5E94\u65E0\u6CD5\u89E3\u6790";
-async function requestJson(url, credential, product, fetcher, init = { method: "GET" }) {
-  try {
-    const response = await fetcher(url, {
-      method: init.method,
-      headers: lobsteraiAuthHeaders(credential, product),
-      ...init.body === void 0 ? {} : { body: init.body },
-      signal: AbortSignal.timeout(LOBSTERAI_REQUEST_TIMEOUT_MS)
-    });
-    const text = await response.text();
-    let parsed;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      return { ok: false, message: describeNonJsonResponse2(response.status, text) };
-    }
-    if (typeof parsed !== "object" || parsed === null) {
-      return { ok: false, message: UNPARSABLE_RESPONSE_MESSAGE2 };
-    }
-    return { ok: true, body: parsed };
-  } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : String(error) };
-  }
-}
-function describeNonJsonResponse2(status, text) {
-  if (status === 401 || status === 403) {
-    return `\u51ED\u636E\u5DF2\u5931\u6548\uFF08HTTP ${status}\uFF09\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55\u8BE5\u8D26\u53F7`;
-  }
-  const snippet = text.trim().slice(0, 80).replace(/\s+/g, " ");
-  return `\u670D\u52A1\u7AEF\u8FD4\u56DE\u4E86\u975E JSON \u54CD\u5E94\uFF08HTTP ${status}\uFF09\uFF1A${snippet}`;
-}
-function readBool2(source, key) {
-  return source[key] === true;
-}
-function readNumber6(source, key) {
-  const value = source[key];
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && /^-?\d+(\.\d+)?$/.test(value.trim())) return Number(value);
-  return 0;
-}
-function readActions(source, key) {
-  const value = source[key];
-  if (!Array.isArray(value)) return [];
-  return value.filter((item) => typeof item === "string");
-}
-async function fetchLobsteraiActivitySlot(credential, product, clientVersion, fetcher = fetch) {
-  const query = new URLSearchParams({
-    placement: LOBSTERAI_SLOT_PLACEMENT,
-    clientVersion,
-    containerApiVersion: LOBSTERAI_SLOT_CONTAINER_API_VERSION,
-    platform: LOBSTERAI_SLOT_PLATFORM
-  });
-  const result = await requestJson(
-    `${product.apiBase}${LOBSTERAI_ACTIVITY_SLOT_PATH}?${query.toString()}`,
-    credential,
-    product,
-    fetcher
-  );
-  if (!result.ok) return null;
-  const envelope = parseLobsteraiEnvelope(result.body);
-  if (!envelope.ok) return null;
-  const activity = typeof envelope.data.activity === "object" && envelope.data.activity !== null ? envelope.data.activity : {};
-  const activityCode = typeof activity.activityCode === "string" ? activity.activityCode : "";
-  return {
-    slotState: typeof envelope.data.slotState === "string" ? envelope.data.slotState : "",
-    activityCode,
-    configRevision: readNumber6(activity, "configRevision")
-  };
-}
-async function fetchLobsteraiActivityContext(credential, product, slot2, fetcher = fetch) {
-  const query = new URLSearchParams({ configRevision: String(slot2.configRevision) });
-  const url = `${product.apiBase}${LOBSTERAI_ACTIVITY_CONTEXT_PATH}/${encodeURIComponent(slot2.activityCode)}/context?${query.toString()}`;
-  const result = await requestJson(url, credential, product, fetcher);
-  if (!result.ok) return null;
-  const envelope = parseLobsteraiEnvelope(result.body);
-  if (!envelope.ok) return null;
-  const state = typeof envelope.data.state === "object" && envelope.data.state !== null ? envelope.data.state : {};
-  return {
-    claimedToday: readBool2(state, "claimedToday"),
-    actions: readActions(envelope.data, "actions")
-  };
-}
-async function claimLobsteraiDailyCheckin(credential, product, clientVersion, fetcher = fetch) {
-  const slot2 = await fetchLobsteraiActivitySlot(credential, product, clientVersion, fetcher);
-  if (slot2 === null) {
-    return { kind: "failed", code: -1, message: "\u6D3B\u52A8\u69FD\u4F4D\u67E5\u8BE2\u5931\u8D25" };
-  }
-  if (slot2.slotState !== "available" || slot2.activityCode.length === 0) {
-    return { kind: "inactive", message: `\u65E0\u53EF\u7528\u6D3B\u52A8\uFF08slotState=${slot2.slotState}\uFF09` };
-  }
-  const context = await fetchLobsteraiActivityContext(credential, product, slot2, fetcher);
-  if (context === null) {
-    return { kind: "failed", code: -1, message: "\u6D3B\u52A8\u4E0A\u4E0B\u6587\u67E5\u8BE2\u5931\u8D25" };
-  }
-  if (context.claimedToday) {
-    return { kind: "already-claimed", message: "\u4ECA\u5929\u5DF2\u7B7E\u5230" };
-  }
-  if (!context.actions.includes("check_in")) {
-    return { kind: "inactive", message: "\u5F53\u524D\u4E0D\u53EF\u7B7E\u5230" };
-  }
-  const url = `${product.apiBase}${LOBSTERAI_ACTIVITY_CONTEXT_PATH}/${encodeURIComponent(slot2.activityCode)}/actions/check_in`;
-  const result = await requestJson(url, credential, product, fetcher, {
-    method: "POST",
-    body: JSON.stringify({
-      configRevision: slot2.configRevision,
-      // 客户端幂等键（对齐 sigin.py:63 的 uuid4）：服务端据此去重。
-      idempotencyKey: randomUUID8(),
-      payload: {}
-    })
-  });
-  if (!result.ok) {
-    return { kind: "failed", code: -1, message: result.message };
-  }
-  const envelope = parseLobsteraiEnvelope(result.body);
-  if (!envelope.ok) {
-    return { kind: "failed", code: envelope.code, message: envelope.message };
-  }
-  const bodyResult = typeof envelope.data.result === "object" && envelope.data.result !== null ? envelope.data.result : {};
-  const credit = ["creditsGranted", "rewardCredits", "credits"].map((key) => bodyResult[key]).find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
-  const message2 = typeof bodyResult.message === "string" ? bodyResult.message : "";
-  return {
-    kind: "claimed",
-    credit,
-    streakDays: 0,
-    isStreakDay: false,
-    ...message2.length > 0 ? { delayedMessage: message2 } : {}
-  };
-}
-async function fetchLobsteraiCreditBalance(credential, product, fetcher = fetch) {
-  const result = await requestJson(
-    `${product.apiBase}${LOBSTERAI_PROFILE_SUMMARY_PATH}`,
-    credential,
-    product,
-    fetcher
-  );
-  if (!result.ok) return null;
-  const envelope = parseLobsteraiEnvelope(result.body);
-  if (!envelope.ok) return null;
-  const packages = [];
-  const items = envelope.data.creditItems;
-  if (Array.isArray(items)) {
-    for (const item of items) {
-      if (typeof item !== "object" || item === null) continue;
-      const record = item;
-      const remaining = readNumber6(record, "creditsRemaining");
-      const type = typeof record.type === "string" ? record.type : "";
-      const label = typeof record.label === "string" ? record.label : "";
-      const expiresAt = typeof record.expiresAt === "string" ? record.expiresAt : "";
-      const expMs = expiresAt.length > 0 ? Date.parse(expiresAt.replace(" ", "T")) : Number.NaN;
-      packages.push({
-        // ⚠️ 包名用 `label`（实测"每日登录奖励"）而不是 `type`（"campaign"）：
-        // type 是机器分类码，label 才是人看的名字。label 缺失时回退 type，
-        // 再回退「积分包」（老用例锁死的形态）。
-        name: label.length > 0 ? label : type.length > 0 ? type : "\u79EF\u5206\u5305",
-        unit: "credit",
-        remaining,
-        // LobsterAI 只下发剩余量，不区分「周期总额/已用」。
-        // 用 remaining 充当 total 会让「剩余/总额」显示成 1:1；
-        // 这里如实置 0，UI 的 `formatPackageLine` 对 0 会显示 '?'（不误导）。
-        total: 0,
-        used: 0,
-        // 无 Status 字段可依据：有 expiresAt 且已过期才算失效。
-        active: !(expiresAt.length > 0 && Number.isFinite(Date.parse(expiresAt.replace(" ", "T"))) && Date.now() >= Date.parse(expiresAt.replace(" ", "T"))),
-        cycleStartTime: "",
-        cycleEndTime: "",
-        expiredTime: expiresAt,
-        ...Number.isFinite(expMs) ? { deductionEndTime: expMs } : {}
-      });
-    }
-  }
-  const faceValueByGroup = /* @__PURE__ */ new Map();
-  for (const pkg of packages) {
-    if (!pkg.active) continue;
-    const key = pkg.name;
-    const cur = faceValueByGroup.get(key) ?? 0;
-    if (pkg.remaining > cur) faceValueByGroup.set(key, pkg.remaining);
-  }
-  for (const pkg of packages) {
-    const face = faceValueByGroup.get(pkg.name);
-    if (face !== void 0 && face > 0) {
-      pkg.total = roundCredits2(face);
-      if (pkg.used <= 0) pkg.used = roundCredits2(Math.max(0, face - pkg.remaining));
-    }
-  }
-  const total = roundCredits2(Math.max(0, readNumber6(envelope.data, "totalCreditsRemaining")));
-  if (total === 0 && packages.length === 0) return null;
-  const expiredTotal = roundCredits2(
-    packages.reduce((sum, pkg) => sum + (pkg.active ? 0 : Math.max(0, pkg.remaining)), 0)
-  );
-  return { total, packages, expiredTotal };
-}
-function roundCredits2(value) {
-  return Math.round(value * 100) / 100;
-}
-
-// vendor/channel-pack/src/codearts-credits.ts
-var CODEARTS_SNAP_ENGINE_URL = "https://snap-access.cn-north-4.myhuaweicloud.com";
-var CODEARTS_PACKAGE_INFO_PATH = "/snap-manager/v1/statistics/plugin";
-var CODEARTS_OPS_DELIVERY_PATH = "/v1/ops/delivery";
-var CODEARTS_OPS_CLAIM_PATH = "/v1/ops/claim";
-var CODEARTS_OPS_CONFIRM_PATH = "/v1/ops/confirm";
-var CODEARTS_OPS_CHANNEL = "IDE";
-var CODEARTS_DAILY_LOGIN_TYPE = "USER_LOGIN";
-var CLAIMED_STATUSES = ["CLAIMED", "CONFIRMED", "CONSUMED"];
-var REQUEST_TIMEOUT_MS3 = 3e4;
-var SNAP_EXTRA_HEADERS = {
-  "Agent-Type": "PromptCenter",
-  "X-Language": "zh-cn"
-};
-var CREDIT_METRIC_LABELS = {
-  usageTotalPackageCredit: "\u603B\u79EF\u5206\u5305",
-  usageBasicPackageCredit: "\u57FA\u7840\u79EF\u5206\u5305",
-  usageOnDemandPackageCredit: "\u6309\u9700\u79EF\u5206\u5305",
-  usageBonusPackageCredit: "\u8D60\u9001\u79EF\u5206\u5305"
-};
-var TOTAL_CREDIT_METRIC = "usageTotalPackageCredit";
-var UNPARSABLE_RESPONSE_MESSAGE3 = "\u8BF7\u6C42\u5931\u8D25\u6216\u54CD\u5E94\u65E0\u6CD5\u89E3\u6790";
-function describeHttpFailure(status, text) {
-  let detail = "";
-  try {
-    const parsed = JSON.parse(text);
-    const code = typeof parsed.error_code === "string" ? parsed.error_code : "";
-    const msg = typeof parsed.error_msg === "string" ? parsed.error_msg : "";
-    detail = [code, msg].filter((part) => part.length > 0).join(" ");
-  } catch {
-    detail = text.trim().slice(0, 200);
-  }
-  return detail.length > 0 ? `HTTP ${status}\uFF1A${detail}` : `HTTP ${status}`;
-}
-function readBool3(source, key) {
-  const value = source[key];
-  if (typeof value === "boolean") return value;
-  if (typeof value === "string") return value.trim().toLowerCase() === "true";
-  return false;
-}
-function readNumber7(source, key) {
-  const value = source[key];
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim().length > 0) {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return 0;
-}
-function readString6(source, key) {
-  const value = source[key];
-  return typeof value === "string" ? value : "";
-}
-function readIdentifier(source, key) {
-  const value = source[key];
-  if (typeof value === "string") return value;
-  if (typeof value === "number" && Number.isFinite(value)) return String(value);
-  return "";
-}
-function readRecord(source, key) {
-  const value = source[key];
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
-}
-function unwrapSnapEnvelope(raw) {
-  const code = raw.code;
-  const hasCode = typeof code === "number";
-  if (hasCode) {
-    if (code !== 0) {
-      const message2 = readString6(raw, "message") || readString6(raw, "msg");
-      return { ok: false, code, message: message2.length > 0 ? message2 : `\u4E1A\u52A1\u7801 ${code}` };
-    }
-    const data = raw.data;
-    if (typeof data === "object" && data !== null && !Array.isArray(data)) {
-      return { ok: true, data };
-    }
-    return { ok: false, code, message: "\u54CD\u5E94\u7F3A\u5C11 data \u5B57\u6BB5" };
-  }
-  return { ok: true, data: raw };
-}
-async function signedSnapRequest(method, url, credential, body, fetcher) {
-  const { access_key_id: ak, secret_access_key: sk, security_token: st } = credential;
-  if (!ak || !sk) {
-    return { ok: false, code: -1, message: "\u51ED\u636E\u7F3A\u5C11 AK/SK" };
-  }
-  try {
-    const payload = body === void 0 ? new Uint8Array() : new TextEncoder().encode(body);
-    const signed = await signRequestHuawei(ak, sk, st, method, url, payload);
-    const headers = new Headers();
-    signed.forEach((value, key) => {
-      if (key !== "host") headers.set(key, value);
-    });
-    for (const [key, value] of Object.entries(SNAP_EXTRA_HEADERS)) headers.set(key, value);
-    const response = await fetcher(url, {
-      method,
-      headers,
-      ...body === void 0 ? {} : { body },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS3)
-    });
-    const text = await response.text();
-    if (!response.ok) {
-      return { ok: false, code: response.status, message: describeHttpFailure(response.status, text) };
-    }
-    let parsed;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      return { ok: false, code: -1, message: UNPARSABLE_RESPONSE_MESSAGE3 };
-    }
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      return { ok: false, code: -1, message: UNPARSABLE_RESPONSE_MESSAGE3 };
-    }
-    return unwrapSnapEnvelope(parsed);
-  } catch (error) {
-    return {
-      ok: false,
-      code: -1,
-      message: error instanceof Error ? error.message : String(error)
-    };
-  }
-}
-function parseCreditBalance(metrics) {
-  if (!Array.isArray(metrics)) return void 0;
-  const packages = [];
-  let totalRemain;
-  let sawAnyCreditMetric = false;
-  for (const item of metrics) {
-    if (typeof item !== "object" || item === null) continue;
-    const record = item;
-    const name2 = readString6(record, "name");
-    const label = CREDIT_METRIC_LABELS[name2];
-    if (label === void 0) continue;
-    sawAnyCreditMetric = true;
-    const amount = readNumber7(record, "package_credit_amount");
-    const used = readNumber7(record, "package_credit_used");
-    const remain = readNumber7(record, "package_credit_remain");
-    if (name2 === TOTAL_CREDIT_METRIC) totalRemain = remain;
-    if (amount <= 0 && remain <= 0) continue;
-    packages.push({
-      name: label,
-      unit: "credit",
-      remaining: remain,
-      total: amount,
-      used,
-      // `statistics/plugin` 不下发资源包的有效性/周期字段（那是腾讯侧的形态）。
-      // 这里如实置为有效、周期留空，而不是臆造一个到期时间。
-      active: true,
-      cycleStartTime: "",
-      cycleEndTime: "",
-      expiredTime: ""
-    });
-  }
-  if (!sawAnyCreditMetric) return void 0;
-  const total = roundCredits3(
-    totalRemain ?? packages.reduce((sum, pkg) => sum + pkg.remaining, 0)
-  );
-  return { total, packages, expiredTotal: 0 };
-}
-async function fetchCodeArtsAccountInfoDetailed(credential, fetcher = fetch) {
-  const url = `${CODEARTS_SNAP_ENGINE_URL}${CODEARTS_PACKAGE_INFO_PATH}`;
-  const result = await signedSnapRequest("GET", url, credential, void 0, fetcher);
-  if (!result.ok) return { ok: false, message: result.message };
-  const data = result.data;
-  const pkg = readRecord(data, "package");
-  const packageNameCn = readString6(pkg, "package_name_cn");
-  const packageNameEn = readString6(pkg, "package_name_en");
-  return {
-    ok: true,
-    info: {
-      isCreditPackage: readBool3(pkg, "is_credit_package"),
-      isTokenPackage: readBool3(pkg, "is_token_package"),
-      specCode: readString6(pkg, "spec_code"),
-      packageName: packageNameCn.length > 0 ? packageNameCn : packageNameEn,
-      packageStatus: readString6(pkg, "status"),
-      credit: parseCreditBalance(data.metrics)
-    }
-  };
-}
-function parseActivity(item) {
-  return {
-    // 用 readIdentifier 而非 readString：实测 campaignId 是**数字** 1。
-    campaignId: readIdentifier(item, "campaignId"),
-    type: readString6(item, "type"),
-    title: readString6(item, "title"),
-    claimable: readBool3(item, "claimable"),
-    status: readString6(item, "status"),
-    // 可领积分数：实测字段名是 `benefitAmount`（值 1000）。
-    // 保留另两个候选名作兼容回退，取不到才为 0。
-    amount: readNumber7(item, "benefitAmount") || readNumber7(item, "amount") || readNumber7(item, "creditAmount")
-  };
-}
-async function fetchCodeArtsOpsActivitiesDetailed(credential, fetcher = fetch) {
-  const url = `${CODEARTS_SNAP_ENGINE_URL}${CODEARTS_OPS_DELIVERY_PATH}?channel=${CODEARTS_OPS_CHANNEL}`;
-  const result = await signedSnapRequest("GET", url, credential, void 0, fetcher);
-  if (!result.ok) return { ok: false, message: result.message };
-  const items = result.data.items;
-  if (!Array.isArray(items)) return { ok: false, message: "\u54CD\u5E94\u7F3A\u5C11 items \u5B57\u6BB5" };
-  return {
-    ok: true,
-    activities: items.filter((item) => typeof item === "object" && item !== null && !Array.isArray(item)).map(parseActivity)
-  };
-}
-function findDailyCheckinActivity(activities) {
-  return activities.find((activity) => activity.type === CODEARTS_DAILY_LOGIN_TYPE);
-}
-async function claimCodeArtsDailyCheckin(credential, fetcher = fetch) {
-  const infoResult = await fetchCodeArtsAccountInfoDetailed(credential, fetcher);
-  if (!infoResult.ok) {
-    return { kind: "failed", code: -1, message: `\u8D26\u6237\u4FE1\u606F\u67E5\u8BE2\u5931\u8D25\uFF1A${infoResult.message}` };
-  }
-  const info = infoResult.info;
-  if (!info.isCreditPackage) {
-    return {
-      kind: "inactive",
-      message: info.isTokenPackage ? "Token \u8BA1\u8D39\u8D26\u6237\uFF0C\u4E0D\u5728\u79EF\u5206\u6D3B\u52A8\u8303\u56F4" : "\u975E\u79EF\u5206\u8BA1\u8D39\u8D26\u6237\uFF0C\u4E0D\u5728\u79EF\u5206\u6D3B\u52A8\u8303\u56F4"
-    };
-  }
-  const activitiesResult = await fetchCodeArtsOpsActivitiesDetailed(credential, fetcher);
-  if (!activitiesResult.ok) {
-    return { kind: "failed", code: -1, message: `\u6D3B\u52A8\u5217\u8868\u67E5\u8BE2\u5931\u8D25\uFF1A${activitiesResult.message}` };
-  }
-  const activity = findDailyCheckinActivity(activitiesResult.activities);
-  if (activity === void 0) {
-    return { kind: "inactive", message: "\u672A\u627E\u5230\u6BCF\u65E5\u7B7E\u5230\u6D3B\u52A8" };
-  }
-  if (!activity.claimable) {
-    return CLAIMED_STATUSES.includes(activity.status) ? { kind: "already-claimed", message: "\u4ECA\u5929\u5DF2\u9886\u53D6" } : { kind: "inactive", message: `\u5F53\u524D\u4E0D\u53EF\u9886\u53D6\uFF08status=${activity.status}\uFF09` };
-  }
-  if (activity.campaignId.length === 0) {
-    return { kind: "failed", code: -1, message: "\u6D3B\u52A8\u7F3A\u5C11 campaignId\uFF0C\u65E0\u6CD5\u9886\u53D6" };
-  }
-  const claimResult = await signedSnapRequest(
-    "POST",
-    `${CODEARTS_SNAP_ENGINE_URL}${CODEARTS_OPS_CLAIM_PATH}`,
-    credential,
-    JSON.stringify({ campaignId: activity.campaignId, channel: CODEARTS_OPS_CHANNEL }),
-    fetcher
-  );
-  if (!claimResult.ok) {
-    return { kind: "failed", code: claimResult.code, message: claimResult.message };
-  }
-  const benefitId = claimResult.data.id;
-  if (benefitId !== null && benefitId !== void 0) {
-    await signedSnapRequest(
-      "POST",
-      `${CODEARTS_SNAP_ENGINE_URL}${CODEARTS_OPS_CONFIRM_PATH}`,
-      credential,
-      JSON.stringify({ campaignId: activity.campaignId }),
-      fetcher
-    );
-  }
-  const claimCredit = readNumber7(claimResult.data, "benefitAmount") || readNumber7(claimResult.data, "credit") || readNumber7(claimResult.data, "credits") || readNumber7(claimResult.data, "creditAmount") || readNumber7(claimResult.data, "amount");
-  return {
-    kind: "claimed",
-    credit: claimCredit > 0 ? claimCredit : activity.amount,
-    // CodeArts 的活动不下发连续签到天数概念（那是 CodeBuddy 的机制）。
-    streakDays: 0,
-    isStreakDay: false
-  };
-}
-function roundCredits3(value) {
-  return Math.round(value * 100) / 100;
-}
-
-// vendor/channel-pack/src/trae-credits.ts
-function classifyTraeCheckinError(httpStatus, code) {
-  if (httpStatus === 200 && code === 1005) {
-    return { type: "PlanLimit", cooldownSecs: 43200 };
-  }
-  if (httpStatus === 429) {
-    return { type: "SoftRate", cooldownSecs: 60 };
-  }
-  if (httpStatus === 401) {
-    return { type: "SessionDead", cooldownSecs: -1 };
-  }
-  if (httpStatus === 404) {
-    return { type: "NotFound", cooldownSecs: 60 };
-  }
-  if (httpStatus >= 500 && httpStatus < 600) {
-    return { type: "Server", cooldownSecs: 600 };
-  }
-  if (httpStatus >= 400 && httpStatus < 500) {
-    return { type: "Client", cooldownSecs: 600 };
-  }
-  if (code !== void 0 && code !== 0) {
-    return { type: "BusinessError", cooldownSecs: 300 };
-  }
-  return { type: "Unknown", cooldownSecs: 0 };
-}
-function readNumber8(source, key) {
-  const value = source[key];
-  return typeof value === "number" && Number.isFinite(value) ? value : 0;
-}
-function readString7(source, key) {
-  const value = source[key];
-  return typeof value === "string" ? value : "";
-}
-function readClaimCode(body) {
-  const raw = body.code;
-  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
-  if (typeof raw === "string" && /^-?\d+$/.test(raw.trim())) return Number(raw.trim());
-  return raw === void 0 ? 0 : -1;
-}
-async function postJson2(path2, credential, body, fetcher, userId) {
-  const uid = userId ?? credential.uid;
-  if (uid.length === 0) {
-    return { ok: false, message: "\u7F3A\u5C11 user_id\uFF0C\u65E0\u6CD5\u6784\u9020\u8BBE\u5907\u8EAB\u4EFD", httpStatus: 0 };
-  }
-  try {
-    const response = await fetcher(`https://api.trae.cn${path2}`, {
-      method: "POST",
-      headers: traeCheckinHeaders(credential, {}, uid),
-      body,
-      signal: AbortSignal.timeout(TRAE_REQUEST_TIMEOUT_MS)
-    });
-    const httpStatus = response.status;
-    const text = await response.text();
-    if (!response.ok) {
-      const snippet = text.trim().slice(0, 80).replace(/\s+/g, " ");
-      return { ok: false, message: `HTTP ${response.status}: ${snippet}`, httpStatus };
-    }
-    let parsed;
-    try {
-      parsed = JSON.parse(text);
-    } catch {
-      return { ok: false, message: `\u975E JSON \u54CD\u5E94: ${text.trim().slice(0, 80)}`, httpStatus };
-    }
-    if (typeof parsed !== "object" || parsed === null) {
-      return { ok: false, message: "\u54CD\u5E94\u4E0D\u662F\u5BF9\u8C61", httpStatus };
-    }
-    return { ok: true, body: parsed, httpStatus };
-  } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : String(error), httpStatus: 0 };
-  }
-}
-async function fetchTraeCheckinStatus(credential, _product, fetcher = fetch) {
-  const result = await postJson2(TRAE_CHECKIN_STATUS_PATH, credential, "{}", fetcher, credential.uid);
-  if (!result.ok) return null;
-  const body = result.body;
-  const code = readClaimCode(body);
-  if (code !== 0) return null;
-  return {
-    active: body.enable === true,
-    todayCheckedIn: body.checked_in === true,
-    streakDays: readNumber8(body, "streak_days") || 0,
-    dailyCredit: readNumber8(body, "credits") || 0,
-    todayCredit: 0,
-    isStreakDay: false,
-    totalCredits: readNumber8(body, "total_credits") || 0,
-    checkinDates: [],
-    activityName: "",
-    themeName: "",
-    endTime: ""
-  };
-}
-async function claimTraeDailyCheckin(credential, product, fetcher = fetch, generation = 0, onRotate, userId, retryCount = 3) {
-  const uid = userId ?? credential.uid;
-  const doClaim = async () => {
-    let lastError = { ok: false, httpStatus: 0, message: "", code: 0 };
-    for (let attempt = 0; attempt <= Math.max(0, retryCount); attempt++) {
-      const result = await postJson2(TRAE_CHECKIN_CLAIM_PATH, credential, "{}", fetcher, uid);
-      if (result.ok) {
-        const c = readClaimCode(result.body);
-        return { ok: true, body: result.body, httpStatus: result.httpStatus, message: "", code: c };
-      }
-      lastError = { ok: false, httpStatus: result.httpStatus, message: result.message, code: 0 };
-      if (result.httpStatus > 0) {
-        return lastError;
-      }
-      if (attempt < retryCount) {
-        await new Promise((r) => setTimeout(r, 1e3));
-      }
-    }
-    return lastError;
-  };
-  const response = await doClaim();
-  if (!response.ok) {
-    return { kind: "failed", code: -1, message: response.message, errorType: "Unknown", cooldownSecs: 0 };
-  }
-  const body = response.body;
-  const code = readClaimCode(body);
-  if (code === 9074) {
-    return {
-      kind: "failed",
-      code: 9074,
-      message: readString7(body, "message") || readString7(body, "msg") || "\u7B7E\u5230\u4EBA\u6570\u8FC7\u591A\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5",
-      errorType: "BusinessError",
-      cooldownSecs: 300
-    };
-  }
-  const msg = readString7(body, "message") || readString7(body, "msg") || "";
-  if (code === 0) {
-    const status = await fetchTraeCheckinStatus(credential, product, fetcher);
-    return {
-      kind: "claimed",
-      credit: status?.dailyCredit ?? 0,
-      streakDays: status?.streakDays ?? 0,
-      isStreakDay: false
-    };
-  }
-  const { type, cooldownSecs } = classifyTraeCheckinError(response.httpStatus, code);
-  return {
-    kind: "failed",
-    code,
-    message: msg.length > 0 ? msg : `\u7B7E\u5230\u5931\u8D25\uFF08code=${code}\uFF09`,
-    errorType: type,
-    cooldownSecs
-  };
-}
-async function fetchTraeCreditBalance(credential, _product, fetcher = fetch) {
-  const result = await postJson2(
-    TRAE_ENT_USAGE_PATH,
-    credential,
-    JSON.stringify({ require_usage: true, req_source: 2 }),
-    fetcher,
-    credential.uid
-  );
-  if (!result.ok) return null;
-  const body = result.body;
-  const packList = body.user_entitlement_pack_list;
-  if (!Array.isArray(packList) || packList.length === 0) return null;
-  const packages = [];
-  let total = 0;
-  let expiredTotal = 0;
-  for (const item of packList) {
-    if (typeof item !== "object" || item === null) continue;
-    const entry = item;
-    const base = entry.entitlement_base_info;
-    if (typeof base !== "object" || base === null) continue;
-    const quota = base.quota;
-    if (typeof quota !== "object" || quota === null) continue;
-    const creditsLimit = readNumber8(quota, "credits_limit");
-    if (creditsLimit <= 0) continue;
-    const usage = entry.usage;
-    const used = typeof usage === "object" && usage !== null ? readNumber8(usage, "credits_amount") : 0;
-    const expireSec = readNumber8(entry, "expire_time");
-    const deductionEndMs = expireSec > 0 ? expireSec * 1e3 : void 0;
-    const pkg = {
-      // ⚠️ 包名用 `display_desc`（实测"每月登录赠送"/"签到奖励"/"免费"），
-      // 不是 `base.name` —— 后者实测为 undefined，旧代码全部回退成了"资源包"。
-      name: readString7(base, "display_desc") || readString7(entry, "display_desc") || "\u8D44\u6E90\u5305",
-      unit: "credits",
-      remaining: creditsLimit - used,
-      total: creditsLimit,
-      used,
-      active: true,
-      cycleStartTime: "",
-      cycleEndTime: "",
-      expiredTime: "",
-      ...deductionEndMs !== void 0 ? { deductionEndTime: deductionEndMs } : {}
-    };
-    packages.push(pkg);
-    total += pkg.remaining;
-  }
-  return { total, packages, expiredTotal };
 }
 
 // vendor/channel-pack/src/account-probe.ts
@@ -56688,125 +54832,1601 @@ async function resetAllAccounts(pool, provider) {
   return { clearedCount, accountCount };
 }
 
-// vendor/channel-pack/src/backup.ts
+// vendor/channel-pack/src/credits-channels.ts
 import { credentialRef as credentialRef10 } from "@deepseek-ai/dsh-credentials";
 
-// vendor/channel-pack/src/types.ts
-var BACKUP_FORMAT = "channel-pack/backup";
-var BACKUP_VERSION = 1;
-
-// vendor/channel-pack/src/backup.ts
-var BackupFormatError = class extends Error {
-};
-async function exportBackup(pool, credentials) {
-  const state = pool.getStateSnapshot();
-  const exported = {};
-  const warnings = [];
-  for (const entry of state.accounts) {
-    try {
-      const resolved = await credentials.resolve(credentialRef10(entry.credentialRef));
-      if (resolved === void 0) {
-        warnings.push(`${entry.id}: \u51ED\u636E\u672A\u914D\u7F6E`);
-      } else {
-        exported[entry.credentialRef] = resolved.value;
-      }
-    } catch (error) {
-      warnings.push(`${entry.id}: ${error instanceof Error ? error.message : String(error)}`);
-    }
+// vendor/channel-pack/src/credits.ts
+var CHECKIN_ACTIVITY_STATUS_PATH = "/v2/billing/meter/checkin-activity-status";
+var DAILY_CHECKIN_PATH = "/v2/billing/meter/daily-checkin";
+var USER_RESOURCE_PATH = "/v2/billing/meter/get-user-resource";
+var REQUEST_TIMEOUT_MS2 = 3e4;
+var CODE_ALREADY_CLAIMED = 10001;
+var CODE_ALREADY_CLAIMED_ALT = 1001;
+var CODE_NO_QUALIFICATION = 1002;
+var CODE_ACTIVITY_ENDED = 1003;
+function roundCredits(value) {
+  return Math.round(value * 100) / 100;
+}
+function normalizeCreditUnit(unit) {
+  return unit === "token" ? "token" : "credit";
+}
+function claimUnitOf(unit) {
+  return normalizeCreditUnit(typeof unit === "string" ? unit : "");
+}
+function formatCreditAmount(value) {
+  if (!Number.isFinite(value)) return "?";
+  return Number.isInteger(value) ? String(value) : value.toFixed(2);
+}
+function formatTokenAmount(value) {
+  if (!Number.isFinite(value)) return "?";
+  const abs = Math.abs(value);
+  if (abs >= 1e6) return `${(value / 1e6).toFixed(2)}M`;
+  if (abs >= 1e3) return `${(value / 1e3).toFixed(2)}K`;
+  return String(Math.round(value));
+}
+function claimUnitLabel(unit) {
+  return unit === "token" ? "Token" : "\u79EF\u5206";
+}
+function formatUnitAmount(value, unit) {
+  const text = unit === "token" ? formatTokenAmount(value) : formatCreditAmount(value);
+  return `${text}${claimUnitLabel(unit)}`;
+}
+function formatClaimGains(totals) {
+  if (totals === void 0 || totals === null || typeof totals !== "object") return null;
+  const parts = [];
+  for (const unit of ["token", "credit"]) {
+    const value = Number(totals[unit]);
+    if (!Number.isFinite(value) || value <= 0) continue;
+    parts.push(`+${formatUnitAmount(value, unit)}`);
   }
-  const locks = sanitizePermanentLocks(pool.permanentLocksSnapshot());
+  return parts.length === 0 ? null : parts.join(", ");
+}
+function checkinHeaders(credential, product) {
+  const headers = new Headers();
+  headers.set("Authorization", `Bearer ${credential.access_token}`);
+  headers.set("Accept", "application/json");
+  headers.set("Content-Type", "application/json");
+  headers.set(HTTP_HEADER_DOMAIN, product.apiDomain || credential.domain || "");
+  headers.set(HTTP_HEADER_PRODUCT, BUDDY_DEPLOYMENT_TYPE);
+  headers.set(HTTP_HEADER_PRODUCT_CODE, product.productCode);
+  if (credential.user_id !== void 0 && credential.user_id.length > 0) {
+    headers.set("X-User-Id", credential.user_id);
+  }
+  if (credential.enterprise_id !== void 0 && credential.enterprise_id.length > 0) {
+    headers.set("X-Enterprise-Id", credential.enterprise_id);
+    headers.set("X-Tenant-Id", credential.enterprise_id);
+  }
+  headers.set("User-Agent", product.userAgent);
+  return headers;
+}
+function readBool(source, key) {
+  return source[key] === true;
+}
+function readNumber3(source, key) {
+  const value = source[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+function readString4(source, key) {
+  const value = source[key];
+  return typeof value === "string" ? value : "";
+}
+function readStringArray(source, key) {
+  const value = source[key];
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+}
+var UNPARSABLE_RESPONSE_MESSAGE = "\u8BF7\u6C42\u5931\u8D25\u6216\u54CD\u5E94\u65E0\u6CD5\u89E3\u6790";
+async function postJson(path2, credential, product, fetcher) {
+  try {
+    const response = await fetcher(`${product.endpoint}${path2}`, {
+      method: "POST",
+      headers: checkinHeaders(credential, product),
+      body: "{}",
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS2)
+    });
+    const text = await response.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return { ok: false, message: describeNonJsonResponse(response.status, text) };
+    }
+    if (typeof parsed !== "object" || parsed === null) {
+      return { ok: false, message: UNPARSABLE_RESPONSE_MESSAGE };
+    }
+    return { ok: true, body: parsed };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+function describeNonJsonResponse(status, text) {
+  if (status === 401 || status === 403) {
+    return `\u51ED\u636E\u5DF2\u5931\u6548\uFF08HTTP ${status}\uFF09\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55\u8BE5\u8D26\u53F7`;
+  }
+  const snippet = text.trim().slice(0, 80).replace(/\s+/g, " ");
+  return `\u670D\u52A1\u7AEF\u8FD4\u56DE\u4E86\u975E JSON \u54CD\u5E94\uFF08HTTP ${status}\uFF09\uFF1A${snippet}`;
+}
+async function fetchCheckinStatus(credential, product, fetcher = fetch) {
+  const result = await postJson(CHECKIN_ACTIVITY_STATUS_PATH, credential, product, fetcher);
+  if (!result.ok) return null;
+  const body = result.body;
+  if (body.code !== 0) return null;
+  const data = body.data;
+  if (typeof data !== "object" || data === null) return null;
+  const record = data;
   return {
-    payload: {
-      format: BACKUP_FORMAT,
-      version: BACKUP_VERSION,
-      exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
-      credentials: exported,
-      accounts: state.accounts,
-      disabledModels: state.disabledModels,
-      // 权威表 + Loomy 兼容字段**同源**（老版本只读后者，缺了会看到
-      // 「锁定悄悄失效」，而失效的后果是真把永久积分烧掉了）。
-      permanentLocks: locks,
-      loomyPermanentLocked: locks.loomy === true
-    },
-    warnings
+    active: readBool(record, "active"),
+    todayCheckedIn: readBool(record, "today_checked_in"),
+    streakDays: readNumber3(record, "streak_days"),
+    dailyCredit: readNumber3(record, "daily_credit"),
+    todayCredit: readNumber3(record, "today_credit"),
+    isStreakDay: readBool(record, "is_streak_day"),
+    totalCredits: readNumber3(record, "total_credits"),
+    checkinDates: readStringArray(record, "checkin_dates"),
+    activityName: readString4(record, "activity_name"),
+    themeName: readString4(record, "theme_name"),
+    endTime: readString4(record, "end_time")
   };
 }
-function assertBackupPayload(value) {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new BackupFormatError("\u5907\u4EFD\u5185\u5BB9\u4E0D\u662F\u5BF9\u8C61");
+async function claimDailyCheckin(credential, product, fetcher = fetch) {
+  const result = await postJson(DAILY_CHECKIN_PATH, credential, product, fetcher);
+  if (!result.ok) {
+    return { kind: "failed", code: -1, message: result.message };
   }
-  const record = value;
-  if (typeof record.format !== "string" || !/^[a-z][a-z0-9-]*\/backup$/i.test(record.format)) {
-    throw new BackupFormatError(`\u4E0D\u662F ${BACKUP_FORMAT} \u5907\u4EFD\u6587\u4EF6\uFF08format=${String(record.format)}\uFF09`);
+  const body = result.body;
+  const code = typeof body.code === "number" ? body.code : -1;
+  const message2 = readString4(body, "msg");
+  if (code === CODE_ALREADY_CLAIMED || code === CODE_ALREADY_CLAIMED_ALT) {
+    return { kind: "already-claimed", message: message2.length > 0 ? message2 : "\u4ECA\u5929\u5DF2\u7B7E\u5230" };
   }
-  if (record.version !== BACKUP_VERSION) {
-    throw new BackupFormatError(`\u4E0D\u652F\u6301\u7684\u5907\u4EFD\u7248\u672C\uFF1A${String(record.version)}\uFF08\u5F53\u524D\u652F\u6301 v${BACKUP_VERSION}\uFF09`);
+  if (code === CODE_NO_QUALIFICATION || code === CODE_ACTIVITY_ENDED) {
+    return { kind: "inactive", message: message2.length > 0 ? message2 : "\u5F53\u524D\u65E0\u9886\u53D6\u8D44\u683C" };
   }
-  if (typeof record.exportedAt !== "string") {
-    throw new BackupFormatError("\u5907\u4EFD\u7F3A\u5C11 exportedAt \u5B57\u6BB5");
+  if (code !== 0) {
+    return { kind: "failed", code, message: message2.length > 0 ? message2 : "\u9886\u53D6\u5931\u8D25" };
   }
-  if (typeof record.credentials !== "object" || record.credentials === null || Array.isArray(record.credentials)) {
-    throw new BackupFormatError("\u5907\u4EFD credentials \u5B57\u6BB5\u65E0\u6548");
+  const data = body.data;
+  if (typeof data !== "object" || data === null) {
+    return { kind: "failed", code, message: "\u9886\u53D6\u54CD\u5E94\u7F3A\u5C11 data \u5B57\u6BB5" };
   }
-  if (!Array.isArray(record.accounts)) {
-    throw new BackupFormatError("\u5907\u4EFD accounts \u5B57\u6BB5\u65E0\u6548");
+  const record = data;
+  const delayed = readString4(record, "message");
+  return {
+    kind: "claimed",
+    credit: readNumber3(record, "credit"),
+    streakDays: readNumber3(record, "streak_days"),
+    isStreakDay: readBool(record, "is_streak_day"),
+    ...delayed.length > 0 ? { delayedMessage: delayed } : {}
+  };
+}
+function readPreciseNumber(source, baseKey) {
+  const precise = source[`${baseKey}Precise`];
+  if (typeof precise === "string") {
+    const parsed = Number.parseFloat(precise);
+    if (Number.isFinite(parsed)) return parsed;
   }
-  if (typeof record.disabledModels !== "object" || record.disabledModels === null || Array.isArray(record.disabledModels)) {
-    throw new BackupFormatError("\u5907\u4EFD disabledModels \u5B57\u6BB5\u65E0\u6548");
+  if (typeof precise === "number" && Number.isFinite(precise)) return precise;
+  return readNumber3(source, baseKey);
+}
+var PACKAGE_STATUS_EXPIRED = 3;
+function parseCreditPackage(entry) {
+  const name2 = readString4(entry, "PackageName") || readString4(entry, "SubProductName") || readString4(entry, "PackageCode");
+  const unit = readString4(entry, "CapacityUnit") || readString4(entry, "OriginUnit");
+  const status = entry.Status;
+  const expiredTime = readString4(entry, "ExpiredTime");
+  const deductionEndTime = readNumber3(entry, "DeductionEndTime");
+  const expiredAt = expiredTime.length > 0 ? Date.parse(expiredTime.replace(" ", "T")) : Number.NaN;
+  const active = status !== PACKAGE_STATUS_EXPIRED && !(Number.isFinite(expiredAt) && Date.now() >= expiredAt) && !(deductionEndTime > 0 && Date.now() >= deductionEndTime);
+  return {
+    name: name2,
+    unit,
+    remaining: readPreciseNumber(entry, "CycleCapacityRemain"),
+    total: readPreciseNumber(entry, "CycleCapacitySize"),
+    used: readPreciseNumber(entry, "CycleCapacityUsed"),
+    active,
+    cycleStartTime: readString4(entry, "CycleStartTime"),
+    cycleEndTime: readString4(entry, "CycleEndTime"),
+    expiredTime,
+    ...deductionEndTime > 0 ? { deductionEndTime } : {}
+  };
+}
+async function fetchCreditBalance(credential, product, fetcher = fetch) {
+  const result = await postJson(USER_RESOURCE_PATH, credential, product, fetcher);
+  if (!result.ok) return null;
+  const body = result.body;
+  if (body.code !== 0) return null;
+  const outer = body.data;
+  if (typeof outer !== "object" || outer === null) return null;
+  const response = outer.Response;
+  if (typeof response !== "object" || response === null) return null;
+  const inner = response.Data;
+  if (typeof inner !== "object" || inner === null) return null;
+  const accounts = inner.Accounts;
+  if (!Array.isArray(accounts)) return null;
+  const packages = [];
+  for (const item of accounts) {
+    if (typeof item !== "object" || item === null) continue;
+    packages.push(parseCreditPackage(item));
   }
-  if (record.permanentLocks !== void 0 && (typeof record.permanentLocks !== "object" || Array.isArray(record.permanentLocks))) {
-    throw new BackupFormatError("\u5907\u4EFD permanentLocks \u5B57\u6BB5\u65E0\u6548");
+  const total = roundCredits(
+    packages.reduce((sum, pkg) => sum + (pkg.active ? pkg.remaining : 0), 0)
+  );
+  const expiredTotal = roundCredits(
+    packages.reduce((sum, pkg) => sum + (pkg.active ? 0 : pkg.remaining), 0)
+  );
+  return { total, packages, expiredTotal };
+}
+
+// vendor/channel-pack/src/buddy-balance-rank.ts
+var BUDDY_EXPIRING_WINDOW_DAYS = 15;
+var BUDDY_EXPIRING_WINDOW_MS = BUDDY_EXPIRING_WINDOW_DAYS * 24 * 60 * 60 * 1e3;
+var DSH_BUDDY_EXPIRING_WINDOW_DAYS = "DSH_BUDDY_EXPIRING_WINDOW_DAYS";
+function buddyExpiringWindowDays(env = process.env) {
+  const raw = env[DSH_BUDDY_EXPIRING_WINDOW_DAYS];
+  if (typeof raw !== "string" || raw.trim().length === 0) return BUDDY_EXPIRING_WINDOW_DAYS;
+  const parsed = Number(raw.trim());
+  if (!Number.isFinite(parsed) || parsed < 0) return BUDDY_EXPIRING_WINDOW_DAYS;
+  return parsed;
+}
+var BUDDY_BALANCE_TIER = Object.freeze({
+  /** 有 15 天内到期的积分 —— 优先消耗（再不用就作废）。 */
+  expiring: 0,
+  /** 只剩永久积分（≥ 15 天后到期）。 */
+  permanent: 1,
+  /** 无余额 / 查询失败。 */
+  none: 2
+});
+function splitBuddyCreditsByExpiry(balance, now = Date.now(), windowMs = BUDDY_EXPIRING_WINDOW_MS) {
+  if (balance === null || balance === void 0) return void 0;
+  let expiring = 0;
+  let permanent = 0;
+  for (const pkg of balance.packages) {
+    if (pkg.active !== true) continue;
+    const remaining = positiveOrZero(pkg.remaining);
+    if (remaining <= 0) continue;
+    const endTime = pkg.deductionEndTime;
+    const known = typeof endTime === "number" && Number.isFinite(endTime) && endTime > 0;
+    if (known && endTime - now < windowMs) expiring += remaining;
+    else permanent += remaining;
+  }
+  return { expiring, permanent };
+}
+function buddyBalanceTier(balance, options = {}) {
+  if (positiveOrZero(balance.expiringBalance) > 0) return BUDDY_BALANCE_TIER.expiring;
+  if (options.allowPermanent === false) return BUDDY_BALANCE_TIER.none;
+  if (positiveOrZero(balance.permanentBalance) > 0) return BUDDY_BALANCE_TIER.permanent;
+  return BUDDY_BALANCE_TIER.none;
+}
+function buddyTierUsable(tier) {
+  return tier !== BUDDY_BALANCE_TIER.none;
+}
+function positiveOrZero(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+function rankBuddyAccountsByBalance(accounts, options = {}) {
+  return accounts.map((account, index) => ({ account, index, tier: buddyBalanceTier(account, options) })).sort((a, b) => a.tier - b.tier || a.index - b.index).map((entry) => entry.account);
+}
+
+// vendor/channel-pack/src/credit-expiry-window.ts
+var DEFAULT_CREDIT_EXPIRING_WINDOW_DAYS = 15;
+function creditExpiringWindowDays(env = process.env) {
+  const raw = env.DSH_CREDIT_EXPIRING_WINDOW_DAYS;
+  if (typeof raw !== "string" || raw.trim().length === 0) return DEFAULT_CREDIT_EXPIRING_WINDOW_DAYS;
+  const parsed = Number(raw.trim());
+  if (!Number.isFinite(parsed) || parsed < 0) return DEFAULT_CREDIT_EXPIRING_WINDOW_DAYS;
+  return parsed;
+}
+
+// vendor/channel-pack/src/lobsterai-credits.ts
+import { randomUUID as randomUUID8 } from "node:crypto";
+var LOBSTERAI_ACTIVITY_SLOT_PATH = "/api/client-activities/slot";
+var LOBSTERAI_ACTIVITY_CONTEXT_PATH = "/api/client-activities";
+var LOBSTERAI_PROFILE_SUMMARY_PATH = "/api/user/profile-summary";
+var LOBSTERAI_SLOT_PLACEMENT = "desktop_sidebar";
+var LOBSTERAI_SLOT_CONTAINER_API_VERSION = "2";
+var LOBSTERAI_SLOT_PLATFORM = "win32";
+var UNPARSABLE_RESPONSE_MESSAGE2 = "\u8BF7\u6C42\u5931\u8D25\u6216\u54CD\u5E94\u65E0\u6CD5\u89E3\u6790";
+async function requestJson(url, credential, product, fetcher, init = { method: "GET" }) {
+  try {
+    const response = await fetcher(url, {
+      method: init.method,
+      headers: lobsteraiAuthHeaders(credential, product),
+      ...init.body === void 0 ? {} : { body: init.body },
+      signal: AbortSignal.timeout(LOBSTERAI_REQUEST_TIMEOUT_MS)
+    });
+    const text = await response.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return { ok: false, message: describeNonJsonResponse2(response.status, text) };
+    }
+    if (typeof parsed !== "object" || parsed === null) {
+      return { ok: false, message: UNPARSABLE_RESPONSE_MESSAGE2 };
+    }
+    return { ok: true, body: parsed };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error) };
   }
 }
-function locksFromPayload(payload) {
-  if (payload.permanentLocks !== void 0) {
-    const locks = sanitizePermanentLocks(payload.permanentLocks);
-    if (locks.loomy === void 0 && payload.loomyPermanentLocked === true) locks.loomy = true;
-    return locks;
+function describeNonJsonResponse2(status, text) {
+  if (status === 401 || status === 403) {
+    return `\u51ED\u636E\u5DF2\u5931\u6548\uFF08HTTP ${status}\uFF09\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55\u8BE5\u8D26\u53F7`;
   }
-  if (typeof payload.loomyPermanentLocked === "boolean") {
-    return payload.loomyPermanentLocked ? { loomy: true } : {};
+  const snippet = text.trim().slice(0, 80).replace(/\s+/g, " ");
+  return `\u670D\u52A1\u7AEF\u8FD4\u56DE\u4E86\u975E JSON \u54CD\u5E94\uFF08HTTP ${status}\uFF09\uFF1A${snippet}`;
+}
+function readBool2(source, key) {
+  return source[key] === true;
+}
+function readNumber4(source, key) {
+  const value = source[key];
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && /^-?\d+(\.\d+)?$/.test(value.trim())) return Number(value);
+  return 0;
+}
+function readActions(source, key) {
+  const value = source[key];
+  if (!Array.isArray(value)) return [];
+  return value.filter((item) => typeof item === "string");
+}
+async function fetchLobsteraiActivitySlot(credential, product, clientVersion, fetcher = fetch) {
+  const query = new URLSearchParams({
+    placement: LOBSTERAI_SLOT_PLACEMENT,
+    clientVersion,
+    containerApiVersion: LOBSTERAI_SLOT_CONTAINER_API_VERSION,
+    platform: LOBSTERAI_SLOT_PLATFORM
+  });
+  const result = await requestJson(
+    `${product.apiBase}${LOBSTERAI_ACTIVITY_SLOT_PATH}?${query.toString()}`,
+    credential,
+    product,
+    fetcher
+  );
+  if (!result.ok) return null;
+  const envelope = parseLobsteraiEnvelope(result.body);
+  if (!envelope.ok) return null;
+  const activity = typeof envelope.data.activity === "object" && envelope.data.activity !== null ? envelope.data.activity : {};
+  const activityCode = typeof activity.activityCode === "string" ? activity.activityCode : "";
+  return {
+    slotState: typeof envelope.data.slotState === "string" ? envelope.data.slotState : "",
+    activityCode,
+    configRevision: readNumber4(activity, "configRevision")
+  };
+}
+async function fetchLobsteraiActivityContext(credential, product, slot2, fetcher = fetch) {
+  const query = new URLSearchParams({ configRevision: String(slot2.configRevision) });
+  const url = `${product.apiBase}${LOBSTERAI_ACTIVITY_CONTEXT_PATH}/${encodeURIComponent(slot2.activityCode)}/context?${query.toString()}`;
+  const result = await requestJson(url, credential, product, fetcher);
+  if (!result.ok) return null;
+  const envelope = parseLobsteraiEnvelope(result.body);
+  if (!envelope.ok) return null;
+  const state = typeof envelope.data.state === "object" && envelope.data.state !== null ? envelope.data.state : {};
+  return {
+    claimedToday: readBool2(state, "claimedToday"),
+    actions: readActions(envelope.data, "actions")
+  };
+}
+async function claimLobsteraiDailyCheckin(credential, product, clientVersion, fetcher = fetch) {
+  const slot2 = await fetchLobsteraiActivitySlot(credential, product, clientVersion, fetcher);
+  if (slot2 === null) {
+    return { kind: "failed", code: -1, message: "\u6D3B\u52A8\u69FD\u4F4D\u67E5\u8BE2\u5931\u8D25" };
+  }
+  if (slot2.slotState !== "available" || slot2.activityCode.length === 0) {
+    return { kind: "inactive", message: `\u65E0\u53EF\u7528\u6D3B\u52A8\uFF08slotState=${slot2.slotState}\uFF09` };
+  }
+  const context = await fetchLobsteraiActivityContext(credential, product, slot2, fetcher);
+  if (context === null) {
+    return { kind: "failed", code: -1, message: "\u6D3B\u52A8\u4E0A\u4E0B\u6587\u67E5\u8BE2\u5931\u8D25" };
+  }
+  if (context.claimedToday) {
+    return { kind: "already-claimed", message: "\u4ECA\u5929\u5DF2\u7B7E\u5230" };
+  }
+  if (!context.actions.includes("check_in")) {
+    return { kind: "inactive", message: "\u5F53\u524D\u4E0D\u53EF\u7B7E\u5230" };
+  }
+  const url = `${product.apiBase}${LOBSTERAI_ACTIVITY_CONTEXT_PATH}/${encodeURIComponent(slot2.activityCode)}/actions/check_in`;
+  const result = await requestJson(url, credential, product, fetcher, {
+    method: "POST",
+    body: JSON.stringify({
+      configRevision: slot2.configRevision,
+      // 客户端幂等键（对齐 sigin.py:63 的 uuid4）：服务端据此去重。
+      idempotencyKey: randomUUID8(),
+      payload: {}
+    })
+  });
+  if (!result.ok) {
+    return { kind: "failed", code: -1, message: result.message };
+  }
+  const envelope = parseLobsteraiEnvelope(result.body);
+  if (!envelope.ok) {
+    return { kind: "failed", code: envelope.code, message: envelope.message };
+  }
+  const bodyResult = typeof envelope.data.result === "object" && envelope.data.result !== null ? envelope.data.result : {};
+  const credit = ["creditsGranted", "rewardCredits", "credits"].map((key) => bodyResult[key]).find((value) => typeof value === "number" && Number.isFinite(value)) ?? 0;
+  const message2 = typeof bodyResult.message === "string" ? bodyResult.message : "";
+  return {
+    kind: "claimed",
+    credit,
+    streakDays: 0,
+    isStreakDay: false,
+    ...message2.length > 0 ? { delayedMessage: message2 } : {}
+  };
+}
+async function fetchLobsteraiCreditBalance(credential, product, fetcher = fetch) {
+  const result = await requestJson(
+    `${product.apiBase}${LOBSTERAI_PROFILE_SUMMARY_PATH}`,
+    credential,
+    product,
+    fetcher
+  );
+  if (!result.ok) return null;
+  const envelope = parseLobsteraiEnvelope(result.body);
+  if (!envelope.ok) return null;
+  const packages = [];
+  const items = envelope.data.creditItems;
+  if (Array.isArray(items)) {
+    for (const item of items) {
+      if (typeof item !== "object" || item === null) continue;
+      const record = item;
+      const remaining = readNumber4(record, "creditsRemaining");
+      const type = typeof record.type === "string" ? record.type : "";
+      const label = typeof record.label === "string" ? record.label : "";
+      const expiresAt = typeof record.expiresAt === "string" ? record.expiresAt : "";
+      const expMs = expiresAt.length > 0 ? Date.parse(expiresAt.replace(" ", "T")) : Number.NaN;
+      packages.push({
+        // ⚠️ 包名用 `label`（实测"每日登录奖励"）而不是 `type`（"campaign"）：
+        // type 是机器分类码，label 才是人看的名字。label 缺失时回退 type，
+        // 再回退「积分包」（老用例锁死的形态）。
+        name: label.length > 0 ? label : type.length > 0 ? type : "\u79EF\u5206\u5305",
+        unit: "credit",
+        remaining,
+        // LobsterAI 只下发剩余量，不区分「周期总额/已用」。
+        // 用 remaining 充当 total 会让「剩余/总额」显示成 1:1；
+        // 这里如实置 0，UI 的 `formatPackageLine` 对 0 会显示 '?'（不误导）。
+        total: 0,
+        used: 0,
+        // 无 Status 字段可依据：有 expiresAt 且已过期才算失效。
+        active: !(expiresAt.length > 0 && Number.isFinite(Date.parse(expiresAt.replace(" ", "T"))) && Date.now() >= Date.parse(expiresAt.replace(" ", "T"))),
+        cycleStartTime: "",
+        cycleEndTime: "",
+        expiredTime: expiresAt,
+        ...Number.isFinite(expMs) ? { deductionEndTime: expMs } : {}
+      });
+    }
+  }
+  const faceValueByGroup = /* @__PURE__ */ new Map();
+  for (const pkg of packages) {
+    if (!pkg.active) continue;
+    const key = pkg.name;
+    const cur = faceValueByGroup.get(key) ?? 0;
+    if (pkg.remaining > cur) faceValueByGroup.set(key, pkg.remaining);
+  }
+  for (const pkg of packages) {
+    const face = faceValueByGroup.get(pkg.name);
+    if (face !== void 0 && face > 0) {
+      pkg.total = roundCredits2(face);
+      if (pkg.used <= 0) pkg.used = roundCredits2(Math.max(0, face - pkg.remaining));
+    }
+  }
+  const total = roundCredits2(Math.max(0, readNumber4(envelope.data, "totalCreditsRemaining")));
+  if (total === 0 && packages.length === 0) return null;
+  const expiredTotal = roundCredits2(
+    packages.reduce((sum, pkg) => sum + (pkg.active ? 0 : Math.max(0, pkg.remaining)), 0)
+  );
+  return { total, packages, expiredTotal };
+}
+function roundCredits2(value) {
+  return Math.round(value * 100) / 100;
+}
+
+// vendor/channel-pack/src/qoder-machine.ts
+import { execFileSync, spawn as spawn4 } from "node:child_process";
+import { existsSync as existsSync6, readFileSync as readFileSync6, readdirSync } from "node:fs";
+import { homedir as homedir3 } from "node:os";
+import { join as join5 } from "node:path";
+var RUNTIME_INFO_TIMEOUT_MS = 2e4;
+var cached;
+function candidatePaths() {
+  const override = process.env.QODER_MACHINE_TOKEN_PATH;
+  if (override !== void 0 && override.length > 0) return [override];
+  const paths = [];
+  const appData = process.env.APPDATA;
+  if (appData !== void 0 && appData.length > 0) {
+    for (const dir of ["Qoder", "Qoder CN"]) {
+      paths.push(join5(appData, dir, "SharedClientCache", "cache", "machine_token.json"));
+    }
+  }
+  const home = homedir3();
+  for (const dir of ["Qoder", "Qoder CN"]) {
+    paths.push(join5(home, "Library", "Application Support", dir, "SharedClientCache", "cache", "machine_token.json"));
+    paths.push(join5(home, ".config", dir, "SharedClientCache", "cache", "machine_token.json"));
+  }
+  return paths;
+}
+function parseFile(path2) {
+  let raw;
+  try {
+    raw = readFileSync6(path2, "utf8");
+  } catch {
+    return void 0;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return void 0;
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return void 0;
+  const record = parsed;
+  const token = record.token;
+  const type = record.type;
+  if (typeof token !== "string" || token.length === 0) return void 0;
+  if (typeof type !== "string" || type.length === 0) return void 0;
+  return { token, type };
+}
+async function resolveQoderMachineIdentityAsync(forceExecutable) {
+  if (cached !== void 0) return cached ?? void 0;
+  const live = await readFromRuntimeInfoAsync(forceExecutable);
+  if (live !== void 0) {
+    cached = live;
+    return live;
+  }
+  for (const path2 of candidatePaths()) {
+    const identity = parseFile(path2);
+    if (identity !== void 0) {
+      cached = identity;
+      return identity;
+    }
+  }
+  cached = null;
+  return void 0;
+}
+var QODER_DATA_DIR_NAMES = [".qoder", ".qoder-cn"];
+function findRuntimeInfoExecutable(home, dataDirNames = QODER_DATA_DIR_NAMES) {
+  const exeName = process.platform === "win32" ? "runtime-info.exe" : "runtime-info";
+  for (const dirName of dataDirNames) {
+    const binDir = join5(home, dirName, ".bin");
+    let entries;
+    try {
+      entries = readdirSync(binDir);
+    } catch {
+      continue;
+    }
+    const dir = entries.find((name2) => name2.startsWith("umid-"));
+    if (dir === void 0) continue;
+    const exe = join5(binDir, dir, exeName);
+    if (existsSync6(exe)) return exe;
   }
   return void 0;
 }
-async function importBackup(credentials, pool, raw) {
-  assertBackupPayload(raw);
-  const payload = raw;
-  const skipped = [];
-  let credentialsImported = 0;
-  for (const [refName, value] of Object.entries(payload.credentials)) {
-    if (typeof value !== "string") {
-      skipped.push(refName);
-      continue;
-    }
-    try {
-      await credentials.set(credentialRef10(refName), value);
-      credentialsImported++;
-    } catch (error) {
-      skipped.push(refName);
-    }
+function locateRuntimeInfo(override) {
+  const fromEnv = process.env.QODER_RUNTIME_INFO;
+  const candidate = override ?? (fromEnv !== void 0 && fromEnv.length > 0 ? fromEnv : void 0);
+  if (candidate !== void 0) {
+    return existsSync6(candidate) ? candidate : void 0;
   }
-  await pool.replaceAll(payload.accounts, payload.disabledModels, locksFromPayload(payload));
-  const now = Date.now();
-  const expiredAccounts = payload.accounts.filter(
-    (entry) => typeof entry.expiresAt === "number" && Number.isFinite(entry.expiresAt) && entry.expiresAt <= now
-  ).length;
-  const skippedSet = new Set(skipped);
-  const missingCredentials = payload.accounts.filter(
-    (entry) => !Object.prototype.hasOwnProperty.call(payload.credentials, entry.credentialRef) || skippedSet.has(entry.credentialRef)
-  ).length;
+  return findRuntimeInfoExecutable(homedir3());
+}
+var RUNTIME_INFO_ENVIRONMENT = "3";
+function runtimeInfoArgs() {
+  return [RUNTIME_INFO_ENVIRONMENT, "--account-stdin"];
+}
+function parseRuntimeInfoOutput(out) {
+  const start = out.indexOf("{");
+  if (start < 0) return void 0;
+  let parsed;
+  try {
+    parsed = JSON.parse(out.slice(start));
+  } catch {
+    return void 0;
+  }
+  if (typeof parsed !== "object" || parsed === null) return void 0;
+  const record = parsed;
+  const token = record.machineToken;
+  const type = record.machineType;
+  if (typeof token !== "string" || token.length === 0) return void 0;
+  if (typeof type !== "string" || type.length === 0) return void 0;
+  return { token, type };
+}
+async function readFromRuntimeInfoAsync(override) {
+  const exe = locateRuntimeInfo(override);
+  if (exe === void 0) return void 0;
+  return await new Promise((resolve2) => {
+    let settled = false;
+    const done = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve2(value);
+    };
+    let child;
+    try {
+      child = spawn4(exe, [...runtimeInfoArgs()], { windowsHide: true });
+    } catch {
+      done(void 0);
+      return;
+    }
+    const timer = setTimeout(() => {
+      try {
+        child.kill();
+      } catch {
+      }
+      done(void 0);
+    }, RUNTIME_INFO_TIMEOUT_MS);
+    timer.unref?.();
+    let stdout = "";
+    child.stdout?.on("data", (chunk) => {
+      stdout += String(chunk);
+    });
+    child.stderr?.on("data", () => {
+    });
+    child.once("error", () => {
+      clearTimeout(timer);
+      done(void 0);
+    });
+    child.once("close", () => {
+      clearTimeout(timer);
+      done(parseRuntimeInfoOutput(stdout));
+    });
+    child.stdin?.on("error", () => {
+    });
+    child.stdin?.end(JSON.stringify({ account: "" }));
+  });
+}
+async function withQoderMachineHeadersAsync(headers, forceExecutable) {
+  const identity = await resolveQoderMachineIdentityAsync(forceExecutable);
+  if (identity === void 0) return headers;
   return {
-    credentialsImported,
-    accountsImported: payload.accounts.length,
-    skipped,
-    expiredAccounts,
-    missingCredentials
+    ...headers,
+    "Cosy-MachineToken": identity.token,
+    "Cosy-MachineType": identity.type
   };
 }
 
-// vendor/channel-pack/src/opencode-rpc.ts
-import { credentialRef as credentialRef11 } from "@deepseek-ai/dsh-credentials";
-import { randomBytes as randomBytes9 } from "node:crypto";
+// vendor/channel-pack/src/qoder-credits.ts
+var QODER_USAGE_PATH = "/sash/api/v2/me/usage";
+var QODER_CAMPAIGNS_PATH = "/sash/api/v1/me/campaigns";
+var QODER_CAMPAIGN_REFRESH_HOUR_UTC8 = 10;
+function hasQoderCampaignRefreshedToday(nowMs = Date.now()) {
+  return utc8MinutesOfDay(nowMs) >= QODER_CAMPAIGN_REFRESH_HOUR_UTC8 * 60;
+}
+var QODER_CREDITS_TIMEOUT_MS = 15e3;
+var NOT_ACTIVATED_HINT = "\u8BE5\u8D26\u53F7\u5C1A\u672A\u5728 Qoder \u4FA7\u5F00\u901A\u6BCF\u65E5\u9886\u53D6\uFF08\u6BCF\u65E5 100 Credits\uFF09\u3002\u8BF7\u5148\u7528 Qoder \u5B98\u65B9\u5BA2\u6237\u7AEF\u767B\u5F55\u4E00\u6B21\u8BE5\u8D26\u53F7\uFF0C\u5F00\u901A\u540E\u518D\u56DE\u6765\u9886\u53D6\u3002";
+var NOT_REFRESHED_YET_HINT = `\u4ECA\u5929\u7684\u6BCF\u65E5\u6D3B\u52A8\u5C1A\u672A\u5237\u65B0\uFF08\u6BCF\u65E5 ${QODER_CAMPAIGN_REFRESH_HOUR_UTC8}:00\uFF08UTC+8\uFF09\u5237\u65B0\uFF09\uFF0C\u5F53\u524D\u770B\u5230\u7684\u662F\u6628\u5929\u90A3\u4E00\u8F6E\uFF0C\u8BF7\u7A0D\u540E\u518D\u6765\u9886\u53D6\u3002`;
+function isQoderNotActivated(campaigns, usageBody) {
+  if (campaigns === void 0) return false;
+  const hasBenefit = campaigns.campaigns.some((c) => c.actionType === "CLAIM_BENEFIT");
+  if (hasBenefit) return false;
+  if (typeof usageBody !== "object" || usageBody === null) return false;
+  const usage = usageBody.qoderUsage;
+  if (typeof usage !== "object" || usage === null) return false;
+  const record = usage;
+  return record.addOnQuota === void 0;
+}
+async function fetchQoderUsageRaw(credential, product, fetcher = fetch) {
+  try {
+    const response = await fetcher(`${product.openApiBase}${QODER_USAGE_PATH}`, {
+      method: "GET",
+      headers: await creditsHeaders(credential, product),
+      signal: AbortSignal.timeout(QODER_CREDITS_TIMEOUT_MS)
+    });
+    if (!response.ok) return void 0;
+    return await response.json();
+  } catch {
+    return void 0;
+  }
+}
+async function creditsHeaders(credential, product) {
+  return await withQoderMachineHeadersAsync({
+    Accept: "application/json",
+    Authorization: `Bearer ${qoderBearerToken(credential)}`,
+    // 桌面 app 身份（`'10'`）；服务端据此进入活动下发分支。
+    "Cosy-ClientType": product.sashClientType,
+    "User-Agent": "Qoder"
+  });
+}
+function readNumber5(source, key) {
+  if (typeof source !== "object" || source === null) return void 0;
+  const value = source[key];
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : void 0;
+  }
+  return void 0;
+}
+function readString5(source, key) {
+  if (typeof source !== "object" || source === null) return void 0;
+  const value = source[key];
+  return typeof value === "string" && value.length > 0 ? value : void 0;
+}
+var QODER_PLAN_PACKAGE = "\u5957\u9910\u989D\u5EA6";
+function toPackage(name2, quota, options = {}) {
+  const total = readNumber5(quota, "total");
+  const used = readNumber5(quota, "used");
+  const remainingRaw = readNumber5(quota, "remaining");
+  if (total === void 0 && used === void 0 && remainingRaw === void 0) return void 0;
+  const totalValue = Math.max(0, total ?? 0);
+  const usedValue = Math.max(0, used ?? 0);
+  const remaining = remainingRaw !== void 0 ? Math.max(0, remainingRaw) : Math.max(0, totalValue - usedValue);
+  const expMs = options.expiredTime && options.expiredTime.length > 0 ? Date.parse(options.expiredTime.replace(" ", "T")) : Number.NaN;
+  return {
+    name: name2,
+    unit: readString5(quota, "unit") ?? "credits",
+    remaining,
+    total: totalValue,
+    used: usedValue,
+    active: options.active ?? true,
+    cycleStartTime: "",
+    cycleEndTime: "",
+    expiredTime: options.expiredTime ?? "",
+    ...Number.isFinite(expMs) ? { deductionEndTime: expMs } : {}
+  };
+}
+async function fetchQoderCreditBalance(credential, product, fetcher = fetch) {
+  let response;
+  try {
+    response = await fetcher(`${product.openApiBase}${QODER_USAGE_PATH}`, {
+      method: "GET",
+      headers: await creditsHeaders(credential, product),
+      signal: AbortSignal.timeout(QODER_CREDITS_TIMEOUT_MS)
+    });
+  } catch {
+    return null;
+  }
+  if (!response.ok) return null;
+  let body;
+  try {
+    body = await response.json();
+  } catch {
+    return null;
+  }
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return null;
+  const root = body;
+  if (root.displayMode === "enterprise") return null;
+  const usage = root.qoderUsage;
+  if (typeof usage !== "object" || usage === null) return null;
+  const packages = [];
+  const userQuota = toPackage(QODER_PLAN_PACKAGE, usage.userQuota);
+  if (userQuota !== void 0) packages.push(userQuota);
+  const addOnQuota = toPackage("\u8D44\u6E90\u5305", usage.addOnQuota);
+  if (addOnQuota !== void 0) packages.push(addOnQuota);
+  const dedicated = usage.dedicatedResourcePackages;
+  if (Array.isArray(dedicated)) {
+    for (const item of dedicated) {
+      const pkg = toPackage(
+        readString5(item, "name") ?? readString5(item, "id") ?? "\u4E13\u7528\u8D44\u6E90\u5305",
+        item,
+        { expiredTime: readString5(item, "expiresAt") ?? readString5(item, "expires_at") ?? "" }
+      );
+      if (pkg !== void 0) packages.push(pkg);
+    }
+  }
+  if (packages.length === 0) return null;
+  const total = roundCredits(packages.reduce((sum, pkg) => sum + pkg.remaining, 0));
+  return { total, packages, expiredTotal: 0 };
+}
+function parseQoderCampaigns(body) {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return void 0;
+  const root = body;
+  const raw = root.campaigns;
+  const campaigns = [];
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      const id = readString5(item, "campaignId");
+      if (id === void 0) continue;
+      campaigns.push({
+        campaignId: id,
+        ...readString5(item, "campaignKey") !== void 0 ? { campaignKey: readString5(item, "campaignKey") } : {},
+        ...readString5(item, "actionType") !== void 0 ? { actionType: readString5(item, "actionType") } : {},
+        ...readString5(item, "claimStatus") !== void 0 ? { claimStatus: readString5(item, "claimStatus") } : {},
+        ...benefitAmount(item) !== void 0 ? { amount: benefitAmount(item) } : {}
+      });
+    }
+  }
+  return {
+    showCampaign: root.showCampaign === true,
+    claimable: root.claimable === true,
+    campaigns
+  };
+}
+function benefitAmount(item) {
+  if (typeof item !== "object" || item === null) return void 0;
+  return readNumber5(item.benefit, "amount");
+}
+async function loadCampaigns(credential, product, fetcher) {
+  let response;
+  try {
+    response = await fetcher(`${product.openApiBase}${QODER_CAMPAIGNS_PATH}`, {
+      method: "GET",
+      headers: await creditsHeaders(credential, product),
+      signal: AbortSignal.timeout(QODER_CREDITS_TIMEOUT_MS)
+    });
+  } catch {
+    return void 0;
+  }
+  if (!response.ok) return void 0;
+  let body;
+  try {
+    body = await response.json();
+  } catch {
+    return void 0;
+  }
+  return parseQoderCampaigns(body);
+}
+function claimableCampaigns(parsed) {
+  return parsed.campaigns.filter(
+    (c) => c.actionType === "CLAIM_BENEFIT" && c.claimStatus === "CLAIMABLE"
+  );
+}
+function parseClaimResult(body) {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) return {};
+  const root = body;
+  return {
+    ...readString5(root, "status") !== void 0 ? { status: readString5(root, "status") } : {},
+    ...typeof root.replayed === "boolean" ? { replayed: root.replayed } : {},
+    ...benefitAmount(root) !== void 0 ? { amount: benefitAmount(root) } : {}
+  };
+}
+async function claimQoderCampaign(credential, product, campaignId, fetcher = fetch) {
+  const url = `${product.openApiBase}${QODER_CAMPAIGNS_PATH}/${encodeURIComponent(campaignId)}/claim`;
+  let response;
+  try {
+    response = await fetcher(url, {
+      method: "POST",
+      headers: { ...await creditsHeaders(credential, product), "Content-Type": "application/json" },
+      body: "",
+      signal: AbortSignal.timeout(QODER_CREDITS_TIMEOUT_MS)
+    });
+  } catch (error) {
+    return { kind: "failed", code: -1, message: error instanceof Error ? error.message : String(error) };
+  }
+  const text = await response.text().catch(() => "");
+  let body;
+  try {
+    body = text.length > 0 ? JSON.parse(text) : {};
+  } catch {
+    return { kind: "failed", code: response.status, message: describeNonJson(response.status, text) };
+  }
+  if (!response.ok) {
+    return { kind: "failed", code: response.status, message: describeNonJson(response.status, text) };
+  }
+  const result = parseClaimResult(body);
+  if (result.replayed === true) {
+    return { kind: "already-claimed", message: "\u4ECA\u5929\u5DF2\u9886\u53D6" };
+  }
+  if (result.status !== void 0 && result.status !== "CLAIMED") {
+    return { kind: "failed", code: -1, message: `\u9886\u53D6\u672A\u6210\u529F\uFF08status=${result.status}\uFF09` };
+  }
+  return { kind: "claimed", credit: result.amount ?? 0, streakDays: 0, isStreakDay: false };
+}
+function describeNonJson(status, text) {
+  if (status === 401 || status === 403) return `\u51ED\u636E\u5DF2\u5931\u6548\uFF08HTTP ${status}\uFF09\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55\u8BE5\u8D26\u53F7`;
+  const snippet = text.trim().slice(0, 80).replace(/\s+/g, " ");
+  return `\u670D\u52A1\u7AEF\u8FD4\u56DE\u4E86\u975E JSON \u54CD\u5E94\uFF08HTTP ${status}\uFF09\uFF1A${snippet}`;
+}
+async function claimQoderDailyCheckin(credential, product, fetcher = fetch, nowMs = Date.now()) {
+  const parsed = await loadCampaigns(credential, product, fetcher);
+  if (parsed === void 0) {
+    return { kind: "failed", code: -1, message: "\u6D3B\u52A8\u5217\u8868\u67E5\u8BE2\u5931\u8D25" };
+  }
+  const refreshed = hasQoderCampaignRefreshedToday(nowMs);
+  const stale = refreshed ? void 0 : { coversToday: false };
+  const targets = claimableCampaigns(parsed);
+  if (targets.length === 0) {
+    const claimedBefore = parsed.campaigns.some(
+      (c) => c.actionType === "CLAIM_BENEFIT" && c.claimStatus === "CLAIMED"
+    );
+    if (claimedBefore) {
+      if (!refreshed) return { kind: "inactive", message: NOT_REFRESHED_YET_HINT };
+      return { kind: "already-claimed", message: "\u4ECA\u5929\u5DF2\u9886\u53D6" };
+    }
+    const usage = await fetchQoderUsageRaw(credential, product, fetcher);
+    if (isQoderNotActivated(parsed, usage)) {
+      return { kind: "inactive", message: NOT_ACTIVATED_HINT, actionRequired: true };
+    }
+    return { kind: "inactive", message: "\u5F53\u524D\u6CA1\u6709\u53EF\u9886\u53D6\u7684\u6D3B\u52A8" };
+  }
+  let total = 0;
+  let firstError;
+  for (const target of targets) {
+    const outcome = await claimQoderCampaign(credential, product, target.campaignId, fetcher);
+    if (outcome.kind === "claimed") total += outcome.credit;
+    else if (outcome.kind === "failed" && firstError === void 0) firstError = outcome.message;
+  }
+  if (total > 0) return { kind: "claimed", credit: total, streakDays: 0, isStreakDay: false, ...stale };
+  if (firstError !== void 0) return { kind: "failed", code: -1, message: firstError };
+  return { kind: "already-claimed", message: "\u4ECA\u5929\u5DF2\u9886\u53D6", ...stale };
+}
+
+// vendor/channel-pack/src/trae-credits.ts
+function classifyTraeCheckinError(httpStatus, code) {
+  if (httpStatus === 200 && code === 1005) {
+    return { type: "PlanLimit", cooldownSecs: 43200 };
+  }
+  if (httpStatus === 429) {
+    return { type: "SoftRate", cooldownSecs: 60 };
+  }
+  if (httpStatus === 401) {
+    return { type: "SessionDead", cooldownSecs: -1 };
+  }
+  if (httpStatus === 404) {
+    return { type: "NotFound", cooldownSecs: 60 };
+  }
+  if (httpStatus >= 500 && httpStatus < 600) {
+    return { type: "Server", cooldownSecs: 600 };
+  }
+  if (httpStatus >= 400 && httpStatus < 500) {
+    return { type: "Client", cooldownSecs: 600 };
+  }
+  if (code !== void 0 && code !== 0) {
+    return { type: "BusinessError", cooldownSecs: 300 };
+  }
+  return { type: "Unknown", cooldownSecs: 0 };
+}
+function readNumber6(source, key) {
+  const value = source[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+function readString6(source, key) {
+  const value = source[key];
+  return typeof value === "string" ? value : "";
+}
+function readClaimCode(body) {
+  const raw = body.code;
+  if (typeof raw === "number" && Number.isFinite(raw)) return raw;
+  if (typeof raw === "string" && /^-?\d+$/.test(raw.trim())) return Number(raw.trim());
+  return raw === void 0 ? 0 : -1;
+}
+async function postJson2(path2, credential, body, fetcher, userId) {
+  const uid = userId ?? credential.uid;
+  if (uid.length === 0) {
+    return { ok: false, message: "\u7F3A\u5C11 user_id\uFF0C\u65E0\u6CD5\u6784\u9020\u8BBE\u5907\u8EAB\u4EFD", httpStatus: 0 };
+  }
+  try {
+    const response = await fetcher(`https://api.trae.cn${path2}`, {
+      method: "POST",
+      headers: traeCheckinHeaders(credential, {}, uid),
+      body,
+      signal: AbortSignal.timeout(TRAE_REQUEST_TIMEOUT_MS)
+    });
+    const httpStatus = response.status;
+    const text = await response.text();
+    if (!response.ok) {
+      const snippet = text.trim().slice(0, 80).replace(/\s+/g, " ");
+      return { ok: false, message: `HTTP ${response.status}: ${snippet}`, httpStatus };
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return { ok: false, message: `\u975E JSON \u54CD\u5E94: ${text.trim().slice(0, 80)}`, httpStatus };
+    }
+    if (typeof parsed !== "object" || parsed === null) {
+      return { ok: false, message: "\u54CD\u5E94\u4E0D\u662F\u5BF9\u8C61", httpStatus };
+    }
+    return { ok: true, body: parsed, httpStatus };
+  } catch (error) {
+    return { ok: false, message: error instanceof Error ? error.message : String(error), httpStatus: 0 };
+  }
+}
+async function fetchTraeCheckinStatus(credential, _product, fetcher = fetch) {
+  const result = await postJson2(TRAE_CHECKIN_STATUS_PATH, credential, "{}", fetcher, credential.uid);
+  if (!result.ok) return null;
+  const body = result.body;
+  const code = readClaimCode(body);
+  if (code !== 0) return null;
+  return {
+    active: body.enable === true,
+    todayCheckedIn: body.checked_in === true,
+    streakDays: readNumber6(body, "streak_days") || 0,
+    dailyCredit: readNumber6(body, "credits") || 0,
+    todayCredit: 0,
+    isStreakDay: false,
+    totalCredits: readNumber6(body, "total_credits") || 0,
+    checkinDates: [],
+    activityName: "",
+    themeName: "",
+    endTime: ""
+  };
+}
+async function claimTraeDailyCheckin(credential, product, fetcher = fetch, generation = 0, onRotate, userId, retryCount = 3) {
+  const uid = userId ?? credential.uid;
+  const doClaim = async () => {
+    let lastError = { ok: false, httpStatus: 0, message: "", code: 0 };
+    for (let attempt = 0; attempt <= Math.max(0, retryCount); attempt++) {
+      const result = await postJson2(TRAE_CHECKIN_CLAIM_PATH, credential, "{}", fetcher, uid);
+      if (result.ok) {
+        const c = readClaimCode(result.body);
+        return { ok: true, body: result.body, httpStatus: result.httpStatus, message: "", code: c };
+      }
+      lastError = { ok: false, httpStatus: result.httpStatus, message: result.message, code: 0 };
+      if (result.httpStatus > 0) {
+        return lastError;
+      }
+      if (attempt < retryCount) {
+        await new Promise((r) => setTimeout(r, 1e3));
+      }
+    }
+    return lastError;
+  };
+  const response = await doClaim();
+  if (!response.ok) {
+    return { kind: "failed", code: -1, message: response.message, errorType: "Unknown", cooldownSecs: 0 };
+  }
+  const body = response.body;
+  const code = readClaimCode(body);
+  if (code === 9074) {
+    return {
+      kind: "failed",
+      code: 9074,
+      message: readString6(body, "message") || readString6(body, "msg") || "\u7B7E\u5230\u4EBA\u6570\u8FC7\u591A\uFF0C\u8BF7\u7A0D\u540E\u518D\u8BD5",
+      errorType: "BusinessError",
+      cooldownSecs: 300
+    };
+  }
+  const msg = readString6(body, "message") || readString6(body, "msg") || "";
+  if (code === 0) {
+    const status = await fetchTraeCheckinStatus(credential, product, fetcher);
+    return {
+      kind: "claimed",
+      credit: status?.dailyCredit ?? 0,
+      streakDays: status?.streakDays ?? 0,
+      isStreakDay: false
+    };
+  }
+  const { type, cooldownSecs } = classifyTraeCheckinError(response.httpStatus, code);
+  return {
+    kind: "failed",
+    code,
+    message: msg.length > 0 ? msg : `\u7B7E\u5230\u5931\u8D25\uFF08code=${code}\uFF09`,
+    errorType: type,
+    cooldownSecs
+  };
+}
+async function fetchTraeCreditBalance(credential, _product, fetcher = fetch) {
+  const result = await postJson2(
+    TRAE_ENT_USAGE_PATH,
+    credential,
+    JSON.stringify({ require_usage: true, req_source: 2 }),
+    fetcher,
+    credential.uid
+  );
+  if (!result.ok) return null;
+  const body = result.body;
+  const packList = body.user_entitlement_pack_list;
+  if (!Array.isArray(packList) || packList.length === 0) return null;
+  const packages = [];
+  let total = 0;
+  let expiredTotal = 0;
+  for (const item of packList) {
+    if (typeof item !== "object" || item === null) continue;
+    const entry = item;
+    const base = entry.entitlement_base_info;
+    if (typeof base !== "object" || base === null) continue;
+    const quota = base.quota;
+    if (typeof quota !== "object" || quota === null) continue;
+    const creditsLimit = readNumber6(quota, "credits_limit");
+    if (creditsLimit <= 0) continue;
+    const usage = entry.usage;
+    const used = typeof usage === "object" && usage !== null ? readNumber6(usage, "credits_amount") : 0;
+    const expireSec = readNumber6(entry, "expire_time");
+    const deductionEndMs = expireSec > 0 ? expireSec * 1e3 : void 0;
+    const pkg = {
+      // ⚠️ 包名用 `display_desc`（实测"每月登录赠送"/"签到奖励"/"免费"），
+      // 不是 `base.name` —— 后者实测为 undefined，旧代码全部回退成了"资源包"。
+      name: readString6(base, "display_desc") || readString6(entry, "display_desc") || "\u8D44\u6E90\u5305",
+      unit: "credits",
+      remaining: creditsLimit - used,
+      total: creditsLimit,
+      used,
+      active: true,
+      cycleStartTime: "",
+      cycleEndTime: "",
+      expiredTime: "",
+      ...deductionEndMs !== void 0 ? { deductionEndTime: deductionEndMs } : {}
+    };
+    packages.push(pkg);
+    total += pkg.remaining;
+  }
+  return { total, packages, expiredTotal };
+}
+
+// vendor/channel-pack/src/cline-credits.ts
+var CLINE_CREDITS_TIMEOUT_MS = 3e4;
+var CLINE_BALANCE_SCALE = 1e5;
+function readNumber7(source, key) {
+  const value = source[key];
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return void 0;
+}
+function toClineCreditBalance(rawBalance) {
+  const total = roundCredits(rawBalance / CLINE_BALANCE_SCALE);
+  const pkg = {
+    name: "Cline \u8D26\u6237\u4F59\u989D",
+    unit: "USD",
+    remaining: total,
+    total,
+    used: 0,
+    active: true,
+    cycleStartTime: "",
+    cycleEndTime: "",
+    expiredTime: ""
+  };
+  return { total, packages: [pkg], expiredTotal: 0 };
+}
+function parseClineBalanceResponse(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return { error: "\u54CD\u5E94\u4E0D\u662F JSON \u5BF9\u8C61" };
+  }
+  const record = value;
+  const serverError = typeof record.error === "string" && record.error.trim().length > 0 ? record.error.trim() : void 0;
+  if (record.success === false || serverError !== void 0 && record.success !== true) {
+    return { error: serverError ?? "\u670D\u52A1\u7AEF\u8FD4\u56DE\u5931\u8D25" };
+  }
+  const data = typeof record.data === "object" && record.data !== null && !Array.isArray(record.data) ? record.data : void 0;
+  if (data === void 0) return { error: "\u54CD\u5E94\u7F3A\u5C11 data \u5B57\u6BB5" };
+  const rawBalance = readNumber7(data, "balance");
+  if (rawBalance === void 0) return { error: "\u54CD\u5E94\u7F3A\u5C11 balance \u5B57\u6BB5" };
+  return { rawBalance };
+}
+async function fetchClineCreditBalance(credential, product, fetcher = fetch, options = {}) {
+  const userId = credential.account_id;
+  if (typeof userId !== "string" || userId.trim().length === 0) {
+    return { balance: null, error: "\u51ED\u636E\u7F3A\u5C11\u8D26\u53F7 id\uFF0C\u65E0\u6CD5\u67E5\u8BE2\u4F59\u989D" };
+  }
+  const url = `${product.apiBase}/api/v1/users/${encodeURIComponent(userId.trim())}/balance`;
+  let response;
+  try {
+    response = await fetcher(url, {
+      method: "GET",
+      headers: clineAuthHeaders(credential.access_token, product),
+      signal: options.signal ?? AbortSignal.timeout(CLINE_CREDITS_TIMEOUT_MS)
+    });
+  } catch (error) {
+    return { balance: null, error: `\u4F59\u989D\u67E5\u8BE2\u7F51\u7EDC\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}` };
+  }
+  let parsed;
+  try {
+    parsed = await response.json();
+  } catch {
+    return { balance: null, error: `\u4F59\u989D\u54CD\u5E94\u4E0D\u662F JSON\uFF08HTTP ${response.status}\uFF09` };
+  }
+  if (!response.ok) {
+    const detail = parseClineBalanceResponse(parsed);
+    return {
+      balance: null,
+      error: detail.error !== void 0 ? `\u4F59\u989D\u67E5\u8BE2\u5931\u8D25\uFF08HTTP ${response.status}\uFF09\uFF1A${detail.error}` : `\u4F59\u989D\u67E5\u8BE2\u5931\u8D25\uFF08HTTP ${response.status}\uFF09`
+    };
+  }
+  const result = parseClineBalanceResponse(parsed);
+  if (result.rawBalance === void 0) {
+    return { balance: null, ...result.error === void 0 ? {} : { error: result.error } };
+  }
+  return {
+    balance: toClineCreditBalance(result.rawBalance),
+    rawBalance: result.rawBalance
+  };
+}
+
+// vendor/channel-pack/src/minimax-credits.ts
+var MINIMAX_SIGNIN_STATUS = Object.freeze({
+  Upcoming: 1,
+  Claimable: 2,
+  Claimed: 3,
+  Disabled: 4
+});
+var MINIMAX_CLAIM_RESULT = Object.freeze({
+  Claimed: 1,
+  AlreadyClaimed: 2
+});
+var MINIMAX_PANEL_SCENE = Object.freeze({
+  Unknown: 0,
+  First: 1,
+  Active: 2,
+  Completed: 3,
+  Broken: 4
+});
+var MINIMAX_SIGNIN_STATUS_VALUES = Object.values(MINIMAX_SIGNIN_STATUS);
+var MINIMAX_PANEL_SCENE_VALUES = Object.values(MINIMAX_PANEL_SCENE);
+function resolveMinimaxTimezoneId(resolve2 = () => Intl.DateTimeFormat().resolvedOptions().timeZone) {
+  try {
+    const zone = resolve2();
+    return typeof zone === "string" && zone.trim().length > 0 ? zone.trim() : "UTC";
+  } catch {
+    return "UTC";
+  }
+}
+function finiteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : void 0;
+}
+function looseAmount(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : void 0;
+  if (typeof value !== "string") return void 0;
+  const trimmed = value.trim();
+  if (trimmed === "") return void 0;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : void 0;
+}
+function parseMinimaxSigninPanel(data) {
+  if (typeof data !== "object" || data === null || Array.isArray(data)) return void 0;
+  const record = data;
+  const scene = finiteNumber(record.scene);
+  if (scene === void 0 || !MINIMAX_PANEL_SCENE_VALUES.includes(scene)) return void 0;
+  const rawDays = record.days;
+  if (!Array.isArray(rawDays) || rawDays.length !== 7) return void 0;
+  const days = [];
+  const seen = /* @__PURE__ */ new Set();
+  let claimable = 0;
+  let today = 0;
+  for (const raw of rawDays) {
+    if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return void 0;
+    const day = raw;
+    const dayNo = finiteNumber(day.day_no);
+    const points = finiteNumber(day.points);
+    const status = finiteNumber(day.status);
+    const bonusRaw = day.bonus_points;
+    const bonusPoints = bonusRaw === void 0 ? 0 : finiteNumber(bonusRaw);
+    if (dayNo === void 0 || !Number.isInteger(dayNo) || dayNo < 1 || dayNo > 7) return void 0;
+    if (seen.has(dayNo)) return void 0;
+    if (points === void 0 || points < 0) return void 0;
+    if (bonusPoints === void 0 || bonusPoints < 0) return void 0;
+    if (typeof day.is_today !== "boolean") return void 0;
+    if (status === void 0 || !MINIMAX_SIGNIN_STATUS_VALUES.includes(status)) {
+      return void 0;
+    }
+    seen.add(dayNo);
+    if (status === MINIMAX_SIGNIN_STATUS.Claimable) claimable++;
+    if (day.is_today) today++;
+    days.push({ dayNo, points, bonusPoints, status, isToday: day.is_today });
+  }
+  if (claimable > 1 || today > 1) return void 0;
+  return { scene, days };
+}
+function minimaxPanelToCheckinStatus(panel) {
+  const today = panel.days.find((day) => day.isToday);
+  const claimedToday = today !== void 0 && today.status === MINIMAX_SIGNIN_STATUS.Claimed;
+  const sorted = [...panel.days].sort((a, b) => a.dayNo - b.dayNo);
+  const todayIndex = sorted.findIndex((day) => day.isToday);
+  let streakDays = 0;
+  if (todayIndex >= 0) {
+    let index = sorted[todayIndex]?.status === MINIMAX_SIGNIN_STATUS.Claimed ? todayIndex : sorted[todayIndex]?.status === MINIMAX_SIGNIN_STATUS.Claimable ? todayIndex - 1 : -1;
+    for (; index >= 0; index -= 1) {
+      if (sorted[index]?.status !== MINIMAX_SIGNIN_STATUS.Claimed) break;
+      streakDays += 1;
+    }
+  }
+  const claimable = panel.days.find((day) => day.status === MINIMAX_SIGNIN_STATUS.Claimable);
+  const target = today ?? claimable;
+  return {
+    active: true,
+    todayCheckedIn: claimedToday,
+    streakDays,
+    // ⚠️ points 就是总数，不相加 bonus_points
+    dailyCredit: target?.points ?? 0,
+    todayCredit: claimedToday ? today?.points ?? 0 : 0,
+    // ⚠️⚠️ **本字段当前不可判读，且几乎恒为 `true`**（2026-09-29 实测发现，
+    // **未修复** —— 因为缺权威语义依据，不擅自改）。
+    //
+    // 实测本机 7 天面板：`bonus_points` 是 **800 档日 400 / 2000 档日 1000**，
+    // **七天全都有值**。故 `bonusPoints > 0` 恒真，不携带任何信息 ——
+    // 与 `credit/details` 那个 `total_count` 误读（见 `fetchMinimaxCreditBalance`）
+    // 是**同一类缺陷形态**：拿一个「在已知样本上恰好符合预期」的字段当判据。
+    //
+    // 危害**目前为零**：`isStreakDay` 在 RPC（`computeClaimSummary` 只用
+    // `credit`）与 Channel Pack UI 上**都没有消费者**（已全仓检索确认）。
+    // 但语义仍是错的：`bonus_points` 看起来是「该日的额外奖励数额」，
+    // **不是**「今天是连续奖励日」的布尔标志。
+    //
+    // 客户端权威实现（`.minimax-forensics/shared-dist/daily-signin.js`）里
+    // **根本没有 `isStreakDay` 这个概念** —— 它只有 `getCurrentSigninStreak()`
+    //（与我们的 `streakDays` 逐行一致）。故无法从客户端反推正确判据。
+    // ⚠️ 要改先拿到 `bonus_points` 的权威语义（或真实「非连续日」样本），
+    // **不要**凭猜测把它改成别的表达式。
+    isStreakDay: (target?.bonusPoints ?? 0) > 0,
+    totalCredits: 0,
+    checkinDates: [],
+    activityName: "",
+    themeName: "",
+    endTime: ""
+  };
+}
+function unwrapEnvelopeData(payload) {
+  const nested = payload.data;
+  return typeof nested === "object" && nested !== null && !Array.isArray(nested) ? nested : payload;
+}
+async function requestEnvelope(url, credential, init, fetcher) {
+  try {
+    const headers = minimaxHeaders(credential);
+    if (init.body !== void 0) headers.set("Content-Type", "application/json");
+    const response = await fetcher(url, {
+      method: init.method,
+      headers,
+      ...init.body === void 0 ? {} : { body: init.body },
+      signal: AbortSignal.timeout(MINIMAX_REQUEST_TIMEOUT_MS)
+    });
+    const text = await response.text();
+    let payload;
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      return {
+        ok: false,
+        code: response.status,
+        message: response.status === 401 || response.status === 403 ? `\u51ED\u636E\u5DF2\u5931\u6548\uFF08HTTP ${response.status}\uFF09\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55\u8BE5\u8D26\u53F7` : `\u670D\u52A1\u7AEF\u8FD4\u56DE\u4E86\u975E JSON \u54CD\u5E94\uFF08HTTP ${response.status}\uFF09`
+      };
+    }
+    if (typeof payload !== "object" || payload === null) {
+      return { ok: false, code: -1, message: "\u54CD\u5E94\u65E0\u6CD5\u89E3\u6790" };
+    }
+    const record = payload;
+    const baseResp = typeof record.base_resp === "object" && record.base_resp !== null ? record.base_resp : {};
+    const statusCode = finiteNumber(baseResp.status_code);
+    const statusMsg = typeof baseResp.status_msg === "string" ? baseResp.status_msg : "";
+    if (statusCode !== void 0 && statusCode !== 0) {
+      return { ok: false, code: statusCode, message: statusMsg || `\u4E1A\u52A1\u9519\u8BEF ${statusCode}` };
+    }
+    return { ok: true, payload: record };
+  } catch (error) {
+    return {
+      ok: false,
+      code: -1,
+      message: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+function withTimezone(base, path2, timezoneId) {
+  const url = new URL(`${base}${path2}`);
+  url.searchParams.set("timezone_id", timezoneId);
+  return url.toString();
+}
+async function fetchMinimaxSigninStatus(credential, fetcher = fetch, product = MINIMAX) {
+  const url = withTimezone(
+    product.apiHost,
+    MINIMAX_SIGNIN_STATUS_PATH,
+    resolveMinimaxTimezoneId()
+  );
+  const result = await requestEnvelope(url, credential, { method: "GET" }, fetcher);
+  if (!result.ok) return null;
+  const panel = parseMinimaxSigninPanel(unwrapEnvelopeData(result.payload));
+  return panel === void 0 ? null : minimaxPanelToCheckinStatus(panel);
+}
+async function claimMinimaxDailyCheckin(credential, fetcher = fetch, product = MINIMAX) {
+  const url = withTimezone(
+    product.apiHost,
+    MINIMAX_SIGNIN_CLAIM_PATH,
+    resolveMinimaxTimezoneId()
+  );
+  const result = await requestEnvelope(url, credential, { method: "POST", body: "{}" }, fetcher);
+  if (!result.ok) {
+    return { kind: "failed", code: result.code, message: result.message };
+  }
+  const data = unwrapEnvelopeData(result.payload);
+  const claimResult = finiteNumber(data.claim_result);
+  if (claimResult === MINIMAX_CLAIM_RESULT.AlreadyClaimed) {
+    return { kind: "already-claimed", message: "\u4ECA\u65E5\u5DF2\u7B7E\u5230" };
+  }
+  if (claimResult !== MINIMAX_CLAIM_RESULT.Claimed) {
+    return { kind: "failed", code: -1, message: "\u7B7E\u5230\u54CD\u5E94\u7F3A\u5C11\u6709\u6548\u7684 claim_result" };
+  }
+  const points = finiteNumber(data.points) ?? 0;
+  const panel = parseMinimaxSigninPanel(data.panel);
+  const status = panel === void 0 ? void 0 : minimaxPanelToCheckinStatus(panel);
+  return {
+    kind: "claimed",
+    credit: points,
+    streakDays: status?.streakDays ?? 0,
+    isStreakDay: status?.isStreakDay ?? false
+  };
+}
+async function fetchMinimaxCreditBalance(credential, fetcher = fetch, product = MINIMAX) {
+  const url = `${product.apiHost}${MINIMAX_CREDIT_DETAILS_PATH}`;
+  const result = await requestEnvelope(url, credential, { method: "GET" }, fetcher);
+  if (!result.ok) return null;
+  const data = unwrapEnvelopeData(result.payload);
+  const details = Array.isArray(data.details) ? data.details : void 0;
+  if (details === void 0 && finiteNumber(data.total_count) === void 0) return null;
+  let total = 0;
+  for (const entry of details ?? []) {
+    if (typeof entry !== "object" || entry === null) continue;
+    const remaining = looseAmount(entry.remaining_amount);
+    if (remaining !== void 0) total += remaining;
+  }
+  return { total: roundCredits(total), packages: [], expiredTotal: 0 };
+}
+
+// vendor/channel-pack/src/gemini-credits.ts
+var GEMINI_UNAUTHORIZED_MESSAGE = "\u5C1A\u672A\u6388\u6743 Google \u8D26\u53F7";
+var GEMINI_BUCKET_FIVE_HOUR = "gemini-5h";
+var GEMINI_BUCKET_WEEKLY = "gemini-weekly";
+var GEMINI_WINDOW_LABEL_FIVE_HOUR = "5 \u5C0F\u65F6\u7A97\u53E3";
+var GEMINI_WINDOW_LABEL_WEEKLY = "\u5468\u7A97\u53E3";
+var GEMINI_QUOTA_UNIT = "%";
+function tierLabel(id, name2) {
+  const combined = `${id} ${name2}`.toLowerCase();
+  if (combined.includes("ultra")) return "Ultra";
+  if (combined.includes("pro")) return "Pro";
+  if (combined.includes("free")) return "Free";
+  return name2 !== "" ? name2 : id;
+}
+function pickTier(raw) {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return void 0;
+  const record = raw;
+  const id = typeof record.id === "string" ? record.id : "";
+  const name2 = typeof record.name === "string" ? record.name : "";
+  if (id === "" && name2 === "") return void 0;
+  return { id, name: name2 };
+}
+function parseGeminiAccountTier(payload) {
+  if (typeof payload !== "object" || payload === null || Array.isArray(payload)) return void 0;
+  const record = payload;
+  const tier = pickTier(record.paidTier) ?? pickTier(record.currentTier);
+  if (tier === void 0) return void 0;
+  return { id: tier.id, name: tier.name, label: tierLabel(tier.id, tier.name) };
+}
+var cache3 = /* @__PURE__ */ new Map();
+function parseGeminiQuotaWindow(raw) {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return void 0;
+  const record = raw;
+  const bucketId = typeof record.bucketId === "string" ? record.bucketId : "";
+  if (bucketId === "") return void 0;
+  const fraction = record.remainingFraction;
+  if (typeof fraction !== "number" || !Number.isFinite(fraction)) return void 0;
+  const resetTime = typeof record.resetTime === "string" ? record.resetTime : "";
+  if (resetTime === "" || Number.isNaN(Date.parse(resetTime))) return void 0;
+  const window = typeof record.window === "string" ? record.window : "";
+  return { bucketId, window, resetTime, remainingFraction: fraction };
+}
+function parseGeminiQuotaWindows(payload) {
+  if (typeof payload !== "object" || payload === null) return {};
+  const groups = payload.groups;
+  if (!Array.isArray(groups)) return {};
+  let fiveHour;
+  let weekly;
+  for (const group of groups) {
+    if (typeof group !== "object" || group === null || Array.isArray(group)) continue;
+    const buckets = group.buckets;
+    if (!Array.isArray(buckets)) continue;
+    for (const bucket of buckets) {
+      const parsed = parseGeminiQuotaWindow(bucket);
+      if (parsed === void 0) continue;
+      if (parsed.bucketId === GEMINI_BUCKET_FIVE_HOUR && fiveHour === void 0) fiveHour = parsed;
+      if (parsed.bucketId === GEMINI_BUCKET_WEEKLY && weekly === void 0) weekly = parsed;
+    }
+  }
+  return {
+    ...fiveHour === void 0 ? {} : { fiveHour },
+    ...weekly === void 0 ? {} : { weekly }
+  };
+}
+function percentOf(window) {
+  const clamped = Math.min(1, Math.max(0, window.remainingFraction));
+  return Math.round(clamped * 100);
+}
+function makeQuotaPackage(label, window) {
+  const remaining = percentOf(window);
+  return {
+    name: label,
+    unit: GEMINI_QUOTA_UNIT,
+    remaining,
+    total: 100,
+    used: 100 - remaining,
+    active: true,
+    cycleStartTime: "",
+    cycleEndTime: window.resetTime,
+    expiredTime: ""
+  };
+}
+function toGeminiCreditBalance(fiveHour, weekly) {
+  const packages = [];
+  if (fiveHour !== void 0) packages.push(makeQuotaPackage(GEMINI_WINDOW_LABEL_FIVE_HOUR, fiveHour));
+  if (weekly !== void 0) packages.push(makeQuotaPackage(GEMINI_WINDOW_LABEL_WEEKLY, weekly));
+  if (packages.length === 0) return { total: 0, packages: [], expiredTotal: 0 };
+  const sum = packages.reduce((acc, item) => acc + item.remaining, 0);
+  return {
+    total: roundCredits(sum / packages.length),
+    packages,
+    expiredTotal: 0
+  };
+}
+async function fetchGeminiCreditBalance(credential, _product = GEMINI, options = {}) {
+  const token = credential.access_token ?? "";
+  if (token === "") return { balance: null, error: GEMINI_UNAUTHORIZED_MESSAGE };
+  const now = options.now?.() ?? Date.now();
+  if (options.force !== true) {
+    const cached2 = cache3.get(token);
+    if (cached2 !== void 0 && now - cached2.at < GEMINI_QUOTA_CACHE_TTL_MS) return cached2.result;
+  }
+  const result = await requestQuota(credential, options.fetcher ?? fetch);
+  cache3.set(token, { at: now, result });
+  return result;
+}
+async function requestQuota(credential, fetcher) {
+  const project = credential.cloudaicompanionProject ?? GEMINI_DEFAULT_PROJECT;
+  const [quota, tier] = await Promise.all([
+    requestQuotaSummary(credential, fetcher, project),
+    requestAccountTier(credential, fetcher).catch(() => void 0)
+  ]);
+  return tier === void 0 ? quota : { ...quota, tier };
+}
+async function requestQuotaSummary(credential, fetcher, project) {
+  let response;
+  try {
+    response = await fetcher(`${GEMINI_ENDPOINT_SANDBOX}${GEMINI_QUOTA_PATH}`, {
+      method: "POST",
+      // ⚠️ 身份头与推理请求**完全一致**（含五个伪装头）；流式才刻意不带 Accept，
+      // 配额是普通 JSON 请求，`includeAccept` 保持默认 false 与抓包一致。
+      headers: geminiHeaders(credential),
+      // ⚠️ 必须带 `project`（见文件头注释）：空对象 `{}` 对第二个账号会 403。
+      body: JSON.stringify({ project }),
+      signal: AbortSignal.timeout(GEMINI_CREDITS_TIMEOUT_MS)
+    });
+  } catch (error) {
+    return { balance: null, error: `\u914D\u989D\u67E5\u8BE2\u7F51\u7EDC\u5931\u8D25\uFF1A${describe(error)}` };
+  }
+  const text = await response.text().catch(() => "");
+  if (!response.ok) {
+    return {
+      balance: null,
+      // ⚠️ 403 有两种成因，文案不能一概说"凭据已失效"：本账号缺 5 小时窗口时
+      // 上游对 `{}` 回 `SUBSCRIPTION_REQUIRED`，凭据其实是好的（用户报障形态）。
+      // 这里把上游的 `reason` 透出来，否则面板只会误导人去重新登录。
+      error: response.status === 401 || response.status === 403 ? `\u914D\u989D\u67E5\u8BE2\u88AB\u62D2\uFF08HTTP ${response.status}\uFF09${quotaRejectionHint(text)}` : `\u914D\u989D\u67E5\u8BE2\u5931\u8D25\uFF08HTTP ${response.status}\uFF09\uFF1A${text.slice(0, 200)}`
+    };
+  }
+  let payload;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    return { balance: null, error: `\u914D\u989D\u54CD\u5E94\u4E0D\u662F JSON\uFF08HTTP ${response.status}\uFF09` };
+  }
+  const { fiveHour, weekly } = parseGeminiQuotaWindows(payload);
+  if (fiveHour === void 0 && weekly === void 0) {
+    return { balance: null, error: "\u914D\u989D\u54CD\u5E94\u91CC\u6CA1\u6709 Gemini \u914D\u989D\u6876" };
+  }
+  return { balance: toGeminiCreditBalance(fiveHour, weekly) };
+}
+async function requestAccountTier(credential, fetcher) {
+  const response = await fetcher(`${GEMINI_ENDPOINT_SANDBOX}${GEMINI_LOAD_CODE_ASSIST_PATH}`, {
+    method: "POST",
+    headers: geminiHeaders(credential),
+    body: GEMINI_LOAD_CODE_ASSIST_BODY,
+    signal: AbortSignal.timeout(GEMINI_CREDITS_TIMEOUT_MS)
+  });
+  if (!response.ok) return void 0;
+  const text = await response.text().catch(() => "");
+  if (text === "") return void 0;
+  try {
+    return parseGeminiAccountTier(JSON.parse(text));
+  } catch {
+    return void 0;
+  }
+}
+function describe(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+function quotaRejectionHint(text) {
+  try {
+    const payload = JSON.parse(text);
+    if (typeof payload === "object" && payload !== null) {
+      const error = payload.error;
+      if (typeof error === "object" && error !== null) {
+        const record = error;
+        const details = Array.isArray(record.details) ? record.details : [];
+        const reason = details.map((item) => typeof item === "object" && item !== null ? item.reason : void 0).find((value) => typeof value === "string" && value !== "");
+        const message2 = typeof record.message === "string" ? record.message : "";
+        if (reason !== void 0) return `\uFF08${reason}\uFF09\uFF1A${message2.slice(0, 160)}`;
+        if (message2 !== "") return `\uFF1A${message2.slice(0, 160)}`;
+      }
+    }
+  } catch {
+  }
+  return text === "" ? "" : `\uFF1A${text.slice(0, 160)}`;
+}
 
 // vendor/channel-pack/src/opencode-product.ts
 var OPENCODE = {
@@ -56912,6 +56532,903 @@ function classifyOpencodeError(status, body, headers) {
   if (status >= 500) return { kind: "server", detail };
   return { kind: "auth", detail };
 }
+
+// vendor/channel-pack/src/codearts-credits.ts
+var CODEARTS_SNAP_ENGINE_URL = "https://snap-access.cn-north-4.myhuaweicloud.com";
+var CODEARTS_PACKAGE_INFO_PATH = "/snap-manager/v1/statistics/plugin";
+var CODEARTS_OPS_DELIVERY_PATH = "/v1/ops/delivery";
+var CODEARTS_OPS_CLAIM_PATH = "/v1/ops/claim";
+var CODEARTS_OPS_CONFIRM_PATH = "/v1/ops/confirm";
+var CODEARTS_OPS_CHANNEL = "IDE";
+var CODEARTS_DAILY_LOGIN_TYPE = "USER_LOGIN";
+var CLAIMED_STATUSES = ["CLAIMED", "CONFIRMED", "CONSUMED"];
+var REQUEST_TIMEOUT_MS3 = 3e4;
+var SNAP_EXTRA_HEADERS = {
+  "Agent-Type": "PromptCenter",
+  "X-Language": "zh-cn"
+};
+var CREDIT_METRIC_LABELS = {
+  usageTotalPackageCredit: "\u603B\u79EF\u5206\u5305",
+  usageBasicPackageCredit: "\u57FA\u7840\u79EF\u5206\u5305",
+  usageOnDemandPackageCredit: "\u6309\u9700\u79EF\u5206\u5305",
+  usageBonusPackageCredit: "\u8D60\u9001\u79EF\u5206\u5305"
+};
+var TOTAL_CREDIT_METRIC = "usageTotalPackageCredit";
+var UNPARSABLE_RESPONSE_MESSAGE3 = "\u8BF7\u6C42\u5931\u8D25\u6216\u54CD\u5E94\u65E0\u6CD5\u89E3\u6790";
+function describeHttpFailure(status, text) {
+  let detail = "";
+  try {
+    const parsed = JSON.parse(text);
+    const code = typeof parsed.error_code === "string" ? parsed.error_code : "";
+    const msg = typeof parsed.error_msg === "string" ? parsed.error_msg : "";
+    detail = [code, msg].filter((part) => part.length > 0).join(" ");
+  } catch {
+    detail = text.trim().slice(0, 200);
+  }
+  return detail.length > 0 ? `HTTP ${status}\uFF1A${detail}` : `HTTP ${status}`;
+}
+function readBool3(source, key) {
+  const value = source[key];
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value.trim().toLowerCase() === "true";
+  return false;
+}
+function readNumber8(source, key) {
+  const value = source[key];
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim().length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return 0;
+}
+function readString7(source, key) {
+  const value = source[key];
+  return typeof value === "string" ? value : "";
+}
+function readIdentifier(source, key) {
+  const value = source[key];
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return "";
+}
+function readRecord(source, key) {
+  const value = source[key];
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : {};
+}
+function unwrapSnapEnvelope(raw) {
+  const code = raw.code;
+  const hasCode = typeof code === "number";
+  if (hasCode) {
+    if (code !== 0) {
+      const message2 = readString7(raw, "message") || readString7(raw, "msg");
+      return { ok: false, code, message: message2.length > 0 ? message2 : `\u4E1A\u52A1\u7801 ${code}` };
+    }
+    const data = raw.data;
+    if (typeof data === "object" && data !== null && !Array.isArray(data)) {
+      return { ok: true, data };
+    }
+    return { ok: false, code, message: "\u54CD\u5E94\u7F3A\u5C11 data \u5B57\u6BB5" };
+  }
+  return { ok: true, data: raw };
+}
+async function signedSnapRequest(method, url, credential, body, fetcher) {
+  const { access_key_id: ak, secret_access_key: sk, security_token: st } = credential;
+  if (!ak || !sk) {
+    return { ok: false, code: -1, message: "\u51ED\u636E\u7F3A\u5C11 AK/SK" };
+  }
+  try {
+    const payload = body === void 0 ? new Uint8Array() : new TextEncoder().encode(body);
+    const signed = await signRequestHuawei(ak, sk, st, method, url, payload);
+    const headers = new Headers();
+    signed.forEach((value, key) => {
+      if (key !== "host") headers.set(key, value);
+    });
+    for (const [key, value] of Object.entries(SNAP_EXTRA_HEADERS)) headers.set(key, value);
+    const response = await fetcher(url, {
+      method,
+      headers,
+      ...body === void 0 ? {} : { body },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS3)
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      return { ok: false, code: response.status, message: describeHttpFailure(response.status, text) };
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      return { ok: false, code: -1, message: UNPARSABLE_RESPONSE_MESSAGE3 };
+    }
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return { ok: false, code: -1, message: UNPARSABLE_RESPONSE_MESSAGE3 };
+    }
+    return unwrapSnapEnvelope(parsed);
+  } catch (error) {
+    return {
+      ok: false,
+      code: -1,
+      message: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+function parseCreditBalance(metrics) {
+  if (!Array.isArray(metrics)) return void 0;
+  const packages = [];
+  let totalRemain;
+  let sawAnyCreditMetric = false;
+  for (const item of metrics) {
+    if (typeof item !== "object" || item === null) continue;
+    const record = item;
+    const name2 = readString7(record, "name");
+    const label = CREDIT_METRIC_LABELS[name2];
+    if (label === void 0) continue;
+    sawAnyCreditMetric = true;
+    const amount = readNumber8(record, "package_credit_amount");
+    const used = readNumber8(record, "package_credit_used");
+    const remain = readNumber8(record, "package_credit_remain");
+    if (name2 === TOTAL_CREDIT_METRIC) totalRemain = remain;
+    if (amount <= 0 && remain <= 0) continue;
+    packages.push({
+      name: label,
+      unit: "credit",
+      remaining: remain,
+      total: amount,
+      used,
+      // `statistics/plugin` 不下发资源包的有效性/周期字段（那是腾讯侧的形态）。
+      // 这里如实置为有效、周期留空，而不是臆造一个到期时间。
+      active: true,
+      cycleStartTime: "",
+      cycleEndTime: "",
+      expiredTime: ""
+    });
+  }
+  if (!sawAnyCreditMetric) return void 0;
+  const total = roundCredits3(
+    totalRemain ?? packages.reduce((sum, pkg) => sum + pkg.remaining, 0)
+  );
+  return { total, packages, expiredTotal: 0 };
+}
+async function fetchCodeArtsAccountInfoDetailed(credential, fetcher = fetch) {
+  const url = `${CODEARTS_SNAP_ENGINE_URL}${CODEARTS_PACKAGE_INFO_PATH}`;
+  const result = await signedSnapRequest("GET", url, credential, void 0, fetcher);
+  if (!result.ok) return { ok: false, message: result.message };
+  const data = result.data;
+  const pkg = readRecord(data, "package");
+  const packageNameCn = readString7(pkg, "package_name_cn");
+  const packageNameEn = readString7(pkg, "package_name_en");
+  return {
+    ok: true,
+    info: {
+      isCreditPackage: readBool3(pkg, "is_credit_package"),
+      isTokenPackage: readBool3(pkg, "is_token_package"),
+      specCode: readString7(pkg, "spec_code"),
+      packageName: packageNameCn.length > 0 ? packageNameCn : packageNameEn,
+      packageStatus: readString7(pkg, "status"),
+      credit: parseCreditBalance(data.metrics)
+    }
+  };
+}
+function parseActivity(item) {
+  return {
+    // 用 readIdentifier 而非 readString：实测 campaignId 是**数字** 1。
+    campaignId: readIdentifier(item, "campaignId"),
+    type: readString7(item, "type"),
+    title: readString7(item, "title"),
+    claimable: readBool3(item, "claimable"),
+    status: readString7(item, "status"),
+    // 可领积分数：实测字段名是 `benefitAmount`（值 1000）。
+    // 保留另两个候选名作兼容回退，取不到才为 0。
+    amount: readNumber8(item, "benefitAmount") || readNumber8(item, "amount") || readNumber8(item, "creditAmount")
+  };
+}
+async function fetchCodeArtsOpsActivitiesDetailed(credential, fetcher = fetch) {
+  const url = `${CODEARTS_SNAP_ENGINE_URL}${CODEARTS_OPS_DELIVERY_PATH}?channel=${CODEARTS_OPS_CHANNEL}`;
+  const result = await signedSnapRequest("GET", url, credential, void 0, fetcher);
+  if (!result.ok) return { ok: false, message: result.message };
+  const items = result.data.items;
+  if (!Array.isArray(items)) return { ok: false, message: "\u54CD\u5E94\u7F3A\u5C11 items \u5B57\u6BB5" };
+  return {
+    ok: true,
+    activities: items.filter((item) => typeof item === "object" && item !== null && !Array.isArray(item)).map(parseActivity)
+  };
+}
+function findDailyCheckinActivity(activities) {
+  return activities.find((activity) => activity.type === CODEARTS_DAILY_LOGIN_TYPE);
+}
+async function claimCodeArtsDailyCheckin(credential, fetcher = fetch) {
+  const infoResult = await fetchCodeArtsAccountInfoDetailed(credential, fetcher);
+  if (!infoResult.ok) {
+    return { kind: "failed", code: -1, message: `\u8D26\u6237\u4FE1\u606F\u67E5\u8BE2\u5931\u8D25\uFF1A${infoResult.message}` };
+  }
+  const info = infoResult.info;
+  if (!info.isCreditPackage) {
+    return {
+      kind: "inactive",
+      message: info.isTokenPackage ? "Token \u8BA1\u8D39\u8D26\u6237\uFF0C\u4E0D\u5728\u79EF\u5206\u6D3B\u52A8\u8303\u56F4" : "\u975E\u79EF\u5206\u8BA1\u8D39\u8D26\u6237\uFF0C\u4E0D\u5728\u79EF\u5206\u6D3B\u52A8\u8303\u56F4"
+    };
+  }
+  const activitiesResult = await fetchCodeArtsOpsActivitiesDetailed(credential, fetcher);
+  if (!activitiesResult.ok) {
+    return { kind: "failed", code: -1, message: `\u6D3B\u52A8\u5217\u8868\u67E5\u8BE2\u5931\u8D25\uFF1A${activitiesResult.message}` };
+  }
+  const activity = findDailyCheckinActivity(activitiesResult.activities);
+  if (activity === void 0) {
+    return { kind: "inactive", message: "\u672A\u627E\u5230\u6BCF\u65E5\u7B7E\u5230\u6D3B\u52A8" };
+  }
+  if (!activity.claimable) {
+    return CLAIMED_STATUSES.includes(activity.status) ? { kind: "already-claimed", message: "\u4ECA\u5929\u5DF2\u9886\u53D6" } : { kind: "inactive", message: `\u5F53\u524D\u4E0D\u53EF\u9886\u53D6\uFF08status=${activity.status}\uFF09` };
+  }
+  if (activity.campaignId.length === 0) {
+    return { kind: "failed", code: -1, message: "\u6D3B\u52A8\u7F3A\u5C11 campaignId\uFF0C\u65E0\u6CD5\u9886\u53D6" };
+  }
+  const claimResult = await signedSnapRequest(
+    "POST",
+    `${CODEARTS_SNAP_ENGINE_URL}${CODEARTS_OPS_CLAIM_PATH}`,
+    credential,
+    JSON.stringify({ campaignId: activity.campaignId, channel: CODEARTS_OPS_CHANNEL }),
+    fetcher
+  );
+  if (!claimResult.ok) {
+    return { kind: "failed", code: claimResult.code, message: claimResult.message };
+  }
+  const benefitId = claimResult.data.id;
+  if (benefitId !== null && benefitId !== void 0) {
+    await signedSnapRequest(
+      "POST",
+      `${CODEARTS_SNAP_ENGINE_URL}${CODEARTS_OPS_CONFIRM_PATH}`,
+      credential,
+      JSON.stringify({ campaignId: activity.campaignId }),
+      fetcher
+    );
+  }
+  const claimCredit = readNumber8(claimResult.data, "benefitAmount") || readNumber8(claimResult.data, "credit") || readNumber8(claimResult.data, "credits") || readNumber8(claimResult.data, "creditAmount") || readNumber8(claimResult.data, "amount");
+  return {
+    kind: "claimed",
+    credit: claimCredit > 0 ? claimCredit : activity.amount,
+    // CodeArts 的活动不下发连续签到天数概念（那是 CodeBuddy 的机制）。
+    streakDays: 0,
+    isStreakDay: false
+  };
+}
+function roundCredits3(value) {
+  return Math.round(value * 100) / 100;
+}
+
+// vendor/channel-pack/src/credits-channels.ts
+function ok(value) {
+  return { ok: true, value };
+}
+function unsupportedProvider(provider) {
+  return { ok: false, error: { code: "bad-request", message: `unsupported provider: ${provider}` } };
+}
+function unsupportedCheckin(message2) {
+  return { ok: false, error: { code: "bad-request", message: message2 } };
+}
+function nullStatus(accounts) {
+  return { accounts: accounts.map((entry) => ({ accountId: entry.id, nickname: entry.nickname, status: null })) };
+}
+function endpointDeps(deps, extra) {
+  return { resolve: deps.resolve, warn: deps.warn, ...extra };
+}
+function computeClaimSummary(outcomes) {
+  const summary = {
+    claimed: 0,
+    totalCredit: 0,
+    alreadyClaimed: 0,
+    inactive: 0,
+    failed: 0,
+    coversToday: 0,
+    totalByUnit: { token: 0, credit: 0 }
+  };
+  for (const outcome of outcomes) {
+    switch (outcome.kind) {
+      case "claimed":
+        summary.claimed += 1;
+        summary.totalCredit += outcome.credit;
+        summary.totalByUnit[claimUnitOf(outcome.unit)] += outcome.credit;
+        if (outcome.coversToday !== false) summary.coversToday += 1;
+        break;
+      case "already-claimed":
+        summary.alreadyClaimed += 1;
+        if (outcome.coversToday !== false) summary.coversToday += 1;
+        break;
+      case "inactive":
+        summary.inactive += 1;
+        break;
+      case "failed":
+        summary.failed += 1;
+        break;
+      default: {
+        const exhaustive = outcome;
+        void exhaustive;
+        summary.failed += 1;
+        break;
+      }
+    }
+  }
+  return summary;
+}
+async function collectCreditsStatus(accounts, product, deps) {
+  const fetcher = deps.fetcher ?? fetch;
+  const fetchStatus = deps.fetchStatus ?? (async (credential, product2) => fetchCheckinStatus(
+    credential,
+    product2,
+    fetcher
+  ));
+  const results = [];
+  for (const entry of accounts) {
+    let status = null;
+    try {
+      const resolved = await deps.resolve(credentialRef10(entry.credentialRef));
+      if (resolved !== void 0) {
+        const credential = JSON.parse(resolved.value);
+        status = await fetchStatus(credential, product);
+      }
+    } catch (error) {
+      deps.warn?.(`[channel-pack] credits.status \u8D26\u53F7 ${entry.id} \u5931\u8D25: ${String(error)}`);
+      status = null;
+    }
+    results.push({ accountId: entry.id, nickname: entry.nickname, status });
+  }
+  return results;
+}
+async function collectClaimResults(accounts, product, deps) {
+  const fetcher = deps.fetcher ?? fetch;
+  const fetchStatus = deps.fetchStatus ?? (async (credential, product2) => fetchCheckinStatus(
+    credential,
+    product2,
+    fetcher
+  ));
+  const claim = deps.claim ?? (async (credential, product2) => claimDailyCheckin(
+    credential,
+    product2,
+    fetcher
+  ));
+  const precheck = deps.precheckStatus !== false;
+  const results = [];
+  const outcomes = [];
+  for (const entry of accounts) {
+    let outcome;
+    try {
+      const resolved = await deps.resolve(credentialRef10(entry.credentialRef));
+      if (resolved === void 0) {
+        outcome = { kind: "failed", code: -1, message: "\u51ED\u636E\u672A\u914D\u7F6E" };
+      } else {
+        const credential = JSON.parse(resolved.value);
+        if (!precheck) {
+          outcome = await claim(credential, product, entry);
+        } else {
+          const status = await fetchStatus(credential, product);
+          if (status !== null && !status.active) {
+            outcome = { kind: "inactive", message: "\u7B7E\u5230\u6D3B\u52A8\u672A\u5F00\u542F" };
+          } else if (status !== null && status.todayCheckedIn) {
+            outcome = { kind: "already-claimed", message: "\u4ECA\u5929\u5DF2\u7B7E\u5230" };
+          } else {
+            outcome = await claim(credential, product, entry);
+          }
+        }
+      }
+    } catch (error) {
+      deps.warn?.(`[channel-pack] credits.claimAll \u8D26\u53F7 ${entry.id} \u5931\u8D25: ${String(error)}`);
+      outcome = {
+        kind: "failed",
+        code: -1,
+        message: error instanceof Error ? error.message : String(error)
+      };
+    }
+    outcomes.push(outcome);
+    results.push({ accountId: entry.id, nickname: entry.nickname, outcome });
+  }
+  return { results, summary: computeClaimSummary(outcomes) };
+}
+async function collectCreditBalances(accounts, product, deps) {
+  const fetcher = deps.fetcher ?? fetch;
+  const fetchBalance = deps.fetchBalance ?? (async (credential, product2) => fetchCreditBalance(
+    credential,
+    product2,
+    fetcher
+  ));
+  const fetchDetailed = deps.fetchBalanceDetailed;
+  const results = [];
+  for (const entry of accounts) {
+    let balance = null;
+    let error;
+    let extra;
+    try {
+      const resolved = await deps.resolve(credentialRef10(entry.credentialRef));
+      if (resolved === void 0) {
+        error = "\u51ED\u636E\u672A\u914D\u7F6E";
+      } else {
+        const credential = JSON.parse(resolved.value);
+        if (fetchDetailed !== void 0) {
+          const detailed = await fetchDetailed(credential, product);
+          balance = detailed.balance;
+          error = detailed.error;
+          extra = detailed.extra;
+          if (balance === null && error === void 0) error = "\u4F59\u989D\u67E5\u8BE2\u5931\u8D25";
+        } else {
+          balance = await fetchBalance(credential, product);
+          if (balance === null) error = "\u4F59\u989D\u67E5\u8BE2\u5931\u8D25";
+        }
+      }
+    } catch (caught) {
+      deps.warn?.(`[channel-pack] credits.balances \u8D26\u53F7 ${entry.id} \u5931\u8D25: ${String(caught)}`);
+      error = caught instanceof Error ? caught.message : String(caught);
+      balance = null;
+    }
+    results.push({
+      accountId: entry.id,
+      nickname: entry.nickname,
+      balance,
+      ...error === void 0 ? {} : { error },
+      ...extra === void 0 ? {} : { extra }
+    });
+  }
+  return results;
+}
+var CREDITS_QUERY_FAILED = "\u79EF\u5206\u67E5\u8BE2\u5931\u8D25\uFF08\u51ED\u636E\u5931\u6548\u6216\u54CD\u5E94\u5F02\u5E38\uFF09";
+async function collectAccountBalances(accounts, deps, query) {
+  const values = [];
+  for (const account of accounts) {
+    const resolved = await deps.resolve(credentialRef10(account.credentialRef));
+    if (!resolved) {
+      values.push({
+        accountId: account.id,
+        nickname: account.nickname,
+        balance: null,
+        error: "\u51ED\u636E\u672A\u914D\u7F6E"
+      });
+      continue;
+    }
+    let credential;
+    try {
+      credential = JSON.parse(resolved.value);
+    } catch {
+      values.push({
+        accountId: account.id,
+        nickname: account.nickname,
+        balance: null,
+        error: "\u51ED\u636E\u89E3\u6790\u5931\u8D25"
+      });
+      continue;
+    }
+    const result = await query(credential);
+    values.push({
+      accountId: account.id,
+      nickname: account.nickname,
+      balance: result.balance,
+      ...result.error === void 0 ? {} : { error: result.error }
+    });
+  }
+  return values;
+}
+async function collectAccountOutcomes(accounts, deps, claim) {
+  const results = [];
+  const outcomes = [];
+  for (const account of accounts) {
+    const resolved = await deps.resolve(credentialRef10(account.credentialRef));
+    let accountOutcomes;
+    if (!resolved) {
+      accountOutcomes = [{ kind: "failed", code: -1, message: "\u51ED\u636E\u672A\u914D\u7F6E" }];
+    } else {
+      let credential;
+      try {
+        credential = JSON.parse(resolved.value);
+      } catch {
+        credential = void 0;
+      }
+      accountOutcomes = credential === void 0 ? [{ kind: "failed", code: -1, message: "\u51ED\u636E\u89E3\u6790\u5931\u8D25" }] : await claim(credential);
+    }
+    for (const outcome of accountOutcomes) {
+      results.push({ accountId: account.id, nickname: account.nickname, outcome });
+      outcomes.push(outcome);
+    }
+  }
+  return { results, summary: computeClaimSummary(outcomes) };
+}
+function buildZcodeBalance(result) {
+  const packages = result.buckets.map((bucket) => {
+    const remaining = bucket.availableUnits ?? bucket.remainingUnits ?? 0;
+    const total = bucket.totalUnits ?? 0;
+    return {
+      name: bucket.showName ?? result.planName ?? "ZCode \u514D\u8D39\u989D\u5EA6",
+      unit: "token",
+      remaining,
+      total,
+      used: Math.max(0, total - remaining),
+      active: true,
+      // ZCode 的额度按日刷新（`period: 'one_time'` 的活动包到点失效），
+      // 故周期起止都留空，只用 `expiredTime` 给到期时刻。
+      cycleStartTime: "",
+      cycleEndTime: "",
+      expiredTime: bucket.expiresAt !== void 0 ? new Date(bucket.expiresAt * 1e3).toISOString() : result.expiresAt !== void 0 ? new Date(result.expiresAt * 1e3).toISOString() : ""
+    };
+  });
+  if (packages.length === 0) {
+    packages.push({
+      name: result.planName ?? "ZCode \u514D\u8D39\u989D\u5EA6",
+      unit: "token",
+      remaining: 0,
+      total: 0,
+      used: 0,
+      active: true,
+      cycleStartTime: "",
+      cycleEndTime: "",
+      expiredTime: result.expiresAt !== void 0 ? new Date(result.expiresAt * 1e3).toISOString() : ""
+    });
+  }
+  return { total: result.remaining, expiredTotal: 0, packages };
+}
+var buddyChannel = (deps, product) => ({
+  status: async (accounts) => ok({
+    accounts: await collectCreditsStatus(accounts, product, endpointDeps(deps))
+  }),
+  claim: async (accounts) => ok(await collectClaimResults(accounts, product, endpointDeps(deps))),
+  balances: async (accounts) => ok({
+    accounts: await collectCreditBalances(accounts, product, endpointDeps(deps)),
+    windowDays: buddyExpiringWindowDays()
+  })
+});
+var qoderChannel = (deps, product) => ({
+  // Qoder 的领取流程**自带活动列表查询**（loadCampaigns → 逐个 claim），故跳过
+  // 外部那次状态检查，否则会重复发一次 GET。幂等判据在响应体的 `replayed`。
+  claim: async (accounts) => ok(await collectClaimResults(accounts, void 0, {
+    ...endpointDeps(deps),
+    claim: (credential) => claimQoderDailyCheckin(credential, product),
+    precheckStatus: false
+  })),
+  balances: async (accounts) => ok({
+    accounts: await collectAccountBalances(accounts, deps, async (credential) => {
+      const balance = await fetchQoderCreditBalance(credential, product);
+      return { balance, ...balance === null ? { error: CREDITS_QUERY_FAILED } : {} };
+    })
+  })
+});
+function channelCredits(deps) {
+  return {
+    [CODEBUDDY.id]: buddyChannel(deps, CODEBUDDY),
+    [WORKBUDDY.id]: {
+      // WorkBuddy 国际版只有余额：签到接口在其后端并不存在。
+      // ⚠️ 领取必须显式拒绝，不能落进 CodeBuddy 那套默认实现 —— 否则会用
+      // 国际版凭据去发国内版签到接口（早期真实缺陷）。
+      status: async (accounts) => ok({ accounts: await collectCreditsStatus(accounts, WORKBUDDY, endpointDeps(deps)) }),
+      claim: async () => unsupportedCheckin("WorkBuddy \u56FD\u9645\u7248\u4E0D\u652F\u6301\u6BCF\u65E5\u7B7E\u5230\uFF08\u5176\u540E\u7AEF\u6CA1\u6709\u7B7E\u5230\u63A5\u53E3\uFF09"),
+      balances: async (accounts) => ok({
+        accounts: await collectCreditBalances(accounts, WORKBUDDY, endpointDeps(deps)),
+        windowDays: buddyExpiringWindowDays()
+      })
+    },
+    codearts: {
+      // CodeArts 的可领状态要经 `statistics/plugin` + `/v1/ops/delivery` 两步才能得到，
+      // 且与 CodeBuddy 的 CheckinStatus 不同构，故如实回 null。
+      status: async (accounts) => ok(nullStatus(accounts)),
+      // 领取流程自带「账户类型 + 活动列表」预检，故跳过外部状态查询 ——
+      // 用 fetchCheckinStatus 打华为端点既发错请求又必然失败。
+      claim: async (accounts) => ok(await collectClaimResults(accounts, void 0, {
+        ...endpointDeps(deps),
+        claim: (credential) => claimCodeArtsDailyCheckin(credential),
+        precheckStatus: false
+      })),
+      balances: async (accounts) => ok({
+        accounts: await collectCreditBalances(accounts, void 0, {
+          ...endpointDeps(deps),
+          fetchBalanceDetailed: async (credential) => {
+            const result = await fetchCodeArtsAccountInfoDetailed(credential);
+            if (!result.ok) return { balance: null, error: `\u8D26\u6237\u4FE1\u606F\u67E5\u8BE2\u5931\u8D25\uFF1A${result.message}` };
+            const info = result.info;
+            if (!info.isCreditPackage) {
+              return {
+                balance: null,
+                error: info.isTokenPackage ? "Token \u8BA1\u8D39\u8D26\u6237\uFF0C\u65E0\u79EF\u5206\u4F59\u989D" : "\u975E\u79EF\u5206\u8BA1\u8D39\u8D26\u6237\uFF0C\u65E0\u79EF\u5206\u4F59\u989D"
+              };
+            }
+            if (info.credit === void 0) return { balance: null, error: "\u672A\u8FD4\u56DE\u79EF\u5206\u6570\u636E" };
+            return { balance: info.credit };
+          }
+        })
+      })
+    },
+    [LOBSTERAI.id]: {
+      status: async (accounts) => ok(nullStatus(accounts)),
+      // LobsterAI 的领取自身是多步的（slot → context → check_in），`claimedToday`
+      // 与 `actions` 判断都在内部完成，故 precheckStatus: false。
+      claim: async (accounts) => {
+        const clientVersion = await deps.lobsterAiClientVersion();
+        return ok(await collectClaimResults(accounts, LOBSTERAI, {
+          ...endpointDeps(deps),
+          claim: (credential, product) => claimLobsteraiDailyCheckin(credential, product, clientVersion),
+          precheckStatus: false
+        }));
+      },
+      balances: async (accounts) => ok({
+        accounts: await collectCreditBalances(accounts, LOBSTERAI, {
+          ...endpointDeps(deps),
+          fetchBalance: (credential, product) => fetchLobsteraiCreditBalance(credential, product)
+        }),
+        windowDays: creditExpiringWindowDays()
+      })
+    },
+    [TRAE.id]: {
+      status: async (accounts) => ok(nullStatus(accounts)),
+      claim: async (accounts) => ok(await collectClaimResults(accounts, void 0, {
+        ...endpointDeps(deps),
+        fetchStatus: (credential) => fetchTraeCheckinStatus(credential, TRAE, fetch),
+        // ⚠️ **不传 `precheckStatus`（默认 true）是硬要求**：TRAE 的 claim 对「今天已领」
+        // 不幂等，直接领取会被误报成 +积分。设备代次经账号池读写，命中 9074 才换代。
+        claim: (credential, _product, entry) => claimTraeDailyCheckin(
+          credential,
+          TRAE,
+          fetch,
+          deps.trae.generationFor(entry.id),
+          (next) => deps.trae.updateGeneration(entry.id, next)
+        )
+      })),
+      balances: async (accounts) => ok({
+        accounts: await collectCreditBalances(accounts, TRAE, {
+          ...endpointDeps(deps),
+          fetchBalance: (credential, product) => fetchTraeCreditBalance(credential, product)
+        }),
+        windowDays: creditExpiringWindowDays()
+      })
+    },
+    [CLINE.id]: {
+      // Cline **没有签到端点**（对整个 sidecar 二进制做字符串扫描，checkin /
+      // check-in / daily / campaign 均无业务端点命中）。
+      status: async (accounts) => ok(nullStatus(accounts)),
+      claim: async () => unsupportedCheckin("Cline \u4E0D\u652F\u6301\u6BCF\u65E5\u7B7E\u5230\uFF08\u5176\u540E\u7AEF\u6CA1\u6709\u7B7E\u5230\u63A5\u53E3\uFF09"),
+      balances: async (accounts) => ok({
+        accounts: await collectAccountBalances(accounts, deps, async (credential) => {
+          const result = await fetchClineCreditBalance(credential, CLINE);
+          return {
+            balance: result.balance,
+            ...result.balance === null ? { error: result.error ?? CREDITS_QUERY_FAILED } : {}
+          };
+        })
+      })
+    },
+    [LOOMY.id]: {
+      // Loomy 没有状态端点：每日额度由 `POST /points/first-login` 触发，幂等由
+      // 领取接口自己处理（重复调用回 already-claimed）。
+      status: async (accounts) => ok(nullStatus(accounts)),
+      claim: async (accounts) => ok(await collectAccountOutcomes(accounts, deps, async (credential) => [await deps.loomy.claimDailyQuota(credential)])),
+      balances: async (accounts) => ok({
+        accounts: await collectAccountBalances(accounts, deps, async (credential) => {
+          const balance = await deps.loomy.fetchCreditBalance(credential);
+          return { balance, ...balance === null ? { error: CREDITS_QUERY_FAILED } : {} };
+        })
+      })
+    },
+    [RACCOON.id]: {
+      // ⚠️ 旧 `switch` 里 Racoon **没有** status 分支，落到 `productById` 兜底 ⇒
+      // `unsupported provider: raccoon`。这里如实保持「缺动词」而非伪造一份 null 状态。
+      claim: async () => unsupportedCheckin(
+        "Raccoon Work \u4E0D\u652F\u6301\u6BCF\u65E5\u7B7E\u5230\uFF08\u6BCF\u65E5\u79EF\u5206\u7531\u670D\u52A1\u7AEF\u81EA\u52A8\u53D1\u653E\uFF1B\u767B\u5F55\u5956\u52B1\u8BF7\u5728\u300C\u65B0\u624B\u4EFB\u52A1\u300D\u4E2D\u9886\u53D6\uFF09"
+      ),
+      balances: async (accounts) => ok({
+        accounts: await collectAccountBalances(accounts, deps, async (credential) => {
+          const balance = await deps.raccoon.fetchCreditBalance(credential);
+          return { balance, ...balance === null ? { error: CREDITS_QUERY_FAILED } : {} };
+        })
+      })
+    },
+    [MINIMAX.id]: {
+      // ⚠️ 判据是 `is_today && status===3`（见 `minimaxPanelToCheckinStatus`），不是
+      // 「没有 Claimable」；`active` 恒 true（拿到响应即 true）。
+      status: async (accounts) => ok({
+        accounts: await collectCreditsStatus(accounts, void 0, {
+          ...endpointDeps(deps),
+          fetchStatus: (credential) => fetchMinimaxSigninStatus(credential)
+        })
+      }),
+      // 默认 precheck：签到接口对「今天已领」回 already_claimed，可安全预检。
+      claim: async (accounts) => ok(await collectClaimResults(accounts, void 0, {
+        ...endpointDeps(deps),
+        fetchStatus: (credential) => fetchMinimaxSigninStatus(credential),
+        claim: (credential) => claimMinimaxDailyCheckin(credential)
+      })),
+      balances: async (accounts) => ok({
+        accounts: await collectCreditBalances(accounts, void 0, {
+          ...endpointDeps(deps),
+          fetchBalance: (credential) => fetchMinimaxCreditBalance(credential)
+        })
+      })
+    },
+    [ZCODE.id]: {
+      // zcode 没有「今日已领」端点，`claimDailyFor` 自带激活上报与 preview，
+      // 重复调用只多发一次无谓请求，不值得为此加一次状态 GET。
+      claim: async (accounts) => ok(await collectAccountOutcomes(accounts, deps, async (credential) => (
+        // captcha 一次性：`claimDailyWith` 解析一份配置后原样传回，region 与 param 必须同源
+        // （阿里云成对验签，不一致即 400/3007）。
+        await deps.zcode.claimDailyFor(credential, async (config) => await deps.zcode.mintCaptcha(config))
+      ))),
+      balances: async (accounts) => ok({
+        accounts: await collectAccountBalances(accounts, deps, async (credential) => {
+          const result = await deps.zcode.fetchBalanceFor(credential);
+          if (result === void 0) return { balance: null, error: "\u989D\u5EA6\u67E5\u8BE2\u5931\u8D25\uFF08\u51ED\u636E\u5931\u6548\u6216\u7F51\u7EDC\u5F02\u5E38\uFF09" };
+          if (result.enterprise === true) {
+            return { balance: null, error: "\u4F01\u4E1A\u7248\u8D26\u53F7\u4E0D\u4E0B\u53D1\u989D\u5EA6\u6570\u5B57\uFF0C\u8BF7\u5728 ZCode \u5185\u67E5\u770B" };
+          }
+          return { balance: buildZcodeBalance(result) };
+        })
+      })
+    },
+    [GEMINI.id]: {
+      // 只有 Gemini 读 `req.force`（面板上的「刷新」要绕过宿主侧 TTL 缓存）。
+      // 也是全仓库唯一用 `extra.accountTier` 的渠道。
+      balances: async (accounts, request2) => ok({
+        accounts: await collectCreditBalances(accounts, GEMINI, {
+          ...endpointDeps(deps),
+          fetchBalanceDetailed: async (credential) => {
+            const { balance, error, tier } = await fetchGeminiCreditBalance(credential, GEMINI, { force: request2.force === true });
+            const extra = tier === void 0 ? void 0 : { accountTier: { label: tier.label, title: `${tier.name}\uFF08${tier.id}\uFF09` } };
+            return {
+              balance,
+              ...error === void 0 ? {} : { error },
+              ...extra === void 0 ? {} : { extra }
+            };
+          }
+        })
+      })
+    },
+    [OPENCODE.id]: {
+      // 零网络：把账号池本地记录的限流状态映射成「可用通道数」，不查上游。
+      balances: async (accounts) => ok({
+        accounts: accounts.map((account) => {
+          const now = Date.now();
+          const limits = Object.entries(account.modelRateLimits ?? {});
+          const limitedUntil = limits.reduce((max, [, resetAt]) => Math.max(max, Number(resetAt) || 0), 0);
+          const limitedModels = limits.filter(([, resetAt]) => Number(resetAt) > now).length;
+          const available2 = account.enabled && limitedUntil <= now ? 1 : 0;
+          const balance = {
+            total: available2,
+            packages: [{
+              name: limitedModels > 0 ? `${limitedModels} \u4E2A\u6A21\u578B\u9650\u989D\u4E2D` : "\u53EF\u7528\u901A\u9053",
+              unit: "\u901A\u9053",
+              remaining: available2,
+              total: available2,
+              used: 0,
+              active: true,
+              cycleStartTime: "",
+              cycleEndTime: "",
+              expiredTime: ""
+            }],
+            expiredTotal: account.enabled && limitedUntil > now ? 1 : 0
+          };
+          return {
+            accountId: account.id,
+            nickname: account.nickname,
+            balance,
+            ...!account.enabled ? { error: "\u5DF2\u505C\u7528" } : limitedUntil > now ? { error: `\u9650\u989D\u4E2D\uFF0C${new Date(limitedUntil).toLocaleString("zh-CN")} \u6062\u590D` } : {}
+          };
+        })
+      })
+    },
+    [QODER.id]: qoderChannel(deps, QODER),
+    [QODER_CN.id]: qoderChannel(deps, QODER_CN)
+  };
+}
+
+// vendor/channel-pack/src/backup.ts
+import { credentialRef as credentialRef11 } from "@deepseek-ai/dsh-credentials";
+
+// vendor/channel-pack/src/types.ts
+var BACKUP_FORMAT = "channel-pack/backup";
+var BACKUP_VERSION = 1;
+
+// vendor/channel-pack/src/backup.ts
+var BackupFormatError = class extends Error {
+};
+async function exportBackup(pool, credentials) {
+  const state = pool.getStateSnapshot();
+  const exported = {};
+  const warnings = [];
+  for (const entry of state.accounts) {
+    try {
+      const resolved = await credentials.resolve(credentialRef11(entry.credentialRef));
+      if (resolved === void 0) {
+        warnings.push(`${entry.id}: \u51ED\u636E\u672A\u914D\u7F6E`);
+      } else {
+        exported[entry.credentialRef] = resolved.value;
+      }
+    } catch (error) {
+      warnings.push(`${entry.id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const locks = sanitizePermanentLocks(pool.permanentLocksSnapshot());
+  return {
+    payload: {
+      format: BACKUP_FORMAT,
+      version: BACKUP_VERSION,
+      exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      credentials: exported,
+      accounts: state.accounts,
+      disabledModels: state.disabledModels,
+      // 权威表 + Loomy 兼容字段**同源**（老版本只读后者，缺了会看到
+      // 「锁定悄悄失效」，而失效的后果是真把永久积分烧掉了）。
+      permanentLocks: locks,
+      loomyPermanentLocked: locks.loomy === true
+    },
+    warnings
+  };
+}
+function assertBackupPayload(value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new BackupFormatError("\u5907\u4EFD\u5185\u5BB9\u4E0D\u662F\u5BF9\u8C61");
+  }
+  const record = value;
+  if (typeof record.format !== "string" || !/^[a-z][a-z0-9-]*\/backup$/i.test(record.format)) {
+    throw new BackupFormatError(`\u4E0D\u662F ${BACKUP_FORMAT} \u5907\u4EFD\u6587\u4EF6\uFF08format=${String(record.format)}\uFF09`);
+  }
+  if (record.version !== BACKUP_VERSION) {
+    throw new BackupFormatError(`\u4E0D\u652F\u6301\u7684\u5907\u4EFD\u7248\u672C\uFF1A${String(record.version)}\uFF08\u5F53\u524D\u652F\u6301 v${BACKUP_VERSION}\uFF09`);
+  }
+  if (typeof record.exportedAt !== "string") {
+    throw new BackupFormatError("\u5907\u4EFD\u7F3A\u5C11 exportedAt \u5B57\u6BB5");
+  }
+  if (typeof record.credentials !== "object" || record.credentials === null || Array.isArray(record.credentials)) {
+    throw new BackupFormatError("\u5907\u4EFD credentials \u5B57\u6BB5\u65E0\u6548");
+  }
+  if (!Array.isArray(record.accounts)) {
+    throw new BackupFormatError("\u5907\u4EFD accounts \u5B57\u6BB5\u65E0\u6548");
+  }
+  if (typeof record.disabledModels !== "object" || record.disabledModels === null || Array.isArray(record.disabledModels)) {
+    throw new BackupFormatError("\u5907\u4EFD disabledModels \u5B57\u6BB5\u65E0\u6548");
+  }
+  if (record.permanentLocks !== void 0 && (typeof record.permanentLocks !== "object" || Array.isArray(record.permanentLocks))) {
+    throw new BackupFormatError("\u5907\u4EFD permanentLocks \u5B57\u6BB5\u65E0\u6548");
+  }
+}
+function locksFromPayload(payload) {
+  if (payload.permanentLocks !== void 0) {
+    const locks = sanitizePermanentLocks(payload.permanentLocks);
+    if (locks.loomy === void 0 && payload.loomyPermanentLocked === true) locks.loomy = true;
+    return locks;
+  }
+  if (typeof payload.loomyPermanentLocked === "boolean") {
+    return payload.loomyPermanentLocked ? { loomy: true } : {};
+  }
+  return void 0;
+}
+async function importBackup(credentials, pool, raw) {
+  assertBackupPayload(raw);
+  const payload = raw;
+  const skipped = [];
+  let credentialsImported = 0;
+  for (const [refName, value] of Object.entries(payload.credentials)) {
+    if (typeof value !== "string") {
+      skipped.push(refName);
+      continue;
+    }
+    try {
+      await credentials.set(credentialRef11(refName), value);
+      credentialsImported++;
+    } catch (error) {
+      skipped.push(refName);
+    }
+  }
+  await pool.replaceAll(payload.accounts, payload.disabledModels, locksFromPayload(payload));
+  const now = Date.now();
+  const expiredAccounts = payload.accounts.filter(
+    (entry) => typeof entry.expiresAt === "number" && Number.isFinite(entry.expiresAt) && entry.expiresAt <= now
+  ).length;
+  const skippedSet = new Set(skipped);
+  const missingCredentials = payload.accounts.filter(
+    (entry) => !Object.prototype.hasOwnProperty.call(payload.credentials, entry.credentialRef) || skippedSet.has(entry.credentialRef)
+  ).length;
+  return {
+    credentialsImported,
+    accountsImported: payload.accounts.length,
+    skipped,
+    expiredAccounts,
+    missingCredentials
+  };
+}
+
+// vendor/channel-pack/src/opencode-rpc.ts
+import { credentialRef as credentialRef12 } from "@deepseek-ai/dsh-credentials";
+import { randomBytes as randomBytes9 } from "node:crypto";
 
 // vendor/channel-pack/src/opencode-auth.ts
 import { randomBytes as randomBytes8 } from "node:crypto";
@@ -57254,7 +57771,7 @@ async function handleOpencodeRpc(ctx, pool, method, payload) {
           return done({ accountId: id, existed: true });
         }
         const nickname = typeof req.nickname === "string" && req.nickname.trim().length > 0 ? req.nickname.trim() : `OpenCode ${apiKey.slice(-6)}`;
-        await ctx.credentials.set(credentialRef11(refName), JSON.stringify({
+        await ctx.credentials.set(credentialRef12(refName), JSON.stringify({
           api_key: apiKey,
           nickname,
           // 指纹在此**首次固化**，之后由池里的代次权威重算（见 index.ts 接线注释）。
@@ -57279,7 +57796,7 @@ async function handleOpencodeRpc(ctx, pool, method, payload) {
         const refName = `OPENCODE_ANON_${randomBytes9(4).toString("hex").toUpperCase()}`;
         const count2 = pool.listAccountsByProvider(OPENCODE.id).filter((a) => a.id.startsWith(`${OPENCODE.id}-anon-`)).length;
         const nickname = typeof req?.nickname === "string" && req.nickname.trim().length > 0 ? req.nickname.trim() : `\u533F\u540D\u901A\u9053 ${count2 + 1}`;
-        await ctx.credentials.set(credentialRef11(refName), JSON.stringify({
+        await ctx.credentials.set(credentialRef12(refName), JSON.stringify({
           api_key: OPENCODE.anonymousKey,
           nickname
         }));
@@ -57999,162 +58516,6 @@ var PERMANENT_LOCK_PROVIDERS = /* @__PURE__ */ new Set([
   CODEBUDDY.id,
   WORKBUDDY.id
 ]);
-function computeClaimSummary(outcomes) {
-  const summary = {
-    claimed: 0,
-    totalCredit: 0,
-    alreadyClaimed: 0,
-    inactive: 0,
-    failed: 0,
-    coversToday: 0,
-    totalByUnit: { token: 0, credit: 0 }
-  };
-  for (const outcome of outcomes) {
-    switch (outcome.kind) {
-      case "claimed":
-        summary.claimed += 1;
-        summary.totalCredit += outcome.credit;
-        summary.totalByUnit[claimUnitOf(outcome.unit)] += outcome.credit;
-        if (outcome.coversToday !== false) summary.coversToday += 1;
-        break;
-      case "already-claimed":
-        summary.alreadyClaimed += 1;
-        if (outcome.coversToday !== false) summary.coversToday += 1;
-        break;
-      case "inactive":
-        summary.inactive += 1;
-        break;
-      case "failed":
-        summary.failed += 1;
-        break;
-      default: {
-        const exhaustive = outcome;
-        void exhaustive;
-        summary.failed += 1;
-        break;
-      }
-    }
-  }
-  return summary;
-}
-async function collectCreditsStatus(accounts, product, deps) {
-  const fetcher = deps.fetcher ?? fetch;
-  const fetchStatus = deps.fetchStatus ?? (async (credential, product2) => fetchCheckinStatus(
-    credential,
-    product2,
-    fetcher
-  ));
-  const results = [];
-  for (const entry of accounts) {
-    let status = null;
-    try {
-      const resolved = await deps.resolve(credentialRef12(entry.credentialRef));
-      if (resolved !== void 0) {
-        const credential = JSON.parse(resolved.value);
-        status = await fetchStatus(credential, product);
-      }
-    } catch (error) {
-      deps.warn?.(`[channel-pack] credits.status \u8D26\u53F7 ${entry.id} \u5931\u8D25: ${String(error)}`);
-      status = null;
-    }
-    results.push({ accountId: entry.id, nickname: entry.nickname, status });
-  }
-  return results;
-}
-async function collectClaimResults(accounts, product, deps) {
-  const fetcher = deps.fetcher ?? fetch;
-  const fetchStatus = deps.fetchStatus ?? (async (credential, product2) => fetchCheckinStatus(
-    credential,
-    product2,
-    fetcher
-  ));
-  const claim = deps.claim ?? (async (credential, product2) => claimDailyCheckin(
-    credential,
-    product2,
-    fetcher
-  ));
-  const precheck = deps.precheckStatus !== false;
-  const results = [];
-  const outcomes = [];
-  for (const entry of accounts) {
-    let outcome;
-    try {
-      const resolved = await deps.resolve(credentialRef12(entry.credentialRef));
-      if (resolved === void 0) {
-        outcome = { kind: "failed", code: -1, message: "\u51ED\u636E\u672A\u914D\u7F6E" };
-      } else {
-        const credential = JSON.parse(resolved.value);
-        if (!precheck) {
-          outcome = await claim(credential, product, entry);
-        } else {
-          const status = await fetchStatus(credential, product);
-          if (status !== null && !status.active) {
-            outcome = { kind: "inactive", message: "\u7B7E\u5230\u6D3B\u52A8\u672A\u5F00\u542F" };
-          } else if (status !== null && status.todayCheckedIn) {
-            outcome = { kind: "already-claimed", message: "\u4ECA\u5929\u5DF2\u7B7E\u5230" };
-          } else {
-            outcome = await claim(credential, product, entry);
-          }
-        }
-      }
-    } catch (error) {
-      deps.warn?.(`[channel-pack] credits.claimAll \u8D26\u53F7 ${entry.id} \u5931\u8D25: ${String(error)}`);
-      outcome = {
-        kind: "failed",
-        code: -1,
-        message: error instanceof Error ? error.message : String(error)
-      };
-    }
-    outcomes.push(outcome);
-    results.push({ accountId: entry.id, nickname: entry.nickname, outcome });
-  }
-  return { results, summary: computeClaimSummary(outcomes) };
-}
-async function collectCreditBalances(accounts, product, deps) {
-  const fetcher = deps.fetcher ?? fetch;
-  const fetchBalance = deps.fetchBalance ?? (async (credential, product2) => fetchCreditBalance(
-    credential,
-    product2,
-    fetcher
-  ));
-  const fetchDetailed = deps.fetchBalanceDetailed;
-  const results = [];
-  for (const entry of accounts) {
-    let balance = null;
-    let error;
-    let extra;
-    try {
-      const resolved = await deps.resolve(credentialRef12(entry.credentialRef));
-      if (resolved === void 0) {
-        error = "\u51ED\u636E\u672A\u914D\u7F6E";
-      } else {
-        const credential = JSON.parse(resolved.value);
-        if (fetchDetailed !== void 0) {
-          const detailed = await fetchDetailed(credential, product);
-          balance = detailed.balance;
-          error = detailed.error;
-          extra = detailed.extra;
-          if (balance === null && error === void 0) error = "\u4F59\u989D\u67E5\u8BE2\u5931\u8D25";
-        } else {
-          balance = await fetchBalance(credential, product);
-          if (balance === null) error = "\u4F59\u989D\u67E5\u8BE2\u5931\u8D25";
-        }
-      }
-    } catch (caught) {
-      deps.warn?.(`[channel-pack] credits.balances \u8D26\u53F7 ${entry.id} \u5931\u8D25: ${String(caught)}`);
-      error = caught instanceof Error ? caught.message : String(caught);
-      balance = null;
-    }
-    results.push({
-      accountId: entry.id,
-      nickname: entry.nickname,
-      balance,
-      ...error === void 0 ? {} : { error },
-      ...extra === void 0 ? {} : { extra }
-    });
-  }
-  return results;
-}
 function llmServiceOf(ctx) {
   const direct = ctx.llm;
   if (direct !== void 0 && direct !== null) return direct;
@@ -58225,6 +58586,25 @@ function registerChannelPackEndpoints(ctx, pool, auths, modelAdapters, config = 
     if (member === void 0) throw new Error(`Unknown Qoder family provider: ${provider}`);
     return member;
   };
+  const creditsChannels = channelCredits({
+    resolve: (ref) => ctx.credentials.resolve(ref),
+    warn: (message2) => ctx.logger?.warn?.(message2),
+    trae: {
+      generationFor: (accountId) => pool.traeCheckinDeviceGenerationFor(accountId),
+      updateGeneration: (accountId, next) => pool.updateTraeCheckinDeviceGeneration(accountId, next)
+    },
+    lobsterAiClientVersion: () => lobsterai.resolveClientVersion(),
+    loomy: {
+      claimDailyQuota: (credential) => loomy.claimDailyQuota(credential),
+      fetchCreditBalance: (credential) => loomy.fetchCreditBalance(credential)
+    },
+    raccoon: { fetchCreditBalance: (credential) => raccoon.fetchCreditBalance(credential) },
+    zcode: {
+      claimDailyFor: (credential, mintCaptcha) => zcode.claimDailyFor(credential, mintCaptcha),
+      mintCaptcha: (config2) => zcode.mintCaptcha(config2),
+      fetchBalanceFor: (credential) => zcode.fetchBalanceFor(credential)
+    }
+  });
   const pendingSmsMsgid = /* @__PURE__ */ new Map();
   const pendingLoginFailures = /* @__PURE__ */ new Map();
   const badgePreferences = createBadgePreferenceStore(ctx);
@@ -58315,7 +58695,7 @@ function registerChannelPackEndpoints(ctx, pool, auths, modelAdapters, config = 
     const out = [];
     for (const account of accounts) {
       try {
-        const resolved = await ctx.credentials.resolve(credentialRef12(account.credentialRef));
+        const resolved = await ctx.credentials.resolve(credentialRef13(account.credentialRef));
         if (!resolved) {
           out.push(account);
           continue;
@@ -58333,48 +58713,6 @@ function registerChannelPackEndpoints(ctx, pool, auths, modelAdapters, config = 
       }
     }
     return out;
-  }
-  function buildZcodeBalance(result) {
-    const packages = result.buckets.map((bucket) => {
-      const remaining = bucket.availableUnits ?? bucket.remainingUnits ?? 0;
-      const total = bucket.totalUnits ?? 0;
-      return {
-        name: bucket.showName ?? result.planName ?? "ZCode \u514D\u8D39\u989D\u5EA6",
-        // ⚠ 单位是 **token**（不是 credit）—— 如实标注，
-        // 避免用户以为 ZCode 有 1 亿积分。
-        unit: "token",
-        remaining,
-        total,
-        used: Math.max(0, total - remaining),
-        active: true,
-        // ZCode 的额度按日刷新（`period: 'one_time'` 的活动包到点失效），
-        // 故周期起止都留空，只用 `expiredTime` 给到期时刻。
-        cycleStartTime: "",
-        cycleEndTime: "",
-        expiredTime: bucket.expiresAt !== void 0 ? new Date(bucket.expiresAt * 1e3).toISOString() : result.expiresAt !== void 0 ? new Date(result.expiresAt * 1e3).toISOString() : ""
-      };
-    });
-    if (packages.length === 0) {
-      packages.push({
-        name: result.planName ?? "ZCode \u514D\u8D39\u989D\u5EA6",
-        unit: "token",
-        remaining: result.remaining,
-        total: result.total,
-        used: Math.max(0, result.total - result.remaining),
-        active: true,
-        cycleStartTime: "",
-        cycleEndTime: "",
-        expiredTime: result.expiresAt !== void 0 ? new Date(result.expiresAt * 1e3).toISOString() : ""
-      });
-    }
-    return {
-      // 仍是**全桶汇总**，与 `packages` 逐项之和一致（`fetchZcodeBalance` 的
-      // `:251-260` 就是这么累加的）。
-      total: result.remaining,
-      // ZCode 不在同一响应里区分「已失效包」，故为 0。
-      expiredTotal: 0,
-      packages
-    };
   }
   async function handleMethod(method, payload, signal) {
     const request2 = payload !== null && typeof payload === "object" ? payload : void 0;
@@ -58449,7 +58787,7 @@ function registerChannelPackEndpoints(ctx, pool, auths, modelAdapters, config = 
               nickname = await fetchQoderUserNickname(credential, product);
               if (nickname !== void 0 && loginResult.access.length > 0) {
                 const updated = withQoderNickname(credential, nickname);
-                await ctx.credentials.set(credentialRef12(refName), JSON.stringify(updated));
+                await ctx.credentials.set(credentialRef13(refName), JSON.stringify(updated));
               }
             }
             await pool.updateAccount(id, {
@@ -58904,7 +59242,7 @@ function registerChannelPackEndpoints(ctx, pool, auths, modelAdapters, config = 
         const accounts = await pool.listAllAccounts();
         const entry = accounts.find((a) => a.id === req.accountId);
         if (!entry) return { ok: true, value: { done: false } };
-        const ref = credentialRef12(entry.credentialRef);
+        const ref = credentialRef13(entry.credentialRef);
         const resolved = await ctx.credentials.resolve(ref);
         if (!resolved) return { ok: true, value: { done: false } };
         if (entry.provider === ZCODE.id) {
@@ -59004,7 +59342,7 @@ function registerChannelPackEndpoints(ctx, pool, auths, modelAdapters, config = 
         if (account2 === void 0) {
           return { ok: false, error: { code: "bad-request", message: "\u8D26\u53F7\u4E0D\u5B58\u5728" } };
         }
-        const resolved = await ctx.credentials.resolve(credentialRef12(account2.credentialRef));
+        const resolved = await ctx.credentials.resolve(credentialRef13(account2.credentialRef));
         if (!resolved) {
           return { ok: false, error: { code: "bad-request", message: "\u51ED\u636E\u672A\u914D\u7F6E" } };
         }
@@ -59098,7 +59436,7 @@ function registerChannelPackEndpoints(ctx, pool, auths, modelAdapters, config = 
         if (account2 === void 0) {
           return { ok: false, error: { code: "bad-request", message: "\u8D26\u53F7\u4E0D\u5B58\u5728" } };
         }
-        const resolved = await ctx.credentials.resolve(credentialRef12(account2.credentialRef));
+        const resolved = await ctx.credentials.resolve(credentialRef13(account2.credentialRef));
         if (!resolved) {
           return { ok: false, error: { code: "bad-request", message: "\u51ED\u636E\u672A\u914D\u7F6E" } };
         }
@@ -59212,246 +59550,27 @@ function registerChannelPackEndpoints(ctx, pool, auths, modelAdapters, config = 
       // 查询某 provider 下全部启用账号的签到状态。
       //
       // 各渠道显式分派协议，未知或退役渠道不调用任何默认端点。
+      // ── 每日签到（积分领取）──
+      // 三个动词的实现按渠道 id 收在 `credits-channels.ts`；这里只负责取账号列表
+      // 与兜底文案。
+      //
+      // ⚠️ **取账号列表的时机与旧实现逐字一致**：status 先判「渠道支不支持这个
+      // 动词」再取列表（未知渠道不发那次 list 调用），claimAll / balances 则先取
+      // 列表（分派前就要拿到账号）。改动这个顺序会改变下游观测到的 list 次数。
       case "credits.status": {
         const req = payload;
-        if (req.provider === "codearts") {
-          const accounts = await pool.listAccounts(req.provider);
-          return {
-            ok: true,
-            value: {
-              accounts: accounts.map((entry) => ({ accountId: entry.id, nickname: entry.nickname, status: null }))
-            }
-          };
-        }
-        if (req.provider === LOBSTERAI.id) {
-          const accounts = await pool.listAccounts(req.provider);
-          return {
-            ok: true,
-            value: {
-              accounts: accounts.map((entry) => ({ accountId: entry.id, nickname: entry.nickname, status: null }))
-            }
-          };
-        }
-        if (req.provider === TRAE.id) {
-          const accounts = await pool.listAccounts(req.provider);
-          return {
-            ok: true,
-            value: {
-              accounts: accounts.map((entry) => ({ accountId: entry.id, nickname: entry.nickname, status: null }))
-            }
-          };
-        }
-        if (req.provider === CLINE.id) {
-          const accounts = await pool.listAccounts(req.provider);
-          return {
-            ok: true,
-            value: {
-              accounts: accounts.map((entry) => ({ accountId: entry.id, nickname: entry.nickname, status: null }))
-            }
-          };
-        }
-        if (req.provider === LOOMY.id) {
-          const accounts = await pool.listAccounts(req.provider);
-          return {
-            ok: true,
-            value: {
-              accounts: accounts.map((entry) => ({ accountId: entry.id, nickname: entry.nickname, status: null }))
-            }
-          };
-        }
-        if (req.provider === MINIMAX.id) {
-          const minimaxStatusAccounts = await pool.listAccounts(req.provider);
-          const value = await collectCreditsStatus(
-            minimaxStatusAccounts,
-            void 0,
-            {
-              resolve: (ref) => ctx.credentials.resolve(ref),
-              fetchStatus: (credential) => fetchMinimaxSigninStatus(credential),
-              warn: (msg) => ctx.logger?.warn?.(msg)
-            }
-          );
-          return { ok: true, value: { accounts: value } };
-        }
-        const product = productById(req.provider);
-        if (product === void 0) {
-          return { ok: false, error: { code: "bad-request", message: `unsupported provider: ${req.provider}` } };
-        }
-        const statusAccounts = await pool.listAccounts(req.provider);
-        const statusValues = await collectCreditsStatus(statusAccounts, product, {
-          resolve: (ref) => ctx.credentials.resolve(ref),
-          warn: (msg) => ctx.logger?.warn?.(msg)
-        });
-        return { ok: true, value: { accounts: statusValues } };
+        const channel = creditsChannels[req.provider];
+        if (channel?.status === void 0) return unsupportedProvider(req.provider);
+        const accounts = await pool.listAccounts(req.provider);
+        return channel.status(accounts);
       }
       // 一键领取：逐账号顺序执行（并发易触发风控），单个账号失败不中断整体。
       case "credits.claimAll": {
         const req = payload;
         const accounts = await pool.listAccounts(req.provider);
-        if (isQoderFamily(req.provider)) {
-          const { product } = requireQoderFamily(req.provider);
-          const value = await collectClaimResults(accounts, void 0, {
-            resolve: (ref) => ctx.credentials.resolve(ref),
-            claim: (credential) => claimQoderDailyCheckin(credential, product),
-            precheckStatus: false,
-            warn: (msg) => ctx.logger?.warn?.(msg)
-          });
-          return { ok: true, value };
-        }
-        if (req.provider === "codearts") {
-          const value = await collectClaimResults(accounts, void 0, {
-            resolve: (ref) => ctx.credentials.resolve(ref),
-            claim: (credential) => claimCodeArtsDailyCheckin(credential),
-            precheckStatus: false,
-            warn: (msg) => ctx.logger?.warn?.(msg)
-          });
-          return { ok: true, value };
-        }
-        if (req.provider === LOBSTERAI.id) {
-          const clientVersion = await lobsterai.resolveClientVersion();
-          const value = await collectClaimResults(accounts, LOBSTERAI, {
-            resolve: (ref) => ctx.credentials.resolve(ref),
-            claim: (credential, product) => claimLobsteraiDailyCheckin(credential, product, clientVersion),
-            // 领取流程内部已做 slot/context 预检，不需要外部再查一次状态。
-            precheckStatus: false,
-            warn: (msg) => ctx.logger?.warn?.(msg)
-          });
-          return { ok: true, value };
-        }
-        if (req.provider === TRAE.id) {
-          const value = await collectClaimResults(accounts, void 0, {
-            resolve: (ref) => ctx.credentials.resolve(ref),
-            // ⚠️ **必须开启状态预检**（`precheckStatus` 默认为 true，不要传 false）。
-            //
-            // TRAE 的 claim 对「今天已签到」是**幂等**的：实测重复领取同样返回
-            // `{code:0, message:"success"}`，与真正领取成功**无法区分**。
-            // 早期照抄 LobsterAI 传了 `precheckStatus: false`（那是「领取流程内部
-            // 已做 slot/context 预检」的理由，TRAE 没有这回事），于是已签到的账号
-            // 被报成「领取成功」（用户报障：显示成功但 +0 积分）。
-            // 判据只能是 status 端点的 `checked_in`。
-            fetchStatus: (credential) => fetchTraeCheckinStatus(credential, TRAE, fetch),
-            claim: (credential, _product, entry) => claimTraeDailyCheckin(
-              credential,
-              TRAE,
-              fetch,
-              pool.traeCheckinDeviceGenerationFor(entry.id),
-              (next) => pool.updateTraeCheckinDeviceGeneration(entry.id, next)
-            ),
-            warn: (msg) => ctx.logger?.warn?.(msg)
-          });
-          return { ok: true, value };
-        }
-        if (req.provider === LOOMY.id) {
-          const values = [];
-          for (const account2 of accounts) {
-            const resolved = await ctx.credentials.resolve(credentialRef12(account2.credentialRef));
-            if (!resolved) {
-              values.push({
-                accountId: account2.id,
-                nickname: account2.nickname,
-                outcome: { kind: "failed", code: -1, message: "\u51ED\u636E\u672A\u914D\u7F6E" }
-              });
-              continue;
-            }
-            let credential;
-            try {
-              credential = JSON.parse(resolved.value);
-            } catch {
-              values.push({
-                accountId: account2.id,
-                nickname: account2.nickname,
-                outcome: { kind: "failed", code: -1, message: "\u51ED\u636E\u89E3\u6790\u5931\u8D25" }
-              });
-              continue;
-            }
-            const outcome = await loomy.claimDailyQuota(credential);
-            values.push({ accountId: account2.id, nickname: account2.nickname, outcome });
-          }
-          return {
-            ok: true,
-            value: {
-              summary: computeClaimSummary(values.map((v) => v.outcome)),
-              results: values
-            }
-          };
-        }
-        if (req.provider === CLINE.id) {
-          return {
-            ok: false,
-            error: {
-              code: "bad-request",
-              message: "Cline \u4E0D\u652F\u6301\u6BCF\u65E5\u7B7E\u5230\uFF08\u5176\u540E\u7AEF\u6CA1\u6709\u7B7E\u5230\u63A5\u53E3\uFF09"
-            }
-          };
-        }
-        if (req.provider === "workbuddy") {
-          return {
-            ok: false,
-            error: {
-              code: "bad-request",
-              message: "WorkBuddy \u56FD\u9645\u7248\u4E0D\u652F\u6301\u6BCF\u65E5\u7B7E\u5230\uFF08\u5176\u540E\u7AEF\u6CA1\u6709\u7B7E\u5230\u63A5\u53E3\uFF09"
-            }
-          };
-        }
-        if (req.provider === RACCOON.id) {
-          return {
-            ok: false,
-            error: {
-              code: "bad-request",
-              message: "Raccoon Work \u4E0D\u652F\u6301\u6BCF\u65E5\u7B7E\u5230\uFF08\u6BCF\u65E5\u79EF\u5206\u7531\u670D\u52A1\u7AEF\u81EA\u52A8\u53D1\u653E\uFF1B\u767B\u5F55\u5956\u52B1\u8BF7\u5728\u300C\u65B0\u624B\u4EFB\u52A1\u300D\u4E2D\u9886\u53D6\uFF09"
-            }
-          };
-        }
-        if (req.provider === MINIMAX.id) {
-          const value = await collectClaimResults(accounts, void 0, {
-            resolve: (ref) => ctx.credentials.resolve(ref),
-            fetchStatus: (credential) => fetchMinimaxSigninStatus(credential),
-            claim: (credential) => claimMinimaxDailyCheckin(credential),
-            warn: (msg) => ctx.logger?.warn?.(msg)
-          });
-          return { ok: true, value };
-        }
-        if (req.provider === ZCODE.id) {
-          const results = [];
-          const outcomes = [];
-          for (const account2 of accounts) {
-            const resolved = await ctx.credentials.resolve(credentialRef12(account2.credentialRef));
-            let accountOutcomes;
-            if (!resolved) {
-              accountOutcomes = [{ kind: "failed", code: -1, message: "\u51ED\u636E\u672A\u914D\u7F6E" }];
-            } else {
-              let credential;
-              try {
-                credential = JSON.parse(resolved.value);
-              } catch {
-                credential = void 0;
-              }
-              if (credential === void 0) {
-                accountOutcomes = [{ kind: "failed", code: -1, message: "\u51ED\u636E\u89E3\u6790\u5931\u8D25" }];
-              } else {
-                accountOutcomes = await zcode.claimDailyFor(credential, async (config2) => {
-                  return await zcode.mintCaptcha(config2);
-                });
-              }
-            }
-            for (const outcome of accountOutcomes) {
-              results.push({ accountId: account2.id, nickname: account2.nickname, outcome });
-              outcomes.push(outcome);
-            }
-          }
-          return {
-            ok: true,
-            value: { results, summary: computeClaimSummary(outcomes) }
-          };
-        }
-        const claimProduct = productById(req.provider);
-        if (claimProduct === void 0) {
-          return { ok: false, error: { code: "bad-request", message: `unsupported provider: ${req.provider}` } };
-        }
-        const claimValue = await collectClaimResults(accounts, claimProduct, {
-          resolve: (ref) => ctx.credentials.resolve(ref),
-          warn: (msg) => ctx.logger?.warn?.(msg)
-        });
-        return { ok: true, value: claimValue };
+        const channel = creditsChannels[req.provider];
+        if (channel?.claim === void 0) return unsupportedProvider(req.provider);
+        return channel.claim(accounts);
       }
       // 积分余额（Credits Balance）：逐账号顺序查询。
       //
@@ -59461,343 +59580,9 @@ function registerChannelPackEndpoints(ctx, pool, auths, modelAdapters, config = 
       case "credits.balances": {
         const req = payload;
         const accounts = await pool.listAccounts(req.provider);
-        if (req.provider === "codearts") {
-          const values = await collectCreditBalances(accounts, void 0, {
-            resolve: (ref) => ctx.credentials.resolve(ref),
-            fetchBalanceDetailed: async (credential) => {
-              const result = await fetchCodeArtsAccountInfoDetailed(credential);
-              if (!result.ok) return { balance: null, error: `\u8D26\u6237\u4FE1\u606F\u67E5\u8BE2\u5931\u8D25\uFF1A${result.message}` };
-              const info = result.info;
-              if (!info.isCreditPackage) {
-                return {
-                  balance: null,
-                  error: info.isTokenPackage ? "Token \u8BA1\u8D39\u8D26\u6237\uFF0C\u65E0\u79EF\u5206\u4F59\u989D" : "\u975E\u79EF\u5206\u8BA1\u8D39\u8D26\u6237\uFF0C\u65E0\u79EF\u5206\u4F59\u989D"
-                };
-              }
-              if (info.credit === void 0) return { balance: null, error: "\u672A\u8FD4\u56DE\u79EF\u5206\u6570\u636E" };
-              return { balance: info.credit };
-            },
-            warn: (msg) => ctx.logger?.warn?.(msg)
-          });
-          return { ok: true, value: { accounts: values } };
-        }
-        if (req.provider === LOBSTERAI.id) {
-          const values = await collectCreditBalances(accounts, LOBSTERAI, {
-            resolve: (ref) => ctx.credentials.resolve(ref),
-            fetchBalance: (credential, product) => fetchLobsteraiCreditBalance(credential, product),
-            warn: (msg) => ctx.logger?.warn?.(msg)
-          });
-          return {
-            ok: true,
-            value: {
-              accounts: values,
-              windowDays: creditExpiringWindowDays()
-            }
-          };
-        }
-        if (isQoderFamily(req.provider)) {
-          const { product } = requireQoderFamily(req.provider);
-          const values = [];
-          for (const account2 of accounts) {
-            const resolved = await ctx.credentials.resolve(credentialRef12(account2.credentialRef));
-            if (!resolved) {
-              values.push({
-                accountId: account2.id,
-                nickname: account2.nickname,
-                balance: null,
-                error: "\u51ED\u636E\u672A\u914D\u7F6E"
-              });
-              continue;
-            }
-            let credential;
-            try {
-              credential = JSON.parse(resolved.value);
-            } catch {
-              values.push({
-                accountId: account2.id,
-                nickname: account2.nickname,
-                balance: null,
-                error: "\u51ED\u636E\u89E3\u6790\u5931\u8D25"
-              });
-              continue;
-            }
-            const balance = await fetchQoderCreditBalance(credential, product);
-            values.push({
-              accountId: account2.id,
-              nickname: account2.nickname,
-              balance,
-              // 查不到时带上原因，卡片显示原因而非 0（与其它 provider 同约定）。
-              ...balance === null ? { error: "\u79EF\u5206\u67E5\u8BE2\u5931\u8D25\uFF08\u51ED\u636E\u5931\u6548\u6216\u54CD\u5E94\u5F02\u5E38\uFF09" } : {}
-            });
-          }
-          return { ok: true, value: { accounts: values } };
-        }
-        if (req.provider === OPENCODE.id) {
-          const values = accounts.map((account2) => {
-            const now = Date.now();
-            const limits = Object.entries(account2.modelRateLimits ?? {});
-            const limitedUntil = limits.reduce((max, [, resetAt]) => Math.max(max, Number(resetAt) || 0), 0);
-            const limitedModels = limits.filter(([, resetAt]) => Number(resetAt) > now).length;
-            const available2 = account2.enabled && limitedUntil <= now ? 1 : 0;
-            const balance = {
-              total: available2,
-              packages: [{
-                name: limitedModels > 0 ? `${limitedModels} \u4E2A\u6A21\u578B\u9650\u989D\u4E2D` : "\u53EF\u7528\u901A\u9053",
-                unit: "\u901A\u9053",
-                remaining: available2,
-                total: available2,
-                used: 0,
-                active: true,
-                cycleStartTime: "",
-                cycleEndTime: "",
-                expiredTime: ""
-              }],
-              expiredTotal: account2.enabled && limitedUntil > now ? 1 : 0
-            };
-            return {
-              accountId: account2.id,
-              nickname: account2.nickname,
-              balance,
-              ...!account2.enabled ? { error: "\u5DF2\u505C\u7528" } : limitedUntil > now ? { error: `\u9650\u989D\u4E2D\uFF0C${new Date(limitedUntil).toLocaleString("zh-CN")} \u6062\u590D` } : {}
-            };
-          });
-          return { ok: true, value: { accounts: values } };
-        }
-        if (req.provider === TRAE.id) {
-          const values = await collectCreditBalances(accounts, TRAE, {
-            resolve: (ref) => ctx.credentials.resolve(ref),
-            fetchBalance: (credential, product) => fetchTraeCreditBalance(credential, product),
-            warn: (msg) => ctx.logger?.warn?.(msg)
-          });
-          return {
-            ok: true,
-            value: {
-              accounts: values,
-              windowDays: creditExpiringWindowDays()
-            }
-          };
-        }
-        if (req.provider === MINIMAX.id) {
-          const values = await collectCreditBalances(accounts, void 0, {
-            resolve: (ref) => ctx.credentials.resolve(ref),
-            fetchBalance: (credential) => fetchMinimaxCreditBalance(credential),
-            warn: (msg) => ctx.logger?.warn?.(msg)
-          });
-          return { ok: true, value: { accounts: values } };
-        }
-        if (req.provider === GEMINI.id) {
-          const values = await collectCreditBalances(accounts, GEMINI, {
-            resolve: (ref) => ctx.credentials.resolve(ref),
-            fetchBalanceDetailed: async (credential) => {
-              const { balance, error, tier } = await fetchGeminiCreditBalance(credential, GEMINI, { force: req.force === true });
-              const extra = tier === void 0 ? void 0 : { accountTier: { label: tier.label, title: `${tier.name}\uFF08${tier.id}\uFF09` } };
-              return {
-                balance,
-                ...error === void 0 ? {} : { error },
-                ...extra === void 0 ? {} : { extra }
-              };
-            },
-            warn: (msg) => ctx.logger?.warn?.(msg)
-          });
-          return { ok: true, value: { accounts: values } };
-        }
-        if (req.provider === CLINE.id) {
-          const values = [];
-          for (const account2 of accounts) {
-            const resolved = await ctx.credentials.resolve(credentialRef12(account2.credentialRef));
-            if (!resolved) {
-              values.push({
-                accountId: account2.id,
-                nickname: account2.nickname,
-                balance: null,
-                error: "\u51ED\u636E\u672A\u914D\u7F6E"
-              });
-              continue;
-            }
-            let credential;
-            try {
-              credential = JSON.parse(resolved.value);
-            } catch {
-              values.push({
-                accountId: account2.id,
-                nickname: account2.nickname,
-                balance: null,
-                error: "\u51ED\u636E\u89E3\u6790\u5931\u8D25"
-              });
-              continue;
-            }
-            const result = await fetchClineCreditBalance(credential, CLINE);
-            values.push({
-              accountId: account2.id,
-              nickname: account2.nickname,
-              balance: result.balance,
-              // 查不到时带上**具体原因**（含 HTTP 状态码与错误体摘要），
-              // 而不是笼统一句「查询失败」—— 卡片显示原因而非 0
-              //（0 是「已用光」的语义，会误导用户）。
-              ...result.balance === null ? { error: result.error ?? "\u79EF\u5206\u67E5\u8BE2\u5931\u8D25\uFF08\u51ED\u636E\u5931\u6548\u6216\u54CD\u5E94\u5F02\u5E38\uFF09" } : {}
-            });
-          }
-          return { ok: true, value: { accounts: values } };
-        }
-        if (req.provider === LOOMY.id) {
-          const values = [];
-          for (const account2 of accounts) {
-            const resolved = await ctx.credentials.resolve(credentialRef12(account2.credentialRef));
-            if (!resolved) {
-              values.push({
-                accountId: account2.id,
-                nickname: account2.nickname,
-                balance: null,
-                error: "\u51ED\u636E\u672A\u914D\u7F6E"
-              });
-              continue;
-            }
-            let credential;
-            try {
-              credential = JSON.parse(resolved.value);
-            } catch {
-              values.push({
-                accountId: account2.id,
-                nickname: account2.nickname,
-                balance: null,
-                error: "\u51ED\u636E\u89E3\u6790\u5931\u8D25"
-              });
-              continue;
-            }
-            const balance = await loomy.fetchCreditBalance(credential);
-            values.push({
-              accountId: account2.id,
-              nickname: account2.nickname,
-              balance,
-              // 查不到时带原因（不显示成 0，0 是「已用光」的语义）。
-              ...balance === null ? { error: "\u79EF\u5206\u67E5\u8BE2\u5931\u8D25\uFF08\u51ED\u636E\u5931\u6548\u6216\u54CD\u5E94\u5F02\u5E38\uFF09" } : {}
-            });
-          }
-          return { ok: true, value: { accounts: values } };
-        }
-        if (req.provider === RACCOON.id) {
-          const values = [];
-          for (const account2 of accounts) {
-            const resolved = await ctx.credentials.resolve(credentialRef12(account2.credentialRef));
-            if (!resolved) {
-              values.push({
-                accountId: account2.id,
-                nickname: account2.nickname,
-                balance: null,
-                error: "\u51ED\u636E\u672A\u914D\u7F6E"
-              });
-              continue;
-            }
-            let credential;
-            try {
-              credential = JSON.parse(resolved.value);
-            } catch {
-              values.push({
-                accountId: account2.id,
-                nickname: account2.nickname,
-                balance: null,
-                error: "\u51ED\u636E\u89E3\u6790\u5931\u8D25"
-              });
-              continue;
-            }
-            const balance = await raccoon.fetchCreditBalance(credential);
-            values.push({
-              accountId: account2.id,
-              nickname: account2.nickname,
-              balance,
-              // ⚠️ 查不到时带原因（**不显示成 0** —— 0 是「已用光」的语义，
-              // 把「查询失败」显示成 0 会让用户以为自己积分没了）。
-              ...balance === null ? { error: "\u79EF\u5206\u67E5\u8BE2\u5931\u8D25\uFF08\u51ED\u636E\u5931\u6548\u6216\u54CD\u5E94\u5F02\u5E38\uFF09" } : {}
-            });
-          }
-          return { ok: true, value: { accounts: values } };
-        }
-        if (req.provider === ZCODE.id) {
-          const values = [];
-          for (const account2 of accounts) {
-            const resolved = await ctx.credentials.resolve(credentialRef12(account2.credentialRef));
-            if (!resolved) {
-              values.push({
-                accountId: account2.id,
-                nickname: account2.nickname,
-                balance: null,
-                error: "\u51ED\u636E\u672A\u914D\u7F6E"
-              });
-              continue;
-            }
-            let credential;
-            try {
-              credential = JSON.parse(resolved.value);
-            } catch {
-              values.push({
-                accountId: account2.id,
-                nickname: account2.nickname,
-                balance: null,
-                error: "\u51ED\u636E\u89E3\u6790\u5931\u8D25"
-              });
-              continue;
-            }
-            const result = await zcode.fetchBalanceFor(credential);
-            if (result === void 0) {
-              values.push({
-                accountId: account2.id,
-                nickname: account2.nickname,
-                balance: null,
-                error: "\u989D\u5EA6\u67E5\u8BE2\u5931\u8D25\uFF08\u51ED\u636E\u5931\u6548\u6216\u7F51\u7EDC\u5F02\u5E38\uFF09"
-              });
-              continue;
-            }
-            if (result.enterprise === true) {
-              values.push({
-                accountId: account2.id,
-                nickname: account2.nickname,
-                balance: null,
-                error: "\u4F01\u4E1A\u7248\u8D26\u53F7\u4E0D\u4E0B\u53D1\u989D\u5EA6\u6570\u5B57\uFF0C\u8BF7\u5728 ZCode \u5185\u67E5\u770B"
-              });
-              continue;
-            }
-            values.push({
-              accountId: account2.id,
-              nickname: account2.nickname,
-              /**
-               * ⚠ `CreditBalance` 的形状是 `{total, packages[], expiredTotal?}`
-               * 这类**积分包**结构，而 ZCode 是「按日的 token 额度池」。
-               * 两者结构不同，故**逐桶**如实映射 —— 上游一个 resource bucket
-               * 就是一个包，包名用 `show_name`（实测是模型名，如
-               * `GLM-5.3-Flash`）。
-               *
-               * ## ⚠⚠ 这里曾经只映射 `buckets[0]`（真实缺陷）
-               *
-               * 旧实现只取 `result.planName`（= `buckets[0]?.showName`）拼**一个**
-               * 包 —— 多桶账号的其余额度被**静默丢掉**，UI 上看起来只有
-               * 一个模型的额度。而 `result.remaining` / `total` 却是**全桶汇总**，
-               * 于是那一个包的数字比它自己的 `totalUnits` 还大，自相矛盾。
-               *
-               * 实测（本机账号）上游只回一个桶（`GLM-5.3-Flash`），
-               * 但**不能按「只有一个桶」来写** —— 那正是把缺陷固化成契约；
-               * 且用户要看的恰恰是「GLM-5.3 与 GLM-5.3-Flash 各自剩多少」，
-               * 前端需要按模型逐行渲染、缺桶的模型显示占位。
-               */
-              balance: buildZcodeBalance(result)
-            });
-          }
-          return { ok: true, value: { accounts: values } };
-        }
-        const balanceProduct = productById(req.provider);
-        if (balanceProduct === void 0) {
-          return { ok: false, error: { code: "bad-request", message: `unsupported provider: ${req.provider}` } };
-        }
-        const balanceValues = await collectCreditBalances(accounts, balanceProduct, {
-          resolve: (ref) => ctx.credentials.resolve(ref),
-          warn: (msg) => ctx.logger?.warn?.(msg)
-        });
-        return {
-          ok: true,
-          value: {
-            accounts: balanceValues,
-            windowDays: buddyExpiringWindowDays()
-          }
-        };
+        const channel = creditsChannels[req.provider];
+        if (channel?.balances === void 0) return unsupportedProvider(req.provider);
+        return channel.balances(accounts, req);
       }
       // ── Cline「订阅额度」：官方额度窗口 + 请求记录 ──
       //
@@ -59818,7 +59603,7 @@ function registerChannelPackEndpoints(ctx, pool, auths, modelAdapters, config = 
         const accounts = await pool.listAccounts(req.provider);
         const values = [];
         for (const account2 of accounts) {
-          const resolved = await ctx.credentials.resolve(credentialRef12(account2.credentialRef));
+          const resolved = await ctx.credentials.resolve(credentialRef13(account2.credentialRef));
           if (!resolved) {
             values.push({
               accountId: account2.id,
@@ -60579,7 +60364,7 @@ var stopped = /* @__PURE__ */ new WeakSet();
 
 // vendor/channel-pack/src/raccoon-auth.ts
 import { Service as Service9 } from "@deepseek-ai/cordis";
-import { credentialRef as credentialRef13 } from "@deepseek-ai/dsh-credentials";
+import { credentialRef as credentialRef14 } from "@deepseek-ai/dsh-credentials";
 
 // vendor/channel-pack/src/raccoon-credits.ts
 var RACCOON_LOGIN_REWARD_POINTS = 3e3;
@@ -61780,7 +61565,7 @@ var RaccoonAuth = class extends Service9 {
         ...info.phone !== void 0 && credential.phone === void 0 ? { phone: info.phone } : {}
       };
     }
-    const ref = credentialRef13(refName);
+    const ref = credentialRef14(refName);
     await this.ctx.credentials.set(ref, JSON.stringify(enriched));
     this.lastRefreshError = void 0;
     try {
@@ -61813,7 +61598,7 @@ var RaccoonAuth = class extends Service9 {
   /** 解析默认 ref 的凭据。 */
   async resolveDefaultCredential() {
     try {
-      const resolved = await this.ctx.credentials.resolve(credentialRef13(this.credentialRefName));
+      const resolved = await this.ctx.credentials.resolve(credentialRef14(this.credentialRefName));
       return resolved === void 0 ? void 0 : parseRaccoonCredential(resolved.value);
     } catch {
       return void 0;
@@ -61832,7 +61617,7 @@ var RaccoonAuth = class extends Service9 {
     }
     try {
       const next = await refreshRaccoonCredential(this.product, credential, this.fetchImpl);
-      await this.ctx.credentials.set(credentialRef13(this.credentialRefName), JSON.stringify(next));
+      await this.ctx.credentials.set(credentialRef14(this.credentialRefName), JSON.stringify(next));
       this.lastRefreshError = void 0;
     } catch (error) {
       const message2 = error instanceof Error ? error.message : String(error);
@@ -61861,7 +61646,7 @@ var RaccoonAuth = class extends Service9 {
    *   逐个解析凭据比对，代价高且需要账号池具备凭据访问能力）。
    */
   async refreshAccountCredential(refName, pool, accountId) {
-    const ref = credentialRef13(refName);
+    const ref = credentialRef14(refName);
     const resolved = await this.ctx.credentials.resolve(ref);
     if (!resolved) throw new Error("\u51ED\u636E\u672A\u914D\u7F6E");
     const credential = parseRaccoonCredential(resolved.value);
@@ -61907,7 +61692,7 @@ var RaccoonAuth = class extends Service9 {
     const accounts = await pool.listAccounts(this.product.id);
     for (const entry of accounts) {
       if (!entry.refreshable) continue;
-      const resolved = await this.ctx.credentials.resolve(credentialRef13(entry.credentialRef));
+      const resolved = await this.ctx.credentials.resolve(credentialRef14(entry.credentialRef));
       if (!resolved) continue;
       const credential = parseRaccoonCredential(resolved.value);
       if (credential === void 0) continue;
@@ -61942,7 +61727,7 @@ var RaccoonAuth = class extends Service9 {
   }
   /** 登出：清除默认单凭据。 */
   async logout() {
-    await this.ctx.credentials.unset(credentialRef13(this.credentialRefName));
+    await this.ctx.credentials.unset(credentialRef14(this.credentialRefName));
     this.lastRefreshError = void 0;
   }
   /**
@@ -62036,7 +61821,7 @@ var RaccoonAuth = class extends Service9 {
     }
     for (const entry of entries) {
       try {
-        const ref = credentialRef13(entry.credentialRef);
+        const ref = credentialRef14(entry.credentialRef);
         const resolved = await this.ctx.credentials.resolve(ref);
         if (!resolved) continue;
         const credential = parseRaccoonCredential(resolved.value);
@@ -62402,7 +62187,7 @@ function registerRaccoonLlm(ctx, options) {
 }
 
 // vendor/channel-pack/src/channels/raccoon.ts
-import { credentialRef as credentialRef14 } from "@deepseek-ai/dsh-credentials";
+import { credentialRef as credentialRef15 } from "@deepseek-ai/dsh-credentials";
 function createRaccoonChannel(deps) {
   const { pool } = deps;
   return {
@@ -62412,7 +62197,7 @@ function createRaccoonChannel(deps) {
     registerLlm: (ctx, host, auth) => {
       const raccoon = auth;
       return registerRaccoonLlm(ctx, {
-        credentialRef: credentialRef14(RACCOON.defaultCredentialRef),
+        credentialRef: credentialRef15(RACCOON.defaultCredentialRef),
         resolveCredential: async (modelId) => {
           const available2 = await pool.getAvailableAccount(RACCOON.id, modelId ?? "");
           if (available2) {
@@ -62420,7 +62205,7 @@ function createRaccoonChannel(deps) {
             return available2.credential;
           }
           host.throwIfAllAccountsRateLimited(RACCOON, modelId);
-          const resolved = await ctx.credentials.resolve(credentialRef14(RACCOON.defaultCredentialRef));
+          const resolved = await ctx.credentials.resolve(credentialRef15(RACCOON.defaultCredentialRef));
           if (!resolved) return void 0;
           try {
             return JSON.parse(resolved.value);
@@ -62433,7 +62218,7 @@ function createRaccoonChannel(deps) {
           if (accountId !== void 0 && entry === void 0) throw new Error("raccoon: account no longer exists");
           if (entry) await raccoon.refreshAccountCredential(entry.credentialRef, pool, entry.id);
           else await raccoon.refresh();
-          const resolved = await ctx.credentials.resolve(credentialRef14(entry?.credentialRef ?? RACCOON.defaultCredentialRef));
+          const resolved = await ctx.credentials.resolve(credentialRef15(entry?.credentialRef ?? RACCOON.defaultCredentialRef));
           if (!resolved) throw new Error("raccoon: credential no longer exists");
           return JSON.parse(resolved.value);
         },
@@ -65073,7 +64858,7 @@ var TraeFailureLedger = class {
 
 // vendor/channel-pack/src/minimax-auth.ts
 import { Service as Service10 } from "@deepseek-ai/cordis";
-import { credentialRef as credentialRef15 } from "@deepseek-ai/dsh-credentials";
+import { credentialRef as credentialRef16 } from "@deepseek-ai/dsh-credentials";
 
 // vendor/channel-pack/src/minimax-oauth.ts
 import { createHash as createHash8, randomBytes as randomBytes12 } from "node:crypto";
@@ -65345,13 +65130,13 @@ var MinimaxAuth = class extends Service10 {
       ...credential,
       ...options.nickname === void 0 ? {} : { nickname: options.nickname }
     };
-    await this.ctx.credentials.set(credentialRef15(options.refName), JSON.stringify(payload));
+    await this.ctx.credentials.set(credentialRef16(options.refName), JSON.stringify(payload));
     this.lastRefreshError = void 0;
     return { ...credential.account_id === void 0 ? {} : { accountId: credential.account_id } };
   }
   /** 解析默认单凭据。 */
   async resolveDefaultCredential() {
-    const resolved = await this.ctx.credentials.resolve(credentialRef15(this.credentialRefName));
+    const resolved = await this.ctx.credentials.resolve(credentialRef16(this.credentialRefName));
     if (!resolved) return void 0;
     return parseMinimaxCredential(resolved.value);
   }
@@ -65370,7 +65155,7 @@ var MinimaxAuth = class extends Service10 {
         this.fetchImpl,
         this.product
       );
-      await this.ctx.credentials.set(credentialRef15(this.credentialRefName), JSON.stringify(next));
+      await this.ctx.credentials.set(credentialRef16(this.credentialRefName), JSON.stringify(next));
       this.lastRefreshError = void 0;
     } catch (error) {
       const message2 = error instanceof Error ? error.message : String(error);
@@ -65386,7 +65171,7 @@ var MinimaxAuth = class extends Service10 {
    * 也把池值对账（见 `refreshAll` 的注释）。
    */
   async refreshAccountCredential(refName, pool, accountId) {
-    const ref = credentialRef15(refName);
+    const ref = credentialRef16(refName);
     const resolved = await this.ctx.credentials.resolve(ref);
     if (!resolved) throw new Error("\u51ED\u636E\u672A\u914D\u7F6E");
     const credential = parseMinimaxCredential(resolved.value);
@@ -65422,7 +65207,7 @@ var MinimaxAuth = class extends Service10 {
     for (const entry of accounts) {
       if (!entry.refreshable) continue;
       try {
-        const ref = credentialRef15(entry.credentialRef);
+        const ref = credentialRef16(entry.credentialRef);
         const resolved = await this.ctx.credentials.resolve(ref);
         if (!resolved) {
           await pool.updateAccount(entry.id, { refreshable: false });
@@ -66152,7 +65937,7 @@ function registerMinimaxLlm(ctx, options) {
 
 // vendor/channel-pack/src/gemini-auth.ts
 import { Service as Service11 } from "@deepseek-ai/cordis";
-import { credentialRef as credentialRef16 } from "@deepseek-ai/dsh-credentials";
+import { credentialRef as credentialRef17 } from "@deepseek-ai/dsh-credentials";
 
 // vendor/channel-pack/src/channel-fetch.ts
 var import_undici2 = __toESM(require_undici(), 1);
@@ -66667,7 +66452,7 @@ var GeminiAuth = class extends Service11 {
     return queue;
   }
   async readCredential(refName) {
-    const resolved = await this.ctx.credentials.resolve(credentialRef16(refName));
+    const resolved = await this.ctx.credentials.resolve(credentialRef17(refName));
     if (!resolved) return void 0;
     return parseGeminiCredential(resolved.value);
   }
@@ -66707,7 +66492,7 @@ var GeminiAuth = class extends Service11 {
    * 展示名走 `geminiAccountLabel`（邮箱优先，回退 `sub`）。
    */
   async persistLogin(credential, options) {
-    await this.ctx.credentials.set(credentialRef16(options.refName), JSON.stringify(credential));
+    await this.ctx.credentials.set(credentialRef17(options.refName), JSON.stringify(credential));
     return credential.sub === void 0 ? {} : { accountId: credential.sub };
   }
   /** 解析默认单凭据。 */
@@ -66724,7 +66509,7 @@ var GeminiAuth = class extends Service11 {
       throw new GeminiRefreshTokenExpiredError("\u51ED\u636E\u7F3A\u5C11 refresh_token\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55");
     }
     const next = await this.refreshCredential(credential);
-    await this.ctx.credentials.set(credentialRef16(this.credentialRefName), JSON.stringify(next));
+    await this.ctx.credentials.set(credentialRef17(this.credentialRefName), JSON.stringify(next));
   }
   /**
    * 续期**指定 ref**（RPC `account.refresh` / 定时器）。
@@ -66740,7 +66525,7 @@ var GeminiAuth = class extends Service11 {
       if (!isGeminiRefreshable(credential)) {
         throw new GeminiRefreshTokenExpiredError("\u51ED\u636E\u7F3A\u5C11 refresh_token\uFF0C\u8BF7\u91CD\u65B0\u767B\u5F55");
       }
-      const ref = credentialRef16(refName);
+      const ref = credentialRef17(refName);
       if (pool === void 0) {
         const next = await this.refreshCredential(credential);
         await this.ctx.credentials.set(ref, JSON.stringify(next));
@@ -66774,7 +66559,7 @@ var GeminiAuth = class extends Service11 {
   async refreshAll(pool) {
     const accounts = await pool.listAccounts(this.product.id);
     for (const entry of accounts) {
-      const ref = credentialRef16(entry.credentialRef);
+      const ref = credentialRef17(entry.credentialRef);
       let credential;
       try {
         const resolved = await this.ctx.credentials.resolve(ref);
@@ -66876,7 +66661,7 @@ var GeminiAuth = class extends Service11 {
     }
     for (const entry of entries) {
       try {
-        const ref = credentialRef16(entry.credentialRef);
+        const ref = credentialRef17(entry.credentialRef);
         const resolved = await this.ctx.credentials.resolve(ref);
         if (!resolved) continue;
         let credential = parseGeminiCredential(resolved.value);
@@ -67964,7 +67749,7 @@ function apply(ctx, config = {}) {
     ctx.logger.warn(`[channel-pack] \u6E05\u7406 WorkBuddy \u65E7\u7248\u8D26\u53F7\u5931\u8D25\uFF1A${String(error)}`);
   });
   const codearts = registerCodeArtsLlm(ctx, {
-    credentialRef: credentialRef17(CODEARTS_CREDENTIAL_REF),
+    credentialRef: credentialRef18(CODEARTS_CREDENTIAL_REF),
     resolveCredential: async () => {
       const available2 = await pool.getAvailableAccount("codearts", "");
       return available2?.credential;
@@ -67980,7 +67765,7 @@ function apply(ctx, config = {}) {
     accountPool: pool
   });
   const resolveBuddyCredentialByRef = async (refName) => {
-    const resolved = await ctx.credentials.resolve(credentialRef17(refName));
+    const resolved = await ctx.credentials.resolve(credentialRef18(refName));
     if (!resolved) return void 0;
     try {
       return JSON.parse(resolved.value);
@@ -68036,7 +67821,7 @@ function apply(ctx, config = {}) {
   };
   const buddy = new BuddyAuth(ctx);
   const buddyAdapter = registerBuddyLlm(ctx, {
-    credentialRef: credentialRef17(BUDDY_CREDENTIAL_REF),
+    credentialRef: credentialRef18(BUDDY_CREDENTIAL_REF),
     resolveCredential: async (modelId) => {
       const picked = await pickBuddyCredential({
         product: CODEBUDDY,
@@ -68054,7 +67839,7 @@ function apply(ctx, config = {}) {
         return available2.credential;
       }
       throwIfAllAccountsRateLimited(CODEBUDDY, modelId);
-      const resolved = await ctx.credentials.resolve(credentialRef17(BUDDY_CREDENTIAL_REF));
+      const resolved = await ctx.credentials.resolve(credentialRef18(BUDDY_CREDENTIAL_REF));
       if (!resolved) return void 0;
       try {
         return JSON.parse(resolved.value);
@@ -68075,7 +67860,7 @@ function apply(ctx, config = {}) {
   });
   const workbuddy = new BuddyAuth(ctx, { product: WORKBUDDY });
   const workbuddyAdapter = registerBuddyLlm(ctx, {
-    credentialRef: credentialRef17(WORKBUDDY.defaultCredentialRef),
+    credentialRef: credentialRef18(WORKBUDDY.defaultCredentialRef),
     resolveCredential: async (modelId) => {
       const picked = await pickBuddyCredential({
         product: WORKBUDDY,
@@ -68094,7 +67879,7 @@ function apply(ctx, config = {}) {
         return available2.credential;
       }
       throwIfAllAccountsRateLimited(WORKBUDDY, modelId);
-      const resolved = await ctx.credentials.resolve(credentialRef17(WORKBUDDY.defaultCredentialRef));
+      const resolved = await ctx.credentials.resolve(credentialRef18(WORKBUDDY.defaultCredentialRef));
       if (!resolved) return void 0;
       try {
         return JSON.parse(resolved.value);
@@ -68113,14 +67898,14 @@ function apply(ctx, config = {}) {
   });
   const lobsterai = new LobsteraiAuth(ctx);
   const lobsteraiAdapter = registerLobsteraiLlm(ctx, {
-    credentialRef: credentialRef17(LOBSTERAI.defaultCredentialRef),
+    credentialRef: credentialRef18(LOBSTERAI.defaultCredentialRef),
     resolveCredential: async (modelId) => {
       const available2 = await pool.getAvailableAccount(LOBSTERAI.id, modelId ?? "");
       if (available2) {
         reportLedgerAccount(LOBSTERAI.id, available2.entry.id);
         return available2.credential;
       }
-      const resolved = await ctx.credentials.resolve(credentialRef17(LOBSTERAI.defaultCredentialRef));
+      const resolved = await ctx.credentials.resolve(credentialRef18(LOBSTERAI.defaultCredentialRef));
       if (!resolved) return void 0;
       try {
         return JSON.parse(resolved.value);
@@ -68145,7 +67930,7 @@ function apply(ctx, config = {}) {
   const qoder = new QoderAuth(ctx);
   const activeQoderAccountId = /* @__PURE__ */ new Map();
   const qoderAdapter = registerQoderLlm(ctx, {
-    credentialRef: credentialRef17(QODER.defaultCredentialRef),
+    credentialRef: credentialRef18(QODER.defaultCredentialRef),
     resolveCredential: async (modelId) => {
       const available2 = await pool.getAvailableAccount(QODER.id, modelId ?? "");
       if (available2) {
@@ -68155,7 +67940,7 @@ function apply(ctx, config = {}) {
       }
       activeQoderAccountId.set(QODER.id, void 0);
       throwIfAllAccountsRateLimited(QODER, modelId);
-      const resolved = await ctx.credentials.resolve(credentialRef17(QODER.defaultCredentialRef));
+      const resolved = await ctx.credentials.resolve(credentialRef18(QODER.defaultCredentialRef));
       if (!resolved) return void 0;
       try {
         return JSON.parse(resolved.value);
@@ -68181,7 +67966,7 @@ function apply(ctx, config = {}) {
   });
   const qoderCn = new QoderAuth(ctx, { product: QODER_CN });
   const qoderCnAdapter = registerQoderLlm(ctx, {
-    credentialRef: credentialRef17(QODER_CN.defaultCredentialRef),
+    credentialRef: credentialRef18(QODER_CN.defaultCredentialRef),
     resolveCredential: async (modelId) => {
       const available2 = await pool.getAvailableAccount(QODER_CN.id, modelId ?? "");
       if (available2) {
@@ -68191,7 +67976,7 @@ function apply(ctx, config = {}) {
       }
       activeQoderAccountId.set(QODER_CN.id, void 0);
       throwIfAllAccountsRateLimited(QODER_CN, modelId);
-      const resolved = await ctx.credentials.resolve(credentialRef17(QODER_CN.defaultCredentialRef));
+      const resolved = await ctx.credentials.resolve(credentialRef18(QODER_CN.defaultCredentialRef));
       if (!resolved) return void 0;
       try {
         return JSON.parse(resolved.value);
@@ -68217,7 +68002,7 @@ function apply(ctx, config = {}) {
   });
   const trae = new TraeAuth(ctx);
   const resolveTraeCredentialByRef = async (refName) => {
-    const resolved = await ctx.credentials.resolve(credentialRef17(refName));
+    const resolved = await ctx.credentials.resolve(credentialRef18(refName));
     if (!resolved) return void 0;
     try {
       return JSON.parse(resolved.value);
@@ -68235,11 +68020,11 @@ function apply(ctx, config = {}) {
     updateModelRateLimit: (accountId, modelId, resetAtMs) => pool.updateModelRateLimit(accountId, modelId, resetAtMs)
   });
   const traeAdapter = registerTraeLlm(ctx, {
-    credentialRef: credentialRef17(TRAE.defaultCredentialRef),
+    credentialRef: credentialRef18(TRAE.defaultCredentialRef),
     resolveCredential: async (modelId) => {
       const picked = await pickTraeSelection(modelId ?? "");
       if (picked !== void 0) return picked.credential;
-      const resolved = await ctx.credentials.resolve(credentialRef17(TRAE.defaultCredentialRef));
+      const resolved = await ctx.credentials.resolve(credentialRef18(TRAE.defaultCredentialRef));
       if (!resolved) return void 0;
       try {
         return JSON.parse(resolved.value);
@@ -68288,14 +68073,14 @@ function apply(ctx, config = {}) {
   let activeClineAccountId = "";
   const clineAdapter = registerClineLlm(ctx, {
     fetchImpl: network.fetch,
-    credentialRef: credentialRef17(CLINE.defaultCredentialRef),
+    credentialRef: credentialRef18(CLINE.defaultCredentialRef),
     resolveCredential: async (modelId) => {
       const available2 = await pool.getAvailableAccount(CLINE.id, modelId ?? "");
       activeClineAccountId = available2?.entry.id ?? "";
       if (activeClineAccountId.length > 0) reportLedgerAccount(CLINE.id, activeClineAccountId);
       if (available2) return available2.credential;
       throwIfAllAccountsRateLimited(CLINE, modelId);
-      const resolved = await ctx.credentials.resolve(credentialRef17(CLINE.defaultCredentialRef));
+      const resolved = await ctx.credentials.resolve(credentialRef18(CLINE.defaultCredentialRef));
       if (!resolved) return void 0;
       try {
         return JSON.parse(resolved.value);
@@ -68321,7 +68106,7 @@ function apply(ctx, config = {}) {
   });
   const loomy = new LoomyAuth(ctx);
   const resolveLoomyCredentialByRef = async (refName) => {
-    const resolved = await ctx.credentials.resolve(credentialRef17(refName));
+    const resolved = await ctx.credentials.resolve(credentialRef18(refName));
     if (!resolved) return void 0;
     try {
       return JSON.parse(resolved.value);
@@ -68334,7 +68119,7 @@ function apply(ctx, config = {}) {
     resolveCredential: resolveLoomyCredentialByRef
   });
   const loomyAdapter = registerLoomyLlm(ctx, {
-    credentialRef: credentialRef17(LOOMY.defaultCredentialRef),
+    credentialRef: credentialRef18(LOOMY.defaultCredentialRef),
     /**
      * 解析本轮该用哪个账号的凭据。
      *
@@ -68372,7 +68157,7 @@ function apply(ctx, config = {}) {
         }
       }
       throwIfAllAccountsRateLimited(LOOMY, modelId);
-      const resolved = await ctx.credentials.resolve(credentialRef17(LOOMY.defaultCredentialRef));
+      const resolved = await ctx.credentials.resolve(credentialRef18(LOOMY.defaultCredentialRef));
       if (!resolved) return void 0;
       try {
         return JSON.parse(resolved.value);
@@ -68385,7 +68170,7 @@ function apply(ctx, config = {}) {
       if (accountId !== void 0 && entry === void 0) throw new Error("loomy: account no longer exists");
       if (entry) await loomy.refreshAccountCredential(entry.credentialRef, pool, entry.id);
       else await loomy.refresh();
-      const resolved = await ctx.credentials.resolve(credentialRef17(entry?.credentialRef ?? LOOMY.defaultCredentialRef));
+      const resolved = await ctx.credentials.resolve(credentialRef18(entry?.credentialRef ?? LOOMY.defaultCredentialRef));
       if (!resolved) throw new Error("loomy: credential no longer exists");
       return JSON.parse(resolved.value);
     },
@@ -68404,7 +68189,7 @@ function apply(ctx, config = {}) {
     // 失败时返回空数组，由适配器回退兜底表。
     fetchRemoteModels: async () => {
       const available2 = await pool.getAvailableAccount(LOOMY.id, "");
-      const resolved = available2 !== null && available2 !== void 0 ? { value: JSON.stringify(available2.credential) } : await ctx.credentials.resolve(credentialRef17(LOOMY.defaultCredentialRef));
+      const resolved = available2 !== null && available2 !== void 0 ? { value: JSON.stringify(available2.credential) } : await ctx.credentials.resolve(credentialRef18(LOOMY.defaultCredentialRef));
       if (resolved === void 0) return [];
       let credential;
       try {
@@ -68435,14 +68220,14 @@ function apply(ctx, config = {}) {
   const raccoonAdapter = raccoonRuntime.adapter;
   const minimax = new MinimaxAuth(ctx);
   const minimaxAdapter = registerMinimaxLlm(ctx, {
-    credentialRef: credentialRef17(MINIMAX.defaultCredentialRef),
+    credentialRef: credentialRef18(MINIMAX.defaultCredentialRef),
     resolveCredential: async (modelId) => {
       const available2 = await pool.getAvailableAccount(MINIMAX.id, modelId ?? "");
       if (available2) {
         reportLedgerAccount(MINIMAX.id, available2.entry.id);
         return available2.credential;
       }
-      const resolved = await ctx.credentials.resolve(credentialRef17(MINIMAX.defaultCredentialRef));
+      const resolved = await ctx.credentials.resolve(credentialRef18(MINIMAX.defaultCredentialRef));
       if (!resolved) return void 0;
       try {
         return JSON.parse(resolved.value);
@@ -68485,14 +68270,14 @@ function apply(ctx, config = {}) {
   const geminiAdapter = registerGeminiLlm(ctx, {
     fetchImpl: network.fetch,
     projectFetcher: network.fetch,
-    credentialRef: credentialRef17(GEMINI.defaultCredentialRef),
+    credentialRef: credentialRef18(GEMINI.defaultCredentialRef),
     resolveCredential: async (modelId) => {
       const available2 = await pool.getAvailableAccount(GEMINI.id, modelId ?? "");
       if (available2) {
         reportLedgerAccount(GEMINI.id, available2.entry.id);
         return available2.credential;
       }
-      const resolved = await ctx.credentials.resolve(credentialRef17(GEMINI.defaultCredentialRef));
+      const resolved = await ctx.credentials.resolve(credentialRef18(GEMINI.defaultCredentialRef));
       if (!resolved) return void 0;
       try {
         return JSON.parse(resolved.value);
@@ -68525,8 +68310,8 @@ function apply(ctx, config = {}) {
     projectCache: geminiProjectCache,
     persistProject: async (value) => {
       const available2 = await pool.getAvailableAccount(GEMINI.id, "");
-      const ref = available2 ? available2.entry.credentialRef : credentialRef17(GEMINI.defaultCredentialRef);
-      await ctx.credentials.set(credentialRef17(ref), value);
+      const ref = available2 ? available2.entry.credentialRef : credentialRef18(GEMINI.defaultCredentialRef);
+      await ctx.credentials.set(credentialRef18(ref), value);
     },
     ...ctx.logger === void 0 ? {} : { logger: ctx.logger }
   });
@@ -68564,7 +68349,7 @@ function apply(ctx, config = {}) {
   };
   const activeZcodeAccountId = /* @__PURE__ */ new Map();
   const zcodeAdapter = registerZcodeLlm(ctx, {
-    credentialRef: credentialRef17(ZCODE.defaultCredentialRef),
+    credentialRef: credentialRef18(ZCODE.defaultCredentialRef),
     resolveCredential: async (modelId) => {
       const available2 = await pool.getAvailableAccount(ZCODE.id, modelId ?? "");
       if (available2) {
@@ -68778,7 +68563,7 @@ function apply(ctx, config = {}) {
     opencodeAdapter = registerOpencodeLlm(ctx, {
       identitySlots: async () => listIdentitySlots(
         await Promise.all(pool.listAccountsByProvider(OPENCODE.id).map(async (entry) => {
-          const resolved = await ctx.credentials.resolve(credentialRef17(entry.credentialRef)).catch(() => void 0);
+          const resolved = await ctx.credentials.resolve(credentialRef18(entry.credentialRef)).catch(() => void 0);
           let parsed = {};
           if (resolved !== void 0) {
             try {
@@ -68831,7 +68616,7 @@ function apply(ctx, config = {}) {
     });
     void ensureDefaultAnonymousSlot(
       (entry) => pool.addAccount(entry),
-      (refName, value) => ctx.credentials.set(credentialRef17(refName), value),
+      (refName, value) => ctx.credentials.set(credentialRef18(refName), value),
       () => pool.listAccountsByProvider(OPENCODE.id),
       // ⚠️ 判据是「池里有没有匿名条目」而不是「有没有账号」：用户若主动
       // 删光了匿名通道，那是明确选择，不该每次启动又塞回来（删除会像失灵）。
