@@ -55,6 +55,11 @@ _Avoid_：驱动、插件、connector
 
 _Avoid_：兼容、对齐、同步
 
+**装配层（assembly layer）**：
+按渠道 id 把各适配器**列成一张表**的模块（`channel-pack-rpc.ts`、`index.ts`、`credits-channels.ts`）。判据是「谁把渠道名字写出来」：只有装配层可以按名字列出渠道，装配层可以依赖适配器；共享层里出现渠道名字说明位置错了。
+
+_Avoid_：注册表、调度层、分发器
+
 ### 积分与签到
 
 **签到（check-in）**：

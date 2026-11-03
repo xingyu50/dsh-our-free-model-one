@@ -76,6 +76,7 @@ const suites = [
   ['channel-utc8', 'utc8-test.mjs', []],
   ['channel-network', 'channel-network-test.mjs', []],
   ['channel-credits-rpc', 'channel-credits-rpc-test.mjs', []],
+  ['channel-credits-dispatch', 'channel-credits-dispatch-test.mjs', []],
   ['channel-credits-ui', 'channel-credits-ui-test.mjs', []],
   ['buddy-credential', 'buddy-credential-test.mjs', []],
   ['buddy-credits', 'buddy-credits-test.mjs', []],
