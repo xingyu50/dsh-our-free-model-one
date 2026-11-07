@@ -8,7 +8,7 @@
  *           account.reorder / account.refresh / account.retest / account.retestAll /
  *           account.test / account.reset / account.resetAll / login.poll /
  *           credits.status / credits.claimAll / credits.balances /
- *           model.list / model.setDisabled /
+ *           model.list / model.refreshCatalog / model.setDisabled /
  *           captcha.demand / captcha.carrierUrl / captcha.contribute（内部载体，
  *           载体页见 src/zcode-carrier-page.ts 与 src/captcha-carrier-server.ts）/
  *           backup.export / backup.import / backup.status
@@ -18,6 +18,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import { isSupportedProvider } from './channel-pack-store.js'
+import type { RemoteCatalogRefreshResult } from './remote-catalog-refresh.js'
 import { credentialRef, type CredentialRef } from '@deepseek-ai/dsh-credentials'
 import { AccountPool } from './account-pool.js'
 import { isGatewayEnabled } from './openai-gateway/config.js'
@@ -156,6 +157,7 @@ import type {
   RpcPermanentLockResponse,
   RpcModelListRequest,
   RpcModelListResponse,
+  RpcModelRefreshCatalogResponse,
   RpcModelSetDisabledRequest,
   RpcModelSetDisabledResponse,
   RpcModelSetAllDisabledRequest,
@@ -543,6 +545,11 @@ export function registerChannelPackRpc(
  */
 export interface ModelCatalogSource {
   listAllModels(): readonly { id: string; name: string; isFree?: boolean }[]
+  /**
+   * 手动重拉上游目录（仅共用闸门的那 9 个适配器有）。
+   * 经 withDeadModelPruning 的 Proxy 透传后仍可调用。
+   */
+  refreshRemoteCatalog?: () => Promise<RemoteCatalogRefreshResult>
 }
 
 /**
@@ -574,6 +581,41 @@ function broadcastCatalogChanged(ctx: Context): void {
   } catch (error) {
     ctx.logger.warn(`[channel-pack] 广播模型目录变更事件失败：${String(error)}`)
   }
+}
+
+/**
+ * 手动重拉所有支持强制刷新的渠道目录，按差异覆盖后广播一次界面重读。
+ *
+ * ⚠️ 单个渠道失败不得中断其余渠道：逐个 Promise.allSettled 汇总。
+ * 只有**至少一个渠道真的变了**才发 `llm/adapters-updated`（该事件会让
+ * 客户端 ModelCatalogDirectory 丢弃 status==='ready' 的短路缓存重读列表）；
+ * 一致 / 失败时什么也不广播，避免无意义的全量目录重建。
+ */
+async function refreshRemoteCatalogs(
+  ctx: Context,
+  modelAdapters: Readonly<Record<string, ModelCatalogSource>> | undefined,
+): Promise<RpcModelRefreshCatalogResponse> {
+  const entries = Object.entries(modelAdapters ?? {})
+    .filter((entry): entry is [string, ModelCatalogSource & { refreshRemoteCatalog: () => Promise<RemoteCatalogRefreshResult> }] =>
+      typeof entry[1].refreshRemoteCatalog === 'function')
+  const settled = await Promise.allSettled(entries.map(async ([provider, adapter]) => ({
+    provider,
+    result: await adapter.refreshRemoteCatalog(),
+  })))
+  const changed: string[] = []
+  const upstreamOk: string[] = []
+  const failures: string[] = []
+  settled.forEach((outcome, index) => {
+    const provider = entries[index][0]
+    if (outcome.status === 'rejected' || outcome.value.result.upstreamOk !== true) {
+      failures.push(provider)
+      return
+    }
+    upstreamOk.push(provider)
+    if (outcome.value.result.changed) changed.push(provider)
+  })
+  if (changed.length > 0) broadcastCatalogChanged(ctx)
+  return { probed: entries.length, changed, upstreamOk, failures }
 }
 
 /**
@@ -968,6 +1010,11 @@ function registerChannelPackEndpoints(
       if (handled !== undefined) return handled
     }
     switch (method) {
+      case 'model.refreshCatalog': {
+        const value: RpcModelRefreshCatalogResponse = await refreshRemoteCatalogs(ctx, modelAdapters)
+        return { ok: true, value }
+      }
+
       case 'account.list': {
         const req = payload as RpcListAccountsRequest
         const accounts = await pool.listAccounts(req.provider)

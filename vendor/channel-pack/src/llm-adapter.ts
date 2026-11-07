@@ -8,6 +8,8 @@ import type { GenerateOptions, LlmModelInfo, LlmProviderInfo, LlmResolvedModelIn
 import { ReasoningEffortId, ToolCallId } from '@deepseek-ai/dsh-llm'
 import { AccountPool, providerCatalogVisible } from './account-pool.js'
 import { RemoteCatalogGate } from './remote-catalog-gate.js'
+import { forceRefreshRemoteCatalog } from './remote-catalog-refresh.js'
+import type { RemoteCatalogRefreshResult } from './remote-catalog-refresh.js'
 import { settingsNamespaceFor } from './settings-compat.js'
 import { nextUtc8DayStartMs } from './model-queue.js'
 import { isCodeArtsBenefitModel } from './models.js'
@@ -931,6 +933,11 @@ export class CodeArtsAdapter extends LlmAdapter {
    * 懒加载远端模型目录。resolveModel 可能先于 listModels 被调用
    * （如直接进入会话），此时同样触发远端拉取。
    */
+  /** 落远端目录：首次加载与手动刷新共用，避免两份逻辑分叉。 */
+  private commitRemoteModels(models: readonly { id: string; name: string }[]): void {
+    this.remoteModels = [...models]
+  }
+
   private async ensureRemoteModels(): Promise<void> {
     const fetchRemote = this.options.fetchRemoteModels
     if (this.remoteModels !== undefined || fetchRemote === undefined) return
@@ -939,8 +946,20 @@ export class CodeArtsAdapter extends LlmAdapter {
       // 空目录同样算「没拿到」：既不应落缓存（否则再也拉不回来），
       // 也不应立刻重试（否则每个模型都打一次空请求）。
       if (models.length === 0) return false
-      this.remoteModels = models
+      this.commitRemoteModels(models)
       return true
+    })
+  }
+
+  /** 手动重拉上游目录：只有与本地缓存不一致才覆盖，上游失败 / 空结果不动缓存。 */
+  async refreshRemoteCatalog(): Promise<RemoteCatalogRefreshResult> {
+    const fetchRemote = this.options.fetchRemoteModels
+    if (fetchRemote === undefined) return { changed: false, upstreamOk: false }
+    return forceRefreshRemoteCatalog<{ id: string; name: string }>({
+      gate: this.catalogGate,
+      fetch: fetchRemote,
+      cached: () => this.remoteModels,
+      commit: (models) => this.commitRemoteModels(models),
     })
   }
 

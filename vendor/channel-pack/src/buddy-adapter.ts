@@ -19,6 +19,8 @@ import {
 } from '@deepseek-ai/dsh-llm'
 import { AccountPool, providerCatalogVisible } from './account-pool.js'
 import { RemoteCatalogGate } from './remote-catalog-gate.js'
+import { forceRefreshRemoteCatalog } from './remote-catalog-refresh.js'
+import type { RemoteCatalogRefreshResult } from './remote-catalog-refresh.js'
 import { settingsNamespaceFor } from './settings-compat.js'
 import {
   RATE_LIMIT_FALLBACK_MS,
@@ -959,27 +961,47 @@ export class BuddyAdapter extends LlmAdapter {
     })
   }
 
+  /** 落最终目录及其派生结构：首次加载与手动刷新共用，避免两份逻辑分叉。 */
+  private commitRemoteModels(models: readonly BuddyRemoteModel[]): void {
+    this.remoteModels = [...models]
+    this.remoteMeta = new Map(models.map((model) => [model.id, model]))
+    this.remoteContextWindows = new Map(
+      models
+        .filter((model) => model.contextWindow !== undefined)
+        .map((model) => [model.id, model.contextWindow as number]),
+    )
+  }
+
   private async ensureRemoteModels(): Promise<void> {
     const fetchRemote = this.options.fetchRemoteModels
     if (this.remoteModels !== undefined || fetchRemote === undefined) return
-    // 闸门：并发去重 + 失败/空结果冷却（详见 src/remote-catalog-gate.ts 的
-    // 实测依据）。Buddy 的目录端点超时上限 60s，失败不冷却会让首屏在
-    // 「每个模型重试一次」的放大下长时间空转。
+    // 闸门：并发去重 + 失败/空结果冷却（详见 src/remote-catalog-gate.ts）。
     await this.catalogGate.run(async () => {
       const models = await fetchRemote()
       if (models.length === 0) return false
       // /v3/config data.models[] 是权威来源（对齐 Rust TUI buddy_context_limits
       // 注入逻辑）：远端下发的上下文窗口优先于静态 fallback 表；
       // 能力字段（supportsImages / reasoning.supportedEfforts）同理。
-      const reconciled = this.reconcileWithFallback(models)
-      this.remoteModels = reconciled
-      this.remoteMeta = new Map(reconciled.map((model) => [model.id, model]))
-      this.remoteContextWindows = new Map(
-        reconciled
-          .filter((model) => model.contextWindow !== undefined)
-          .map((model) => [model.id, model.contextWindow as number]),
-      )
+      this.commitRemoteModels(this.reconcileWithFallback(models))
       return true
+    })
+  }
+
+  /**
+   * 手动强制重拉上游目录：绕过冷却立即问一次上游，只有与本地缓存
+   * **不一致**才覆盖（含倍率 / 上下文窗口等派生结构），并回报是否变化。
+   * 上游失败 / 空结果 / 仅顺序变化都不动缓存，「成功即永久缓存」保持不变。
+   */
+  async refreshRemoteCatalog(): Promise<RemoteCatalogRefreshResult> {
+    const fetchRemote = this.options.fetchRemoteModels
+    if (fetchRemote === undefined) return { changed: false, upstreamOk: false }
+    return forceRefreshRemoteCatalog<BuddyRemoteModel>({
+      gate: this.catalogGate,
+      fetch: fetchRemote,
+      cached: () => this.remoteModels,
+      // 比对与落盘用同一口径：都是「经兜底表校正后的最终目录」。
+      transform: (models) => this.reconcileWithFallback(models),
+      commit: (models) => this.commitRemoteModels(models),
     })
   }
 

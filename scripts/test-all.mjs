@@ -66,6 +66,7 @@ const suites = [
   ['turn-accounting', 'turn-accounting-test.mjs', []],
   ['chan-relay', 'chan-relay-test.mjs', []],
   ['channel-pack', 'channel-pack-test.mjs', []],
+  ['remote-catalog-refresh', 'remote-catalog-refresh-test.mjs', []],
   ['channel-registry', 'channel-registry-test.mjs', []],
   ['channel-providers', 'channel-providers-test.mjs', []],
   ['combo-validation', 'combo-validation-test.mjs', []],

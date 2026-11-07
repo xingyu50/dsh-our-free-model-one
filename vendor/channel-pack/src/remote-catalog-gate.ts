@@ -25,7 +25,12 @@
  *    在 `cooldownMs` 内不再重试。
  *
  * ⚠ 冷却只影响**拉取时机**，不影响兜底目录：调用方在冷却期间照旧回落到
- * 静态表，界面不会因此少模型。
+ * 静态表，界面不会因此少模型。用户显式触发的刷新走 `run(..., true)`
+ * 绕过冷却，永远能立即重试。
+ *
+ * ⚠ 这是「获取模型列表」这条链路的冷却，与账号选号 / 验证码产出的
+ * `cooldown-backoff.ts`（按 (账号, 模型) 记连续失败）不是同一个领域，
+ * 不要复用那边的累计阈值策略。
  */
 
 /** 失败 / 空结果后的默认冷却时长。 */
@@ -65,24 +70,22 @@ export class RemoteCatalogGate {
   /**
    * 至多发起一次加载。
    *
-   * - 冷却中：**不调用** `run`，直接返回。
+   * - 冷却中且非 force：**不调用** `run`，直接返回 `false`。
+   * - `force: true`（用户显式刷新）：绕过冷却，立即调用 `run`。
    * - 已有在飞的加载：等它，不重复调用 `run`。
    * - 否则调用 `run`；返回 `false`（或抛错）即进入冷却。
    *
    * @param run 执行实际拉取，并在成功时自行落缓存；返回是否拿到了非空目录。
+   * @returns `run` 是否成功（冷却跳过 / 失败均为 `false`）。
    */
-  async run(run: () => Promise<boolean>): Promise<void> {
-    if (this.inFlight !== undefined) {
-      await this.inFlight
-      return
-    }
-    if (this.cooling()) return
+  async run(run: () => Promise<boolean>, force = false): Promise<boolean> {
+    if (this.inFlight !== undefined) return this.inFlight
+    if (!force && this.cooling()) return false
     // ⚠ **不能**写成 `this.inFlight = (async () => { … finally { this.inFlight = undefined } })()`：
     // 若 `run()` **同步抛错**，那个 IIFE 会在任何 `await` 之前整段同步跑完
     // （catch → finally 把 `inFlight` 置回 `undefined`），**然后**外层赋值又把
-    // `undefined` 覆盖成一个**已 settle** 的 Promise。此后 `:73` 的
-    // `inFlight !== undefined` 永远先命中 ⇒ 该 provider 永久不再重拉，
-    // 冷却到期也救不回。
+    // `undefined` 覆盖成一个**已 settle** 的 Promise。此后 `inFlight !== undefined`
+    // 永远先命中 ⇒ 该 provider 永久不再重拉，冷却到期也救不回。
     // ⇒ 先把任务落成局部量、await 之后再清，并只清「仍是自己那一个」。
     const task = (async (): Promise<boolean> => {
       try {
@@ -96,13 +99,9 @@ export class RemoteCatalogGate {
     try {
       const got = await task
       this.retryAt = got ? undefined : this.now() + this.cooldownMs
+      return got
     } finally {
       if (this.inFlight === task) this.inFlight = undefined
     }
-  }
-
-  /** 清掉冷却窗口（例如用户显式触发刷新）。 */
-  reset(): void {
-    this.retryAt = undefined
   }
 }

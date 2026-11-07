@@ -61,6 +61,8 @@ import type {
 } from '@deepseek-ai/dsh-llm'
 import { AccountPool, providerCatalogVisible } from './account-pool.js'
 import { RemoteCatalogGate } from './remote-catalog-gate.js'
+import { forceRefreshRemoteCatalog } from './remote-catalog-refresh.js'
+import type { RemoteCatalogRefreshResult } from './remote-catalog-refresh.js'
 import { settingsNamespaceFor } from './settings-compat.js'
 import { collectImages, serializeMessages } from './openai-compat.js'
 import { projectRequestImage, type ImageRequestTarget } from './image-budget.js'
@@ -394,6 +396,10 @@ export class ZcodeAdapter extends LlmAdapter {
    * 改为：只缓存**真实远端目录**，兜底表每次现算（纯本地、零成本），
    * 并用 {@link RemoteCatalogGate} 的冷却挡住「每模型重试一次」的放大。
    */
+  /** 落远端目录：首次加载与手动刷新共用，避免两份逻辑分叉。 */
+  private commitRemoteModels(models: readonly ZcodeRemoteModel[]): void {
+    this.remoteModels = [...models]
+  }
   private async loadModels(): Promise<ZcodeRemoteModel[]> {
     if (this.remoteModels !== undefined) return this.remoteModels
     const fetchRemote = this.options.fetchRemoteModels
@@ -401,12 +407,23 @@ export class ZcodeAdapter extends LlmAdapter {
       await this.catalogGate.run(async () => {
         const fetched = await fetchRemote()
         if (fetched.length === 0) return false
-        this.remoteModels = fetched
+        this.commitRemoteModels(fetched)
         return true
       })
       if (this.remoteModels !== undefined) return this.remoteModels
     }
     return this.product.fallbackModels.map(fallbackToRemote)
+  }
+  /** 手动重拉上游目录：只有与本地缓存不一致才覆盖，上游失败 / 空结果不动缓存。 */
+  async refreshRemoteCatalog(): Promise<RemoteCatalogRefreshResult> {
+    const fetchRemote = this.options.fetchRemoteModels
+    if (fetchRemote === undefined) return { changed: false, upstreamOk: false }
+    return forceRefreshRemoteCatalog<ZcodeRemoteModel>({
+      gate: this.catalogGate,
+      fetch: fetchRemote,
+      cached: () => this.remoteModels,
+      commit: (models) => this.commitRemoteModels(models),
+    })
   }
 
   private inputModalitiesFor(model: ZcodeRemoteModel | undefined): readonly ('text' | 'image')[] {

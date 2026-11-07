@@ -4,7 +4,7 @@ import Schema from '@deepseek-ai/schemastery'
 import { AccountPool, allAccountsRateLimitedForModel } from './account-pool.js'
 import { hasLegacyNamespaceRegistration, settingsOf, suppressAutoSettingsPage } from './settings-compat.js'
 import type { ImageRequestTarget } from './image-budget.js'
-import { registerChannelPackRpc, type ChannelPackAuths } from './channel-pack-rpc.js'
+import { registerChannelPackRpc, type ChannelPackAuths, type ModelCatalogSource } from './channel-pack-rpc.js'
 import { mountChannels, stopChannels } from './channel-registry.js'
 import type { ChannelHost, ChannelSpec } from './channel-registry.js'
 import { createCodeArtsChannel } from './channels/codearts.js'
@@ -397,7 +397,7 @@ export function apply(ctx: Context, config: { disableOpencode?: boolean; outlet?
   // 表由装配结果派生：⚠️ 键是**渠道 id**（不是 auths 键 —— RPC 查目录用的是
   // `modelAdapters[req.provider]`，而 `provider` 一直是渠道 id），值是注册后
   // 返回的适配器实例。
-  const modelAdapters: Record<string, { listAllModels(): readonly { id: string; name: string }[] }> = {}
+  const modelAdapters: Record<string, ModelCatalogSource> = {}
   for (const runtime of channelRuntimes) {
     modelAdapters[runtime.spec.id] = pruned(runtime.spec.id, runtime.adapter)
   }

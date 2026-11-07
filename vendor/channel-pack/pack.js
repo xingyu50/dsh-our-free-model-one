@@ -29368,13 +29368,13 @@ function canonicalReasoningEffortFor(effort) {
   if (rank === void 0) return void 0;
   const wantOff = rank === 0;
   let best;
-  for (const canonical of CANONICAL_REASONING_EFFORTS) {
-    const canonicalRank = reasoningRankOf(canonical);
+  for (const canonical2 of CANONICAL_REASONING_EFFORTS) {
+    const canonicalRank = reasoningRankOf(canonical2);
     if (canonicalRank === void 0) continue;
     if (canonicalRank === 0 !== wantOff) continue;
     const distance = Math.abs(canonicalRank - rank);
     if (best === void 0 || distance < best.distance || distance === best.distance && canonicalRank > best.rank) {
-      best = { canonical, distance, rank: canonicalRank };
+      best = { canonical: canonical2, distance, rank: canonicalRank };
     }
   }
   return best?.canonical;
@@ -29392,15 +29392,15 @@ function effortView(efforts, defaultEffort) {
   for (const effort of efforts) {
     const id = effortIdOf(effort?.id);
     if (id === void 0) continue;
-    const canonical = canonicalReasoningEffortFor(id);
+    const canonical2 = canonicalReasoningEffortFor(id);
     rows.push({
       id,
       name: effortIdOf(effort?.name) ?? id,
-      ...canonical === void 0 ? {} : { canonical }
+      ...canonical2 === void 0 ? {} : { canonical: canonical2 }
     });
-    if (canonical !== void 0 && !canonicalSeen.has(canonical)) {
-      canonicalSeen.add(canonical);
-      openaiEfforts.push(canonical);
+    if (canonical2 !== void 0 && !canonicalSeen.has(canonical2)) {
+      canonicalSeen.add(canonical2);
+      openaiEfforts.push(canonical2);
     }
   }
   if (rows.length === 0) return void 0;
@@ -35321,18 +35321,17 @@ var RemoteCatalogGate = class {
   /**
    * 至多发起一次加载。
    *
-   * - 冷却中：**不调用** `run`，直接返回。
+   * - 冷却中且非 force：**不调用** `run`，直接返回 `false`。
+   * - `force: true`（用户显式刷新）：绕过冷却，立即调用 `run`。
    * - 已有在飞的加载：等它，不重复调用 `run`。
    * - 否则调用 `run`；返回 `false`（或抛错）即进入冷却。
    *
    * @param run 执行实际拉取，并在成功时自行落缓存；返回是否拿到了非空目录。
+   * @returns `run` 是否成功（冷却跳过 / 失败均为 `false`）。
    */
-  async run(run) {
-    if (this.inFlight !== void 0) {
-      await this.inFlight;
-      return;
-    }
-    if (this.cooling()) return;
+  async run(run, force = false) {
+    if (this.inFlight !== void 0) return this.inFlight;
+    if (!force && this.cooling()) return false;
     const task = (async () => {
       try {
         return await run();
@@ -35344,15 +35343,49 @@ var RemoteCatalogGate = class {
     try {
       const got = await task;
       this.retryAt = got ? void 0 : this.now() + this.cooldownMs;
+      return got;
     } finally {
       if (this.inFlight === task) this.inFlight = void 0;
     }
   }
-  /** 清掉冷却窗口（例如用户显式触发刷新）。 */
-  reset() {
-    this.retryAt = void 0;
-  }
 };
+
+// vendor/channel-pack/src/remote-catalog-refresh.ts
+function canonical(value) {
+  if (value === void 0) return "undefined";
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  const record = value;
+  const keys = Object.keys(record).filter((key) => record[key] !== void 0).sort();
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${canonical(record[key])}`).join(",")}}`;
+}
+function remoteCatalogChanged(cached2, next) {
+  if (cached2 === void 0) return next.length > 0;
+  if (cached2.length !== next.length) return true;
+  const before = new Map(cached2.map((model) => [model.id, canonical(model)]));
+  return next.some((model) => before.get(model.id) !== canonical(model));
+}
+async function forceRefreshRemoteCatalog(adapter) {
+  let changed = false;
+  let upstreamOk = false;
+  await adapter.gate.run(async () => {
+    let models;
+    try {
+      models = await adapter.fetch();
+    } catch {
+      return false;
+    }
+    if (models.length === 0) return false;
+    upstreamOk = true;
+    const next = adapter.transform === void 0 ? models : await adapter.transform(models);
+    if (remoteCatalogChanged(adapter.cached(), next)) {
+      adapter.commit(next);
+      changed = true;
+    }
+    return true;
+  }, true);
+  return { changed, upstreamOk };
+}
 
 // vendor/channel-pack/src/rate-limit.ts
 function formatResetIn(resetAtMs, nowMs = Date.now()) {
@@ -36643,15 +36676,30 @@ var LobsteraiAdapter = class extends LlmAdapter {
    * `listModels` 与 `resolveModel` 共用：`resolveModel` 可能先于 `listModels`
    * 被调用（如直接从历史会话进入），此时同样需要触发一次拉取。
    */
+  /** 落远端目录及其元数据：首次加载与手动刷新共用，避免两份逻辑分叉。 */
+  commitRemoteModels(models) {
+    this.remoteModels = [...models];
+    this.remoteMeta = new Map(models.map((model) => [model.id, model]));
+  }
   async ensureRemoteModels() {
     const fetchRemote = this.options.fetchRemoteModels;
     if (this.remoteModels !== void 0 || fetchRemote === void 0) return;
     await this.catalogGate.run(async () => {
       const models = await fetchRemote();
       if (models.length === 0) return false;
-      this.remoteModels = models;
-      this.remoteMeta = new Map(models.map((model) => [model.id, model]));
+      this.commitRemoteModels(models);
       return true;
+    });
+  }
+  /** 手动重拉上游目录：只有与本地缓存不一致才覆盖，上游失败 / 空结果不动缓存。 */
+  async refreshRemoteCatalog() {
+    const fetchRemote = this.options.fetchRemoteModels;
+    if (fetchRemote === void 0) return { changed: false, upstreamOk: false };
+    return forceRefreshRemoteCatalog({
+      gate: this.catalogGate,
+      fetch: fetchRemote,
+      cached: () => this.remoteModels,
+      commit: (models) => this.commitRemoteModels(models)
     });
   }
   /**
@@ -39395,34 +39443,52 @@ var ClineAdapter = class extends LlmAdapter3 {
    * ⚠️ **并发去重**：`listModels` 与 `resolveModel` 会在启动时被 DSH 并发调用，
    * 不去重会打出多份重复的远端请求（两个端点各一次，乘以并发数）。
    */
+  /** 落远端目录：首次加载与手动刷新共用，避免两份逻辑分叉。 */
+  commitRemoteModels(models) {
+    this.remoteModels = [...models];
+  }
+  /**
+   * 向上游拉一次并加工成**最终目录**（含 models.dev 合并）。
+   * 返回空数组 = 远端没给出可用目录；此时绝不能把并着兜底表的 `models`
+   * 当成远端结果落缓存（那会把兜底表永久记成「已加载」）。
+   */
+  async fetchRemoteCatalog() {
+    const credential = await this.options.resolveCredential();
+    const load = this.options.loadModels ?? ((opts) => loadClineModels(this.product, {
+      ...opts.credential === void 0 ? {} : { credential: opts.credential },
+      fetcher: this.fetchImpl
+    }));
+    const { models, warnings, remote } = await load({
+      ...credential === void 0 ? {} : { credential }
+    });
+    const gotRemote = remote !== void 0 ? hasClineRemoteModels(remote) : models.length > 0;
+    const merged = models.length > 0 ? applyModelsDevCatalog(models, await this.ensureModelsDev()) : models;
+    for (const warning of warnings) {
+      console.warn(`[cline] \u6A21\u578B\u76EE\u5F55\u6765\u6E90\u5931\u8D25\uFF1A${warning}`);
+    }
+    return gotRemote ? merged : [];
+  }
   async ensureRemoteModels() {
     if (this.remoteModels !== void 0) return;
     await this.catalogGate.run(async () => {
       try {
-        const credential = await this.options.resolveCredential();
-        const load = this.options.loadModels ?? ((opts) => loadClineModels(this.product, {
-          ...opts.credential === void 0 ? {} : { credential: opts.credential },
-          fetcher: this.fetchImpl
-        }));
-        const { models, warnings, remote } = await load({
-          ...credential === void 0 ? {} : { credential }
-        });
-        const gotRemote = remote !== void 0 ? hasClineRemoteModels(remote) : models.length > 0;
-        let merged = models;
-        if (models.length > 0) {
-          merged = applyModelsDevCatalog(models, await this.ensureModelsDev());
-        }
-        for (const warning of warnings) {
-          console.warn(`[cline] \u6A21\u578B\u76EE\u5F55\u6765\u6E90\u5931\u8D25\uFF1A${warning}`);
-        }
-        if (!gotRemote) return false;
-        this.remoteModels = merged;
-        return true;
+        const models = await this.fetchRemoteCatalog();
+        if (models.length === 0) return false;
+        this.commitRemoteModels(models);
         return true;
       } catch (error) {
         console.warn(`[cline] \u6A21\u578B\u76EE\u5F55\u62C9\u53D6\u5931\u8D25\uFF1A${error instanceof Error ? error.message : String(error)}`);
         return false;
       }
+    });
+  }
+  /** 手动重拉上游目录：只有与本地缓存不一致才覆盖，上游失败 / 空结果不动缓存。 */
+  async refreshRemoteCatalog() {
+    return forceRefreshRemoteCatalog({
+      gate: this.catalogGate,
+      fetch: () => this.fetchRemoteCatalog(),
+      cached: () => this.remoteModels,
+      commit: (models) => this.commitRemoteModels(models)
     });
   }
   /**
@@ -41114,6 +41180,10 @@ var ZcodeAdapter = class extends LlmAdapter4 {
    * 改为：只缓存**真实远端目录**，兜底表每次现算（纯本地、零成本），
    * 并用 {@link RemoteCatalogGate} 的冷却挡住「每模型重试一次」的放大。
    */
+  /** 落远端目录：首次加载与手动刷新共用，避免两份逻辑分叉。 */
+  commitRemoteModels(models) {
+    this.remoteModels = [...models];
+  }
   async loadModels() {
     if (this.remoteModels !== void 0) return this.remoteModels;
     const fetchRemote = this.options.fetchRemoteModels;
@@ -41121,12 +41191,23 @@ var ZcodeAdapter = class extends LlmAdapter4 {
       await this.catalogGate.run(async () => {
         const fetched = await fetchRemote();
         if (fetched.length === 0) return false;
-        this.remoteModels = fetched;
+        this.commitRemoteModels(fetched);
         return true;
       });
       if (this.remoteModels !== void 0) return this.remoteModels;
     }
     return this.product.fallbackModels.map(fallbackToRemote);
+  }
+  /** 手动重拉上游目录：只有与本地缓存不一致才覆盖，上游失败 / 空结果不动缓存。 */
+  async refreshRemoteCatalog() {
+    const fetchRemote = this.options.fetchRemoteModels;
+    if (fetchRemote === void 0) return { changed: false, upstreamOk: false };
+    return forceRefreshRemoteCatalog({
+      gate: this.catalogGate,
+      fetch: fetchRemote,
+      cached: () => this.remoteModels,
+      commit: (models) => this.commitRemoteModels(models)
+    });
   }
   inputModalitiesFor(model) {
     return model?.supportsImage === true ? ["text", "image"] : ["text"];
@@ -42125,6 +42206,11 @@ var TraeAdapter = class extends LlmAdapter5 {
     const id = typeof provider === "string" && provider.length > 0 ? provider : this.product.id;
     return { id, name: this.product.displayName };
   }
+  /** 落远端目录及其元数据：首次加载与手动刷新共用，避免两份逻辑分叉。 */
+  commitRemoteModels(models) {
+    this.remoteModels = [...models];
+    this.remoteMeta = new Map(models.map((model) => [model.id, model]));
+  }
   /** 懒加载远端模型目录（仅拉取一次）。 */
   async ensureRemoteModels() {
     const fetchRemote = this.options.fetchRemoteModels;
@@ -42132,9 +42218,19 @@ var TraeAdapter = class extends LlmAdapter5 {
     await this.catalogGate.run(async () => {
       const models = await fetchRemote();
       if (models.length === 0) return false;
-      this.remoteModels = models;
-      this.remoteMeta = new Map(models.map((model) => [model.id, model]));
+      this.commitRemoteModels(models);
       return true;
+    });
+  }
+  /** 手动重拉上游目录：只有与本地缓存不一致才覆盖，上游失败 / 空结果不动缓存。 */
+  async refreshRemoteCatalog() {
+    const fetchRemote = this.options.fetchRemoteModels;
+    if (fetchRemote === void 0) return { changed: false, upstreamOk: false };
+    return forceRefreshRemoteCatalog({
+      gate: this.catalogGate,
+      fetch: fetchRemote,
+      cached: () => this.remoteModels,
+      commit: (models) => this.commitRemoteModels(models)
     });
   }
   /**
@@ -44899,14 +44995,29 @@ var CodeArtsAdapter = class extends LlmAdapter7 {
    * 懒加载远端模型目录。resolveModel 可能先于 listModels 被调用
    * （如直接进入会话），此时同样触发远端拉取。
    */
+  /** 落远端目录：首次加载与手动刷新共用，避免两份逻辑分叉。 */
+  commitRemoteModels(models) {
+    this.remoteModels = [...models];
+  }
   async ensureRemoteModels() {
     const fetchRemote = this.options.fetchRemoteModels;
     if (this.remoteModels !== void 0 || fetchRemote === void 0) return;
     await this.catalogGate.run(async () => {
       const models = await fetchRemote();
       if (models.length === 0) return false;
-      this.remoteModels = models;
+      this.commitRemoteModels(models);
       return true;
+    });
+  }
+  /** 手动重拉上游目录：只有与本地缓存不一致才覆盖，上游失败 / 空结果不动缓存。 */
+  async refreshRemoteCatalog() {
+    const fetchRemote = this.options.fetchRemoteModels;
+    if (fetchRemote === void 0) return { changed: false, upstreamOk: false };
+    return forceRefreshRemoteCatalog({
+      gate: this.catalogGate,
+      fetch: fetchRemote,
+      cached: () => this.remoteModels,
+      commit: (models) => this.commitRemoteModels(models)
     });
   }
   /**
@@ -49097,6 +49208,27 @@ function broadcastCatalogChanged(ctx) {
     ctx.logger.warn(`[channel-pack] \u5E7F\u64AD\u6A21\u578B\u76EE\u5F55\u53D8\u66F4\u4E8B\u4EF6\u5931\u8D25\uFF1A${String(error)}`);
   }
 }
+async function refreshRemoteCatalogs(ctx, modelAdapters) {
+  const entries = Object.entries(modelAdapters ?? {}).filter((entry) => typeof entry[1].refreshRemoteCatalog === "function");
+  const settled = await Promise.allSettled(entries.map(async ([provider, adapter]) => ({
+    provider,
+    result: await adapter.refreshRemoteCatalog()
+  })));
+  const changed = [];
+  const upstreamOk = [];
+  const failures = [];
+  settled.forEach((outcome, index) => {
+    const provider = entries[index][0];
+    if (outcome.status === "rejected" || outcome.value.result.upstreamOk !== true) {
+      failures.push(provider);
+      return;
+    }
+    upstreamOk.push(provider);
+    if (outcome.value.result.changed) changed.push(provider);
+  });
+  if (changed.length > 0) broadcastCatalogChanged(ctx);
+  return { probed: entries.length, changed, upstreamOk, failures };
+}
 async function fullCatalogIds(ctx, modelAdapters, provider) {
   const all = modelAdapters?.[provider]?.listAllModels();
   if (all !== void 0) return { ids: all.map((model) => model.id) };
@@ -49268,6 +49400,10 @@ function registerChannelPackEndpoints(ctx, pool, auths, modelAdapters, config = 
       if (handled !== void 0) return handled;
     }
     switch (method) {
+      case "model.refreshCatalog": {
+        const value = await refreshRemoteCatalogs(ctx, modelAdapters);
+        return { ok: true, value };
+      }
       case "account.list": {
         const req = payload;
         const accounts = await pool.listAccounts(req.provider);
@@ -53478,19 +53614,39 @@ var BuddyAdapter = class _BuddyAdapter extends LlmAdapter8 {
       pixelBudget: this.product.imagePixelBudget
     });
   }
+  /** 落最终目录及其派生结构：首次加载与手动刷新共用，避免两份逻辑分叉。 */
+  commitRemoteModels(models) {
+    this.remoteModels = [...models];
+    this.remoteMeta = new Map(models.map((model) => [model.id, model]));
+    this.remoteContextWindows = new Map(
+      models.filter((model) => model.contextWindow !== void 0).map((model) => [model.id, model.contextWindow])
+    );
+  }
   async ensureRemoteModels() {
     const fetchRemote = this.options.fetchRemoteModels;
     if (this.remoteModels !== void 0 || fetchRemote === void 0) return;
     await this.catalogGate.run(async () => {
       const models = await fetchRemote();
       if (models.length === 0) return false;
-      const reconciled = this.reconcileWithFallback(models);
-      this.remoteModels = reconciled;
-      this.remoteMeta = new Map(reconciled.map((model) => [model.id, model]));
-      this.remoteContextWindows = new Map(
-        reconciled.filter((model) => model.contextWindow !== void 0).map((model) => [model.id, model.contextWindow])
-      );
+      this.commitRemoteModels(this.reconcileWithFallback(models));
       return true;
+    });
+  }
+  /**
+   * 手动强制重拉上游目录：绕过冷却立即问一次上游，只有与本地缓存
+   * **不一致**才覆盖（含倍率 / 上下文窗口等派生结构），并回报是否变化。
+   * 上游失败 / 空结果 / 仅顺序变化都不动缓存，「成功即永久缓存」保持不变。
+   */
+  async refreshRemoteCatalog() {
+    const fetchRemote = this.options.fetchRemoteModels;
+    if (fetchRemote === void 0) return { changed: false, upstreamOk: false };
+    return forceRefreshRemoteCatalog({
+      gate: this.catalogGate,
+      fetch: fetchRemote,
+      cached: () => this.remoteModels,
+      // 比对与落盘用同一口径：都是「经兜底表校正后的最终目录」。
+      transform: (models) => this.reconcileWithFallback(models),
+      commit: (models) => this.commitRemoteModels(models)
     });
   }
   /**
@@ -59002,6 +59158,10 @@ var LoomyAdapter = class extends LlmAdapter9 {
    * 改为：只缓存**真实远端目录**，兜底表每次现算（纯本地、零成本），
    * 并用 {@link RemoteCatalogGate} 的冷却挡住「每模型重试一次」的放大。
    */
+  /** 落远端目录：首次加载与手动刷新共用，避免两份逻辑分叉。 */
+  commitRemoteModels(models) {
+    this.remoteModels = [...models];
+  }
   async loadModels() {
     if (this.remoteModels !== void 0) return this.remoteModels;
     const fetchRemote = this.options.fetchRemoteModels;
@@ -59009,12 +59169,23 @@ var LoomyAdapter = class extends LlmAdapter9 {
       await this.catalogGate.run(async () => {
         const fetched = await fetchRemote();
         if (fetched.length === 0) return false;
-        this.remoteModels = fetched;
+        this.commitRemoteModels(fetched);
         return true;
       });
       if (this.remoteModels !== void 0) return this.remoteModels;
     }
     return this.product.fallbackModels.map(fallbackToRemote2);
+  }
+  /** 手动重拉上游目录：只有与本地缓存不一致才覆盖，上游失败 / 空结果不动缓存。 */
+  async refreshRemoteCatalog() {
+    const fetchRemote = this.options.fetchRemoteModels;
+    if (fetchRemote === void 0) return { changed: false, upstreamOk: false };
+    return forceRefreshRemoteCatalog({
+      gate: this.catalogGate,
+      fetch: fetchRemote,
+      cached: () => this.remoteModels,
+      commit: (models) => this.commitRemoteModels(models)
+    });
   }
   inputModalitiesFor(model) {
     return model?.supportsImage === true ? ["text", "image"] : ["text"];
@@ -61098,6 +61269,10 @@ var RaccoonAdapter = class extends LlmAdapter10 {
    * 改为：只缓存**真实远端目录**，兜底表每次现算（纯本地、零成本），
    * 并用 {@link RemoteCatalogGate} 的冷却挡住「每模型重试一次」的放大。
    */
+  /** 落远端目录：首次加载与手动刷新共用，避免两份逻辑分叉。 */
+  commitRemoteModels(models) {
+    this.remoteModels = [...models];
+  }
   async loadModels() {
     if (this.remoteModels !== void 0) return this.remoteModels;
     const fetchRemote = this.options.fetchRemoteModels;
@@ -61105,12 +61280,23 @@ var RaccoonAdapter = class extends LlmAdapter10 {
       await this.catalogGate.run(async () => {
         const fetched = await fetchRemote();
         if (fetched.length === 0) return false;
-        this.remoteModels = fetched;
+        this.commitRemoteModels(fetched);
         return true;
       });
       if (this.remoteModels !== void 0) return this.remoteModels;
     }
     return this.product.fallbackModels.map(fallbackToRemote3);
+  }
+  /** 手动重拉上游目录：只有与本地缓存不一致才覆盖，上游失败 / 空结果不动缓存。 */
+  async refreshRemoteCatalog() {
+    const fetchRemote = this.options.fetchRemoteModels;
+    if (fetchRemote === void 0) return { changed: false, upstreamOk: false };
+    return forceRefreshRemoteCatalog({
+      gate: this.catalogGate,
+      fetch: fetchRemote,
+      cached: () => this.remoteModels,
+      commit: (models) => this.commitRemoteModels(models)
+    });
   }
   inputModalitiesFor(model) {
     return model?.supportsImage === true ? ["text", "image"] : ["text"];
@@ -62308,6 +62494,10 @@ var MinimaxAdapter = class extends LlmAdapter11 {
    * 改为：只缓存**真实远端目录**，兜底表每次现算（纯本地、零成本），
    * 并用 {@link RemoteCatalogGate} 的冷却挡住「每模型重试一次」的放大。
    */
+  /** 落远端目录：首次加载与手动刷新共用，避免两份逻辑分叉。 */
+  commitRemoteModels(models) {
+    this.remoteModels = [...models];
+  }
   async loadModels() {
     if (this.remoteModels !== void 0) return this.remoteModels;
     const fetchRemote = this.options.fetchRemoteModels;
@@ -62315,7 +62505,7 @@ var MinimaxAdapter = class extends LlmAdapter11 {
       await this.catalogGate.run(async () => {
         const fetched = await fetchRemote();
         if (fetched.length === 0) return false;
-        this.remoteModels = fetched;
+        this.commitRemoteModels(fetched);
         return true;
       });
       if (this.remoteModels !== void 0) return this.remoteModels;
@@ -62350,6 +62540,17 @@ var MinimaxAdapter = class extends LlmAdapter11 {
   listAllModels() {
     const source = this.remoteModels ?? minimaxFallbackEntries(this.product);
     return source.map((model) => ({ id: model.id, name: model.name }));
+  }
+  /** 手动重拉上游目录：只有与本地缓存不一致才覆盖，上游失败 / 空结果不动缓存。 */
+  async refreshRemoteCatalog() {
+    const fetchRemote = this.options.fetchRemoteModels;
+    if (fetchRemote === void 0) return { changed: false, upstreamOk: false };
+    return forceRefreshRemoteCatalog({
+      gate: this.catalogGate,
+      fetch: fetchRemote,
+      cached: () => this.remoteModels,
+      commit: (models) => this.commitRemoteModels(models)
+    });
   }
   inputModalitiesFor(entry) {
     return entry?.supportsImage === true ? ["text", "image"] : ["text"];

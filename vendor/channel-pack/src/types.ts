@@ -760,6 +760,23 @@ export interface RpcModelListRequest {
 }
 
 /**
+ * RPC: 手动重拉各渠道的上游模型目录并**按差异**覆盖缓存。
+ *
+ * 无请求参数：一次性覆盖所有带远端目录能力的渠道（当前 9 个共用
+ * RemoteCatalogGate 的适配器）。上游失败 / 空结果 / 仅顺序变化都不动缓存。
+ */
+export interface RpcModelRefreshCatalogResponse {
+  /** 本次实际参与重拉的适配器数量。 */
+  probed: number
+  /** 目录内容真的变了、已覆盖缓存并触发界面重读的 provider。 */
+  changed: string[]
+  /** 成功问到非空上游目录的 provider（包含「一致未覆盖」的）。 */
+  upstreamOk: string[]
+  /** 上游失败 / 空结果 / 抛错的 provider；这些渠道的缓存保持原样。 */
+  failures: string[]
+}
+
+/**
  * 单个模型在设置页的展示条目。
  *
  * `disabled` 由服务端按黑名单回填，`name` 是适配器播报的展示名 ——

@@ -44,6 +44,12 @@ window.__ModuleLoader__.load({
         title: 'Our Free Model',
         refresh: '刷新清单',
         reprobe: '重新探测可用性',
+        'chan.sync': '重拉上游模型',
+        'chan.sync.busy': '正在重拉…',
+        'chan.sync.ok': '上游模型已更新：{n} 个渠道有变化，{ok} 个渠道已核对。',
+        'chan.sync.same': '上游模型没有变化：{ok} 个渠道已核对。',
+        'chan.sync.partial': '{n} 个渠道这次没连通，保留原列表。',
+        'chan.sync.hint': '重新向上游查询模型；只有列表真的变了才覆盖本地缓存，连通失败不会清空现有模型。',
         probing: '探测中…',
         loading: '正在加载…',
         loadFailed: '无法连接插件后端',
@@ -817,6 +823,12 @@ window.__ModuleLoader__.load({
         title: 'Our Free Model',
         refresh: 'Refresh roster',
         reprobe: 'Re-probe availability',
+        'chan.sync': 'Re-fetch upstream models',
+        'chan.sync.busy': 'Re-fetching…',
+        'chan.sync.ok': 'Upstream models updated: {n} channel(s) changed, {ok} checked.',
+        'chan.sync.same': 'Upstream models unchanged: {ok} channel(s) checked.',
+        'chan.sync.partial': '{n} channel(s) unreachable this time; kept their existing lists.',
+        'chan.sync.hint': 'Ask upstream again; the cached list is replaced only when it actually changed, and failures never clear existing models.',
         probing: 'Probing…',
         loading: 'Loading…',
         loadFailed: 'Cannot reach the plugin backend',
@@ -4974,6 +4986,7 @@ window.__ModuleLoader__.load({
       }
       const [statuses, setStatuses] = useState(undefined)
       const [error, setError] = useState('')
+      const [syncBusy, setSyncBusy] = useState(false)
       const pack = summary?.channels ?? { state: 'pending', error: '' }
       // The pack is what answers this page's RPC, so *the RPC answering* is the
       // readiness signal — the summary's `channels` bit can be a step behind:
@@ -5032,6 +5045,27 @@ window.__ModuleLoader__.load({
         try { window.dispatchEvent(new CustomEvent('ofm:channels')) } catch { /* no window */ }
       }, [loadStatus])
 
+      /* 手动问一次各渠道的上游目录：只有与本地缓存不一致才覆盖、并由 pack
+         广播 llm/adapters-updated 让模型选择器重读。与免费通道的 /refresh
+         是两条独立链路，故单独一个按钮，不复用 catalogBusy。 */
+      const syncModels = async () => {
+        if (!available || syncBusy) return
+        setSyncBusy(true)
+        try {
+          const value = await rpc('model.refreshCatalog', {}, 600_000)
+          const ok = value?.upstreamOk?.length ?? 0
+          const n = value?.changed?.length ?? 0
+          const failures = value?.failures?.length ?? 0
+          const body = n > 0
+            ? t('chan.sync.ok').replace('{n}', String(n)).replace('{ok}', String(ok))
+            : t('chan.sync.same').replace('{ok}', String(ok))
+          showToast({ title: t('chan.sync'), body: failures > 0 ? `${body} ${t('chan.sync.partial').replace('{n}', String(failures))}` : body, tone: n > 0 ? 'ok' : failures > 0 ? 'warn' : undefined })
+          if (n > 0) { void loadStatus(); try { window.dispatchEvent(new CustomEvent('ofm:channels')) } catch { /* no window */ } }
+        } catch (err) {
+          showToast({ title: t('chan.sync'), body: String(err?.message ?? err), tone: 'warn' })
+        } finally { setSyncBusy(false) }
+      }
+
       const onError = useCallback((channel, err) => {
         const reason = String(err?.message ?? err)
         showToast({ title: t('chan.error').replace('{reason}', reason).slice(0, 120), body: channel.name, tone: 'warn' })
@@ -5065,6 +5099,7 @@ window.__ModuleLoader__.load({
           h('div', null, t('chan.pack.failed').replace('{reason}', pack.error ?? ''), h('div', { className: 'ofm_note' }, t('chan.pack.hint')))) : null,
         !available ? h('div', { className: 'ofm_callout' }, h('div', null, t('chan.rpc.unavailable'))) : null,
         h('div', { className: 'ofm_directorytools' },
+          h(Button, { disabled: !available || syncBusy, onClick: syncModels, title: t('chan.sync.hint') }, syncBusy ? t('chan.sync.busy') : t('chan.sync')),
           h('label', null, t('chan.search'),
             h('input', {
               className: 'ofm_input', type: 'search', value: query, placeholder: t('chan.search'),
